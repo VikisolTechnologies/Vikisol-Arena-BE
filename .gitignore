@@ -1,0 +1,19 @@
+target/
+*.log
+.env
+.env.local
+uploads/
+*.class
+.mvn/repository/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.settings/
+.classpath
+.project
+
+# OS
+.DS_Store
+Thumbs.db
