@@ -1,0 +1,93 @@
+package com.vikisol.arena.enterprise.service;
+
+import com.vikisol.arena.common.dto.PagedResponse;
+import com.vikisol.arena.common.exception.BadRequestException;
+import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.enterprise.dto.TalentSearchResult;
+import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
+import com.vikisol.arena.enterprise.entity.UnlockedCandidate;
+import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
+import com.vikisol.arena.enterprise.repository.UnlockedCandidateRepository;
+import com.vikisol.arena.matching.ScoringService;
+import com.vikisol.arena.profile.dto.CandidateProfileResponse;
+import com.vikisol.arena.profile.entity.CandidateProfile;
+import com.vikisol.arena.profile.entity.Industry;
+import com.vikisol.arena.profile.repository.CandidateProfileRepository;
+import com.vikisol.arena.profile.service.CandidateProfileMapper;
+import com.vikisol.arena.seed.IndianData;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
+
+@Service
+@RequiredArgsConstructor
+public class TalentSearchService {
+
+    private static final List<String> FIT_BLURBS = List.of(
+            "Strong overlap with what you're hiring for, verified skills to back it up.",
+            "Comes up frequently in searches like this one - high signal, low noise.",
+            "A slightly non-obvious pick, but the skill graph lines up well.",
+            "Recently active, open to new roles, and priced within typical range.");
+
+    private final CandidateProfileRepository candidateProfileRepository;
+    private final EnterpriseProfileRepository enterpriseProfileRepository;
+    private final UnlockedCandidateRepository unlockedCandidateRepository;
+    private final CandidateProfileMapper candidateProfileMapper;
+    private final ScoringService scoringService;
+
+    @Transactional(readOnly = true)
+    public PagedResponse<TalentSearchResult> search(UUID enterpriseUserId, String text, String industry, boolean remoteOnly, Pageable pageable) {
+        EnterpriseProfile enterprise = requireEnterprise(enterpriseUserId);
+        Industry industryEnum = (industry == null || industry.isBlank() || "All".equalsIgnoreCase(industry))
+                ? null : Industry.fromWireValue(industry);
+        String normalizedText = (text == null || text.isBlank()) ? null : text.toLowerCase();
+
+        return PagedResponse.of(
+                candidateProfileRepository.search(normalizedText, industryEnum, remoteOnly, pageable),
+                c -> toResult(c, enterprise));
+    }
+
+    @Transactional(readOnly = true)
+    public CandidateProfileResponse getCandidateDetail(UUID id) {
+        CandidateProfile candidate = candidateProfileRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Candidate not found: " + id));
+        return candidateProfileMapper.toResponse(candidate);
+    }
+
+    @Transactional
+    public void unlock(UUID enterpriseUserId, UUID candidateId) {
+        EnterpriseProfile enterprise = requireEnterprise(enterpriseUserId);
+        if (unlockedCandidateRepository.existsByEnterpriseIdAndCandidateId(enterprise.getId(), candidateId)) {
+            return; // already unlocked - idempotent
+        }
+        if (enterprise.getUnlockCreditsUsed() >= enterprise.getUnlockCreditsTotal()) {
+            throw new BadRequestException("You're out of unlock credits on the " + enterprise.getPlan().wireValue()
+                    + " plan. Upgrade your plan to unlock more candidate profiles.");
+        }
+        CandidateProfile candidate = candidateProfileRepository.findById(candidateId)
+                .orElseThrow(() -> new ResourceNotFoundException("Candidate not found: " + candidateId));
+
+        unlockedCandidateRepository.save(UnlockedCandidate.builder().enterprise(enterprise).candidate(candidate).build());
+        enterprise.setUnlockCreditsUsed(enterprise.getUnlockCreditsUsed() + 1);
+        enterpriseProfileRepository.save(enterprise);
+    }
+
+    private TalentSearchResult toResult(CandidateProfile candidate, EnterpriseProfile enterprise) {
+        boolean unlocked = unlockedCandidateRepository.existsByEnterpriseIdAndCandidateId(enterprise.getId(), candidate.getId());
+        int matchPercentage = scoringService.computeMatchPercentage(candidate, Set.of(), null);
+        return new TalentSearchResult(
+                candidateProfileMapper.toResponse(candidate), matchPercentage,
+                IndianData.pick(FIT_BLURBS), String.join(", ", candidate.getOpenTo().stream().map(o -> o.wireValue()).toList()),
+                unlocked);
+    }
+
+    private EnterpriseProfile requireEnterprise(UUID userId) {
+        return enterpriseProfileRepository.findByUserId(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("No enterprise profile for this account"));
+    }
+}
