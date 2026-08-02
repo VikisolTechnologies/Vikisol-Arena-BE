@@ -1,0 +1,78 @@
+package com.vikisol.arena.notifications.service;
+
+import com.vikisol.arena.applications.entity.Application;
+import com.vikisol.arena.auth.entity.User;
+import com.vikisol.arena.jobs.entity.JobPosting;
+import com.vikisol.arena.notifications.entity.Notification;
+import com.vikisol.arena.notifications.entity.NotificationType;
+import com.vikisol.arena.notifications.repository.NotificationRepository;
+import com.vikisol.arena.marketplace.entity.Bid;
+import com.vikisol.arena.marketplace.entity.Project;
+import com.vikisol.arena.profile.entity.CandidateProfile;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * Central place every module drops a notification from, rather than each module writing directly
+ * to NotificationRepository - keeps the "what triggers a notification" list discoverable in one
+ * file instead of scattered across applications/interviews/marketplace services.
+ */
+@Service
+@RequiredArgsConstructor
+public class NotificationService {
+
+    private final NotificationRepository notificationRepository;
+
+    @Transactional
+    public Notification notify(User user, NotificationType type, String title, String body) {
+        return notificationRepository.save(Notification.builder()
+                .user(user).type(type).title(title).body(body).read(false).build());
+    }
+
+    public void notifyApplicationSubmitted(CandidateProfile candidate, JobPosting job) {
+        notify(candidate.getUser(), NotificationType.AGENT, "Application submitted",
+                "Your application to " + job.getTitle() + " at " + job.getEnterprise().getCompanyName() + " was submitted.");
+        notify(job.getEnterprise().getUser(), NotificationType.SYSTEM, "New applicant",
+                candidate.getName() + " applied to " + job.getTitle() + ".");
+    }
+
+    public void notifyStageChanged(Application application) {
+        JobPosting job = application.getJobPosting();
+        notify(application.getCandidate().getUser(), NotificationType.AGENT, "Application update",
+                "Your application to " + job.getTitle() + " moved to " + application.getStage().wireValue() + ".");
+    }
+
+    public void notifyInterviewProposed(Application application) {
+        notify(application.getCandidate().getUser(), NotificationType.INTERVIEW, "Interview slots proposed",
+                application.getJobPosting().getEnterprise().getCompanyName() + " proposed interview slots for "
+                        + application.getJobPosting().getTitle() + ".");
+    }
+
+    public void notifyInterviewConfirmed(Application application) {
+        notify(application.getCandidate().getUser(), NotificationType.INTERVIEW, "Interview confirmed",
+                "Your interview for " + application.getJobPosting().getTitle() + " is confirmed.");
+        notify(application.getJobPosting().getEnterprise().getUser(), NotificationType.INTERVIEW, "Interview confirmed",
+                application.getCandidate().getName() + " confirmed an interview slot for " + application.getJobPosting().getTitle() + ".");
+    }
+
+    public void notifyBidPlaced(Project project, Bid bid) {
+        notify(project.getPostedByUser(), NotificationType.BID, "New bid received",
+                bid.getBidderUser().getName() + " placed a bid of ₹" + bid.getAmount() + " on " + project.getTitle() + ".");
+    }
+
+    public void notifyBidAwarded(Bid bid) {
+        notify(bid.getBidderUser(), NotificationType.BID, "Bid awarded",
+                "Your bid on " + bid.getProject().getTitle() + " was awarded. The project is now underway.");
+    }
+
+    public void notifyMilestoneSubmitted(Project project, String milestoneLabel) {
+        notify(project.getPostedByUser(), NotificationType.SYSTEM, "Deliverable submitted",
+                "A deliverable was submitted for milestone \"" + milestoneLabel + "\" on " + project.getTitle() + ".");
+    }
+
+    public void notifyDeliverableReviewed(User deliverableOwner, String milestoneLabel, boolean accepted) {
+        notify(deliverableOwner, NotificationType.SYSTEM, accepted ? "Deliverable accepted" : "Deliverable rejected",
+                "Your deliverable for milestone \"" + milestoneLabel + "\" was " + (accepted ? "accepted" : "sent back for changes") + ".");
+    }
+}
