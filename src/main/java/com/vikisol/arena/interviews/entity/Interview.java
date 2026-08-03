@@ -1,6 +1,7 @@
 package com.vikisol.arena.interviews.entity;
 
 import com.vikisol.arena.applications.entity.Application;
+import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.common.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
@@ -53,4 +54,12 @@ public class Interview extends BaseEntity {
     // presence flag is needed.
     @Embedded
     private InterviewFeedback feedback;
+
+    // HM3: a recruiter/company_admin assigns a hiring manager when scheduling an interview.
+    // Nullable - most interviews go through recruiter/company_admin alone, this is opt-in.
+    // Drives HM4's isolation: a hiring_manager can only reach *this specific* interview, not the
+    // tenant's whole pipeline (see InterviewService.assertParticipant()'s per-role branching).
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "assigned_hiring_manager_user_id")
+    private User assignedHiringManager;
 }

@@ -8,12 +8,16 @@ import com.vikisol.arena.applications.entity.Application;
 import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.applications.service.ApplicationService;
+import com.vikisol.arena.auth.entity.Role;
+import com.vikisol.arena.auth.entity.User;
+import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
 import com.vikisol.arena.integration.provider.EmailMessage;
 import com.vikisol.arena.integration.provider.EmailProvider;
 import com.vikisol.arena.integration.provider.MeetingLinkProvider;
+import com.vikisol.arena.interviews.dto.HiringManagerInterviewResponse;
 import com.vikisol.arena.interviews.dto.InterviewFeedbackDto;
 import com.vikisol.arena.interviews.dto.InterviewResponse;
 import com.vikisol.arena.interviews.dto.InterviewSlotDto;
@@ -46,6 +50,7 @@ public class InterviewService {
     private final ApplicationRepository applicationRepository;
     private final ApplicationService applicationService;
     private final EnterpriseProfileService enterpriseProfileService;
+    private final UserRepository userRepository;
     private final AuditService auditService;
     private final NotificationService notificationService;
     private final ActivityService activityService;
@@ -55,6 +60,49 @@ public class InterviewService {
     @Transactional(readOnly = true)
     public Optional<InterviewResponse> getForApplication(UUID applicationId) {
         return interviewRepository.findByApplicationId(applicationId).map(this::toResponse);
+    }
+
+    // HM1: "My interviews" - only ones specifically assigned to this hiring manager, never the
+    // tenant's whole pipeline (that's what distinguishes hiring_manager from recruiter/
+    // company_admin - see HM4, DECISIONS.md).
+    @Transactional(readOnly = true)
+    public List<HiringManagerInterviewResponse> getMyAssignedInterviews(UUID hiringManagerUserId) {
+        return interviewRepository.findByAssignedHiringManagerIdOrderByCreatedAtDesc(hiringManagerUserId).stream()
+                .map(this::toHiringManagerResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public HiringManagerInterviewResponse getMyAssignedInterview(UUID hiringManagerUserId, UUID interviewId) {
+        Interview interview = interviewRepository.findById(interviewId)
+                .orElseThrow(() -> new ResourceNotFoundException("Interview not found: " + interviewId));
+        assertHiringManagerAssignmentIfApplicable(hiringManagerUserId, interview);
+        if (interview.getAssignedHiringManager() == null || !interview.getAssignedHiringManager().getId().equals(hiringManagerUserId)) {
+            throw new AccessDeniedException("This interview isn't assigned to you");
+        }
+        return toHiringManagerResponse(interview);
+    }
+
+    // HM3: a recruiter/company_admin assigns a hiring manager when scheduling an interview.
+    @Transactional
+    public void assignHiringManager(UUID actingUserId, UUID interviewId, UUID hiringManagerUserId) {
+        Interview interview = interviewRepository.findById(interviewId)
+                .orElseThrow(() -> new ResourceNotFoundException("Interview not found: " + interviewId));
+        EnterpriseProfile actingTenant = enterpriseProfileService.getEntityForUser(actingUserId);
+        if (!interview.getApplication().getJobPosting().getEnterprise().getId().equals(actingTenant.getId())) {
+            throw new AccessDeniedException("Not your interview");
+        }
+        User hiringManager = userRepository.findById(hiringManagerUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + hiringManagerUserId));
+        if (hiringManager.getRole() != Role.HIRING_MANAGER) {
+            throw new com.vikisol.arena.common.exception.BadRequestException("That person isn't a hiring manager");
+        }
+        EnterpriseProfile hiringManagerTenant = enterpriseProfileService.getEntityForUser(hiringManagerUserId);
+        if (!hiringManagerTenant.getId().equals(actingTenant.getId())) {
+            throw new com.vikisol.arena.common.exception.BadRequestException("That hiring manager isn't on your team");
+        }
+        interview.setAssignedHiringManager(hiringManager);
+        interviewRepository.save(interview);
     }
 
     @Transactional
@@ -97,7 +145,7 @@ public class InterviewService {
     public InterviewResponse confirmSlot(UUID actingUserId, UUID interviewId, UUID slotId) {
         Interview interview = interviewRepository.findById(interviewId)
                 .orElseThrow(() -> new ResourceNotFoundException("Interview not found: " + interviewId));
-        assertParticipant(actingUserId, interview.getApplication());
+        assertParticipant(actingUserId, interview);
 
         InterviewSlot confirmedSlot = interview.getProposedSlots().stream()
                 .filter(s -> s.getId().equals(slotId)).findFirst()
@@ -158,7 +206,7 @@ public class InterviewService {
     public InterviewResponse saveNotes(UUID actingUserId, UUID interviewId, String notes) {
         Interview interview = interviewRepository.findById(interviewId)
                 .orElseThrow(() -> new ResourceNotFoundException("Interview not found: " + interviewId));
-        assertParticipant(actingUserId, interview.getApplication());
+        assertParticipant(actingUserId, interview);
 
         interview.setNotes(notes);
         return toResponse(interviewRepository.save(interview));
@@ -180,6 +228,7 @@ public class InterviewService {
         if (!application.getJobPosting().getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your interview");
         }
+        assertHiringManagerAssignmentIfApplicable(enterpriseUserId, interview);
 
         InterviewRecommendation recommendation = InterviewRecommendation.fromWireValue(request.recommendation());
         interview.setFeedback(InterviewFeedback.builder()
@@ -221,6 +270,27 @@ public class InterviewService {
         }
     }
 
+    // Interview-level overload, used once an Interview row already exists (confirmSlot,
+    // saveNotes) - unlike the Application-level overload above (only ever used by propose(),
+    // which by definition runs before any hiring_manager assignment could exist), this one
+    // additionally tightens HIRING_MANAGER access down to *their specific* assigned interview,
+    // per HM4's isolation requirement (DECISIONS.md flagged this as deferred to this phase).
+    // RECRUITER/COMPANY_ADMIN keep tenant-wide access, matching the rest of the workspace.
+    private void assertParticipant(UUID userId, Interview interview) {
+        assertParticipant(userId, interview.getApplication());
+        assertHiringManagerAssignmentIfApplicable(userId, interview);
+    }
+
+    private void assertHiringManagerAssignmentIfApplicable(UUID userId, Interview interview) {
+        User user = userRepository.findById(userId).orElse(null);
+        if (user == null || user.getRole() != Role.HIRING_MANAGER) return;
+        boolean isAssigned = interview.getAssignedHiringManager() != null
+                && interview.getAssignedHiringManager().getId().equals(userId);
+        if (!isAssigned) {
+            throw new AccessDeniedException("This interview isn't assigned to you");
+        }
+    }
+
     private List<InterviewSlot> threeSlotsFromNow(Interview interview) {
         return List.of(1, 2, 3).stream()
                 .map(days -> InterviewSlot.builder()
@@ -235,6 +305,26 @@ public class InterviewService {
         return new InterviewResponse(
                 i.getId().toString(),
                 i.getApplication().getId().toString(),
+                i.getProposedSlots().stream()
+                        .map(s -> new InterviewSlotDto(s.getId().toString(), s.getStart().toString(), s.getDurationMinutes()))
+                        .toList(),
+                i.getConfirmedSlotId() == null ? null : i.getConfirmedSlotId().toString(),
+                i.getStatus().wireValue(),
+                i.getMeetingLink(),
+                i.getNotes(),
+                toFeedbackDto(i.getFeedback())
+        );
+    }
+
+    private HiringManagerInterviewResponse toHiringManagerResponse(Interview i) {
+        Application application = i.getApplication();
+        return new HiringManagerInterviewResponse(
+                i.getId().toString(),
+                application.getId().toString(),
+                application.getCandidate().getName(),
+                application.getCandidate().getAvatarEmoji(),
+                application.getJobPosting().getTitle(),
+                application.getJobPosting().getEnterprise().getCompanyName(),
                 i.getProposedSlots().stream()
                         .map(s -> new InterviewSlotDto(s.getId().toString(), s.getStart().toString(), s.getDurationMinutes()))
                         .toList(),
