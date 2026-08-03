@@ -7,8 +7,10 @@ import com.vikisol.arena.enterprise.dto.admin.BillingResponse;
 import com.vikisol.arena.enterprise.dto.admin.ChangePlanRequest;
 import com.vikisol.arena.enterprise.dto.admin.InvoiceResponse;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
+import com.vikisol.arena.enterprise.entity.MembershipStatus;
 import com.vikisol.arena.enterprise.entity.Plan;
 import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
+import com.vikisol.arena.enterprise.repository.MembershipRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +43,7 @@ public class BillingService {
 
     private final EnterpriseProfileService enterpriseProfileService;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
+    private final MembershipRepository membershipRepository;
     private final AuditService auditService;
 
     @Transactional(readOnly = true)
@@ -72,8 +75,13 @@ public class BillingService {
     }
 
     private BillingResponse toResponse(EnterpriseProfile tenant) {
+        // seatsUsed comes from live Membership rows, not the stale EnterpriseProfile.seatsUsed
+        // field - that field predates Membership existing at all (back when every tenant had
+        // exactly one user) and nothing keeps it in sync with team invites/removals anymore.
+        // TeamPage already computes this correctly the same way; billing needs to match it.
+        long seatsUsed = membershipRepository.countByTenantIdAndStatus(tenant.getId(), MembershipStatus.ACTIVE);
         return new BillingResponse(
-                tenant.getPlan().wireValue(), tenant.getSeatsUsed(), tenant.getSeatsTotal(),
+                tenant.getPlan().wireValue(), (int) seatsUsed, tenant.getSeatsTotal(),
                 tenant.getUnlockCreditsUsed(), tenant.getUnlockCreditsTotal(), mockInvoices(tenant));
     }
 
