@@ -48,6 +48,13 @@ public class NotificationController {
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
+    @PutMapping("/read-all")
+    @Transactional
+    public ResponseEntity<ApiResponse<Void>> markAllRead(@AuthenticationPrincipal UserPrincipal principal) {
+        notificationRepository.markAllReadForUser(principal.getId());
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
     private NotificationResponse toResponse(Notification n) {
         return new NotificationResponse(n.getId().toString(), n.getType().wireValue(), n.getTitle(), n.getBody(),
                 n.getCreatedAt().toString(), n.isRead());
