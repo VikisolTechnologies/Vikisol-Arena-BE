@@ -60,6 +60,24 @@ app:
   seed:
     enabled: ${SEED_ENABLED:true}
 
+# Phase 5 integration scaffolding - Email/WhatsApp/Teams-meeting providers. All blank by default,
+# which is exactly what keeps the Noop fallback active (see
+# integration/config/IntegrationProviderConfig.java) with zero external calls made until a real
+# deployment sets these. Same override convention as the DB/JWT config above.
+resend:
+  api-key: ${RESEND_API_KEY:}
+  from: ${RESEND_FROM:Vikisol Arena <no-reply@arena.vikisol.dev>}
+
+whatsapp:
+  access-token: ${WHATSAPP_ACCESS_TOKEN:}
+  phone-number-id: ${WHATSAPP_PHONE_NUMBER_ID:}
+
+teams:
+  tenant-id: ${TEAMS_TENANT_ID:}
+  client-id: ${TEAMS_CLIENT_ID:}
+  client-secret: ${TEAMS_CLIENT_SECRET:}
+  organizer-email: ${TEAMS_ORGANIZER_EMAIL:}
+
 management:
   endpoints:
     web:
