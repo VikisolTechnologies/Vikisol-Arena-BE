@@ -78,12 +78,14 @@ All in `src/main/resources/application.yml`, same override style as `HRLMS-BE`:
 
 Auth (JWT, signup/signin/me) - Candidate profile (get/update skills/consent/autonomy, CV upload) -
 Jobs + server-side match scoring - Applications (unified candidate/enterprise entity, see
-Decisions) - Interviews (propose/confirm slots) - Marketplace (projects, bids, award, milestones,
-deliverables, two-way ratings) - Enterprise (profile, postings, applicant pipeline, talent search,
-unlock credits, shortlist) - Messaging (shared bidirectional conversations) - Notifications -
-Activity feed - Local-disk file storage behind a swappable interface - Pagination + ETag caching
-on every list endpoint - Realistic Indian-context seed data - Email/WhatsApp/meeting-link
-integration scaffolding (see Integrations below).
+Decisions) - Interviews (propose/confirm slots, shared notes, structured post-interview feedback
+that advances the linked application's stage) - Marketplace (projects, bids, award, milestones
+with a real 30/40/30 payment-tranche split, deliverables, two-way ratings) - Enterprise (profile,
+postings with plan-based active-posting limits, applicant pipeline, talent search, unlock credits,
+shortlist) - Messaging (shared bidirectional conversations) - Notifications (including bulk
+mark-all-read) - Activity feed - Local-disk file storage behind a swappable interface - Pagination
++ ETag caching on every list endpoint - Realistic Indian-context seed data - Email/WhatsApp/
+meeting-link integration scaffolding (see Integrations below).
 
 That covers every domain named in the brief, in the requested priority order.
 
@@ -105,8 +107,6 @@ That covers every domain named in the brief, in the requested priority order.
 - **Skill-name text search** in candidate search (`enterprise/talent/search`) only matches
   title/location at the DB level, not individual skill names (the mock did match skill names) -
   would need a join query against the skills collection table; deferred for time.
-- **No structured interview scorecards / employer feedback** beyond stage transitions - matches
-  what AUDIT.md flagged as missing in the mock; not built here either (out of scope for this pass).
 - **No payments** - unlock-credit *gating* is real (enforced server-side, returns a clear error at
   zero credits - AUDIT.md flagged this as unverified in the mock; it's now a real, tested check),
   but there's no checkout/payment flow to buy more credits.
@@ -202,6 +202,25 @@ site email fires from today.
   additive/harmless for a future frontend adapter that only reads the fields it knows about.
 - **Seed data uses a fixed random seed (42)** for a stable-looking demo dataset across restarts on
   a fresh database, mirroring `arena-web`'s own `mulberry32` PRNG choice in `mock/seed.ts`.
+- **Interview feedback is embedded on `Interview`, not a separate table** (`InterviewFeedback` is
+  a JPA `@Embeddable`, unlike `InterviewSlot` which is a full related entity) - it's a 0-or-1 value
+  object, not a list, so no separate table/repository was warranted. Submitting feedback
+  (`POST /interviews/{id}/feedback`, enterprise-only) both completes the interview and, in the same
+  transaction, advances the linked `Application`'s stage via the existing
+  `ApplicationService.advanceStageAsEnterprise()` (advance -> offer, reject -> rejected, hold ->
+  stays at interview) - field-for-field mirror of `submitInterviewFeedback()` in arena-web's
+  `interviews.ts`. `PUT /interviews/{id}/notes` is open to either participant, matching
+  arena-web's `InterviewRoom.tsx` (the notes textarea isn't feedback-gated, only "End & give
+  feedback" is).
+- **Enterprise posting limits are enforced server-side** (`JobPostingService.createPosting()`),
+  mirroring arena-web's `POSTING_LIMITS` (`plan.ts`) exactly: free plan 1 active posting, pro 10,
+  enterprise unlimited. "Active" = anything not closed (open or paused).
+- **Milestone tranches now carry a real `amount`.** `ProjectService.award()`'s milestone labels
+  were changed from 4 generic placeholders to the exact 3 arena-web uses ("Kickoff & plan" /
+  "Midpoint delivery" / "Final delivery") with the same 30/40/30 split of the awarded bid - a
+  30/40/30 split isn't well-defined against an arbitrary 4th milestone, so this aligns the count as
+  well as the field. `DataSeeder`'s demo award uses the same split so seeded data stays consistent
+  with a real award.
 
 ## API surface (all under `/api/v1`)
 
@@ -214,7 +233,8 @@ GET    /applications                                      POST /applications
 GET    /applications/exists?jobId=                        DELETE /applications/{id}
 PUT    /applications/{id}/stage
 GET    /interviews/by-application/{id}                     POST /interviews/propose/{applicationId}
-PUT    /interviews/{id}/confirm
+PUT    /interviews/{id}/confirm                             PUT  /interviews/{id}/notes
+POST   /interviews/{id}/feedback (enterprise-only)
 GET    /marketplace/projects, /marketplace/projects/{id}   POST /marketplace/projects
 GET    /marketplace/my-projects, /marketplace/my-bids
 POST   /marketplace/projects/{id}/bids                     POST /marketplace/projects/{id}/award
@@ -230,6 +250,7 @@ GET    /enterprise/shortlist                                POST /enterprise/sho
 GET    /messages/conversations                              POST /messages/conversations
 GET    /messages/conversations/{id}/messages                POST /messages/conversations/{id}/messages
 GET    /notifications                                       PUT /notifications/{id}/read
+PUT    /notifications/read-all
 GET    /activity
 GET    /files/{module}/{entityId}/{documentType}/{fileName}
 ```
