@@ -8,7 +8,11 @@ import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
+import com.vikisol.arena.enterprise.entity.Membership;
+import com.vikisol.arena.enterprise.entity.MembershipStatus;
+import com.vikisol.arena.enterprise.entity.TenantStatus;
 import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
+import com.vikisol.arena.enterprise.repository.MembershipRepository;
 import com.vikisol.arena.integration.provider.EmailMessage;
 import com.vikisol.arena.integration.provider.EmailProvider;
 import com.vikisol.arena.profile.entity.CandidateProfile;
@@ -32,6 +36,7 @@ public class AuthService {
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
+    private final MembershipRepository membershipRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthenticationManager authenticationManager;
@@ -57,9 +62,18 @@ public class AuthService {
             CandidateProfile profile = seedDataFactory.blankCandidateProfile(user);
             profile = candidateProfileRepository.save(profile);
             candidateId = profile.getId().toString();
-        } else {
+        } else if (role == Role.COMPANY_ADMIN) {
+            // The only enterprise-side role this public signup endpoint ever creates - it's a
+            // new tenant's first user (see ARENA-ENTERPRISE-SUITE.md). RECRUITER/HIRING_MANAGER
+            // only ever come from accepting an invitation to an existing tenant (see
+            // MembershipController.acceptInvitation), never this path.
             EnterpriseProfile profile = seedDataFactory.blankEnterpriseProfile(user);
-            enterpriseProfileRepository.save(profile);
+            profile = enterpriseProfileRepository.save(profile);
+            membershipRepository.save(Membership.builder()
+                    .user(user).tenant(profile).status(MembershipStatus.ACTIVE).joinedAt(user.getCreatedAt())
+                    .build());
+        } else {
+            throw new BadRequestException("This account type can't be created directly - ask your admin for an invite.");
         }
 
         String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
@@ -93,6 +107,14 @@ public class AuthService {
         }
         User user = userRepository.findByEmailIgnoreCase(request.email())
                 .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
+
+        if (user.getRole().hasTenant()) {
+            membershipRepository.findByUserId(user.getId()).ifPresent(m -> {
+                if (m.getTenant().getStatus() == TenantStatus.SUSPENDED) {
+                    throw new BadRequestException("This company's account has been suspended. Contact Vikisol support for help.");
+                }
+            });
+        }
 
         String candidateId = null;
         if (user.getRole() == Role.TALENT) {

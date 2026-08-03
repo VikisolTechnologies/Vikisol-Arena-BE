@@ -5,7 +5,7 @@ import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
-import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
+import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
 import com.vikisol.arena.messaging.dto.ConversationResponse;
 import com.vikisol.arena.messaging.dto.ThreadMessageResponse;
 import com.vikisol.arena.messaging.entity.Conversation;
@@ -32,7 +32,7 @@ public class ConversationService {
     private final ThreadMessageRepository threadMessageRepository;
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
-    private final EnterpriseProfileRepository enterpriseProfileRepository;
+    private final EnterpriseProfileService enterpriseProfileService;
     private final NotificationService notificationService;
 
     @Transactional(readOnly = true)
@@ -109,10 +109,16 @@ public class ConversationService {
                 displayEmoji = profile.get().getAvatarEmoji();
             }
         } else {
-            var profile = enterpriseProfileRepository.findByUserId(other.getId());
-            if (profile.isPresent()) {
-                displayName = profile.get().getCompanyName();
-                displayEmoji = profile.get().getLogoEmoji();
+            // Always the tenant's identity (company name/logo), not the individual recruiter's -
+            // a candidate messaging "Swiggy" should see Swiggy regardless of which of Swiggy's
+            // recruiters happens to be on the other end.
+            try {
+                var tenant = enterpriseProfileService.getEntityForUser(other.getId());
+                displayName = tenant.getCompanyName();
+                displayEmoji = tenant.getLogoEmoji();
+            } catch (ResourceNotFoundException ignored) {
+                // No resolvable tenant (e.g. a hiring_manager not yet linked) - falls back to
+                // the user's own name, set above.
             }
         }
 

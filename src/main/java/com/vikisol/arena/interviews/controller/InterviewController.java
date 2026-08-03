@@ -50,12 +50,12 @@ public class InterviewController {
         return ResponseEntity.ok(ApiResponse.ok(interviewService.saveNotes(principal.getId(), interviewId, request.notes())));
     }
 
-    // Enterprise-only, matching arena-web's canGiveFeedback (always false on the candidate route) -
-    // same @PreAuthorize("hasRole('ENTERPRISE')") pattern ApplicantController/JobPostingController/
-    // TalentSearchController already use at the class level; applied here at the method level since
-    // this controller otherwise serves both roles.
+    // Enterprise-side only, matching arena-web's canGiveFeedback (always false on the candidate
+    // route) - includes HIRING_MANAGER per ARENA-ENTERPRISE-SUITE.md HM2 (they submit structured
+    // feedback on their assigned interviews, nothing else enterprise-side). Applied at the method
+    // level since this controller otherwise serves both talent and enterprise roles.
     @PostMapping("/{interviewId}/feedback")
-    @PreAuthorize("hasRole('ENTERPRISE')")
+    @PreAuthorize("hasAnyRole('RECRUITER','COMPANY_ADMIN','HIRING_MANAGER')")
     public ResponseEntity<ApiResponse<InterviewResponse>> submitFeedback(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID interviewId, @Valid @RequestBody SubmitInterviewFeedbackRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(interviewService.submitFeedback(principal.getId(), interviewId, request)));

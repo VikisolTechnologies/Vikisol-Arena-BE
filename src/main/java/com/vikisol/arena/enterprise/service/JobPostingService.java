@@ -7,7 +7,6 @@ import com.vikisol.arena.enterprise.dto.CreatePostingRequest;
 import com.vikisol.arena.enterprise.dto.JobPostingResponse;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.entity.Plan;
-import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
 import com.vikisol.arena.jobs.entity.EmploymentType;
 import com.vikisol.arena.jobs.entity.JobPosting;
 import com.vikisol.arena.jobs.entity.PostingStatus;
@@ -26,7 +25,7 @@ import java.util.UUID;
 public class JobPostingService {
 
     private final JobPostingRepository jobPostingRepository;
-    private final EnterpriseProfileRepository enterpriseProfileRepository;
+    private final EnterpriseProfileService enterpriseProfileService;
     private final JobPostingMapper mapper;
 
     @Transactional(readOnly = true)
@@ -73,7 +72,11 @@ public class JobPostingService {
     @Transactional
     public void setStatus(UUID userId, UUID postingId, PostingStatus status) {
         JobPosting posting = requirePosting(postingId);
-        if (!posting.getEnterprise().getUser().getId().equals(userId)) {
+        EnterpriseProfile actingTenant = requireEnterprise(userId);
+        // Compare tenants, not the founding-admin user - any recruiter/company_admin on the
+        // same tenant manages any of that tenant's postings, not just ones they personally
+        // created (see DECISIONS.md: EnterpriseProfile.user is no longer the ownership check).
+        if (!posting.getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your posting");
         }
         posting.setStatus(status);
@@ -96,7 +99,6 @@ public class JobPostingService {
     }
 
     private EnterpriseProfile requireEnterprise(UUID userId) {
-        return enterpriseProfileRepository.findByUserId(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("No enterprise profile for this account"));
+        return enterpriseProfileService.getEntityForUser(userId);
     }
 }

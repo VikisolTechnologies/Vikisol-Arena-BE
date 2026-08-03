@@ -36,6 +36,7 @@ public class TalentSearchService {
 
     private final CandidateProfileRepository candidateProfileRepository;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
+    private final EnterpriseProfileService enterpriseProfileService;
     private final UnlockedCandidateRepository unlockedCandidateRepository;
     private final CandidateProfileMapper candidateProfileMapper;
     private final ScoringService scoringService;
@@ -89,7 +90,6 @@ public class TalentSearchService {
     }
 
     private EnterpriseProfile requireEnterprise(UUID userId) {
-        return enterpriseProfileRepository.findByUserId(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("No enterprise profile for this account"));
+        return enterpriseProfileService.getEntityForUser(userId);
     }
 }

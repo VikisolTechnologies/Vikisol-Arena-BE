@@ -3,7 +3,6 @@ package com.vikisol.arena.enterprise.service;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.entity.ShortlistEntry;
-import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
 import com.vikisol.arena.enterprise.repository.ShortlistEntryRepository;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
@@ -19,7 +18,7 @@ import java.util.UUID;
 public class ShortlistService {
 
     private final ShortlistEntryRepository shortlistEntryRepository;
-    private final EnterpriseProfileRepository enterpriseProfileRepository;
+    private final EnterpriseProfileService enterpriseProfileService;
     private final CandidateProfileRepository candidateProfileRepository;
 
     @Transactional(readOnly = true)
@@ -44,7 +43,6 @@ public class ShortlistService {
     }
 
     private EnterpriseProfile requireEnterprise(UUID userId) {
-        return enterpriseProfileRepository.findByUserId(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("No enterprise profile for this account"));
+        return enterpriseProfileService.getEntityForUser(userId);
     }
 }

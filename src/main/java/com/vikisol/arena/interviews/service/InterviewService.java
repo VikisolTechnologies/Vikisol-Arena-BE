@@ -7,6 +7,8 @@ import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.applications.service.ApplicationService;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
+import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
 import com.vikisol.arena.integration.provider.EmailMessage;
 import com.vikisol.arena.integration.provider.EmailProvider;
 import com.vikisol.arena.integration.provider.MeetingLinkProvider;
@@ -41,6 +43,7 @@ public class InterviewService {
     private final InterviewRepository interviewRepository;
     private final ApplicationRepository applicationRepository;
     private final ApplicationService applicationService;
+    private final EnterpriseProfileService enterpriseProfileService;
     private final NotificationService notificationService;
     private final ActivityService activityService;
     private final MeetingLinkProvider meetingLinkProvider;
@@ -159,7 +162,8 @@ public class InterviewService {
         Interview interview = interviewRepository.findById(interviewId)
                 .orElseThrow(() -> new ResourceNotFoundException("Interview not found: " + interviewId));
         Application application = interview.getApplication();
-        if (!application.getJobPosting().getEnterprise().getUser().getId().equals(enterpriseUserId)) {
+        EnterpriseProfile actingTenant = enterpriseProfileService.getEntityForUser(enterpriseUserId);
+        if (!application.getJobPosting().getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your interview");
         }
 
@@ -186,7 +190,16 @@ public class InterviewService {
 
     private void assertParticipant(UUID userId, Application application) {
         boolean isCandidate = application.getCandidate().getUser().getId().equals(userId);
-        boolean isEnterprise = application.getJobPosting().getEnterprise().getUser().getId().equals(userId);
+        boolean isEnterprise = false;
+        if (!isCandidate) {
+            try {
+                EnterpriseProfile actingTenant = enterpriseProfileService.getEntityForUser(userId);
+                isEnterprise = application.getJobPosting().getEnterprise().getId().equals(actingTenant.getId());
+            } catch (ResourceNotFoundException ignored) {
+                // Not an enterprise user at all (e.g. hiring_manager with no tenant membership
+                // resolved yet, or a stray candidate id) - isEnterprise stays false.
+            }
+        }
         if (!isCandidate && !isEnterprise) {
             throw new AccessDeniedException("Not part of this application");
         }

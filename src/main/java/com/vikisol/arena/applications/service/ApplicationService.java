@@ -9,6 +9,8 @@ import com.vikisol.arena.activity.service.ActivityService;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
+import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
 import com.vikisol.arena.integration.provider.EmailMessage;
 import com.vikisol.arena.integration.provider.EmailProvider;
 import com.vikisol.arena.jobs.entity.JobPosting;
@@ -34,6 +36,7 @@ public class ApplicationService {
     private final ApplicationRepository applicationRepository;
     private final CandidateProfileRepository candidateProfileRepository;
     private final JobPostingRepository jobPostingRepository;
+    private final EnterpriseProfileService enterpriseProfileService;
     private final ApplicationMapper mapper;
     private final NotificationService notificationService;
     private final ActivityService activityService;
@@ -110,7 +113,10 @@ public class ApplicationService {
     public Application advanceStageAsEnterprise(UUID enterpriseUserId, UUID applicationId, ApplicationStage stage) {
         Application application = applicationRepository.findById(applicationId)
                 .orElseThrow(() -> new ResourceNotFoundException("Applicant not found: " + applicationId));
-        if (!application.getJobPosting().getEnterprise().getUser().getId().equals(enterpriseUserId)) {
+        EnterpriseProfile actingTenant = enterpriseProfileService.getEntityForUser(enterpriseUserId);
+        // Tenant comparison, not founding-admin comparison - any recruiter/company_admin on the
+        // posting's tenant can move its applicants, not just whoever created it.
+        if (!application.getJobPosting().getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your posting");
         }
         application.setStage(stage);

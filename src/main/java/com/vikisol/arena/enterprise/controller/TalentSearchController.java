@@ -18,7 +18,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/enterprise/talent")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ENTERPRISE')")
+@PreAuthorize("hasAnyRole('RECRUITER','COMPANY_ADMIN')")
 public class TalentSearchController {
 
     private final TalentSearchService talentSearchService;

@@ -15,7 +15,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/enterprise/shortlist")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ENTERPRISE')")
+@PreAuthorize("hasAnyRole('RECRUITER','COMPANY_ADMIN')")
 public class ShortlistController {
 
     private final ShortlistService shortlistService;

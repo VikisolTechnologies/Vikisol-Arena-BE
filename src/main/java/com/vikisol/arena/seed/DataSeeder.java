@@ -10,10 +10,13 @@ import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.enterprise.entity.CompanySize;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
+import com.vikisol.arena.enterprise.entity.Membership;
+import com.vikisol.arena.enterprise.entity.MembershipStatus;
 import com.vikisol.arena.enterprise.entity.Plan;
 import com.vikisol.arena.enterprise.entity.ShortlistEntry;
 import com.vikisol.arena.enterprise.entity.UnlockedCandidate;
 import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
+import com.vikisol.arena.enterprise.repository.MembershipRepository;
 import com.vikisol.arena.enterprise.repository.ShortlistEntryRepository;
 import com.vikisol.arena.enterprise.repository.UnlockedCandidateRepository;
 import com.vikisol.arena.interviews.entity.Interview;
@@ -79,6 +82,7 @@ public class DataSeeder implements ApplicationRunner {
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
+    private final MembershipRepository membershipRepository;
     private final JobPostingRepository jobPostingRepository;
     private final ApplicationRepository applicationRepository;
     private final InterviewRepository interviewRepository;
@@ -109,11 +113,19 @@ public class DataSeeder implements ApplicationRunner {
         seedMarketplace(companies, candidates);
         seedEnterpriseEngagement(companies.get(0), candidates);
         seedDemoActivityAndNotifications(candidates.get(0));
+        seedPlatformAdmin();
 
         log.info("Seed complete: {} companies, {} candidates, {} postings", companies.size(), candidates.size(), postings.size());
         log.info("Demo talent login: {} / {}", DEMO_TALENT_EMAIL, DEMO_PASSWORD);
-        log.info("Demo enterprise login: {} / {}", DEMO_ENTERPRISE_EMAIL, DEMO_PASSWORD);
+        log.info("Demo company_admin login: {} / {}", DEMO_ENTERPRISE_EMAIL, DEMO_PASSWORD);
+        log.info("Demo recruiter login: {} / {}", DEMO_RECRUITER_EMAIL, DEMO_PASSWORD);
+        log.info("Demo hiring_manager login: {} / {}", DEMO_HIRING_MANAGER_EMAIL, DEMO_PASSWORD);
+        log.info("Platform admin login: {} / {}", PLATFORM_ADMIN_EMAIL, DEMO_PASSWORD);
     }
+
+    public static final String DEMO_RECRUITER_EMAIL = "demo.recruiter@vikisol.dev";
+    public static final String DEMO_HIRING_MANAGER_EMAIL = "demo.hiringmanager@vikisol.dev";
+    public static final String PLATFORM_ADMIN_EMAIL = "admin@vikisol.dev";
 
     private List<EnterpriseProfile> seedCompanies() {
         List<EnterpriseProfile> companies = new ArrayList<>();
@@ -124,7 +136,7 @@ public class DataSeeder implements ApplicationRunner {
                     .email(isDemo ? DEMO_ENTERPRISE_EMAIL : ("hr@" + seed.name().toLowerCase().replaceAll("[^a-z]", "") + ".example.com"))
                     .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
                     .name(seed.name() + " Talent Team")
-                    .role(Role.ENTERPRISE)
+                    .role(Role.COMPANY_ADMIN)
                     .build());
 
             EnterpriseProfile profile = enterpriseProfileRepository.save(EnterpriseProfile.builder()
@@ -140,9 +152,43 @@ public class DataSeeder implements ApplicationRunner {
                     .unlockCreditsUsed(0)
                     .unlockCreditsTotal(isDemo ? 25 : IndianData.intBetween(10, 30))
                     .build());
+            membershipRepository.save(Membership.builder()
+                    .user(user).tenant(profile).status(MembershipStatus.ACTIVE).joinedAt(user.getCreatedAt())
+                    .build());
             companies.add(profile);
+
+            if (isDemo) {
+                seedDemoRecruiterAndHiringManager(user, profile);
+            }
         }
         return companies;
+    }
+
+    // Gives the Company Admin console (CA1-CA7) and Hiring Manager lite (HM1-HM3) real,
+    // multi-person tenant data to show against on the demo company from day one, rather than
+    // only being exercisable by manually inviting someone through the UI first.
+    private void seedDemoRecruiterAndHiringManager(User admin, EnterpriseProfile tenant) {
+        User recruiter = userRepository.save(User.builder()
+                .email(DEMO_RECRUITER_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                .name("Priyanka Rao").role(Role.RECRUITER).build());
+        membershipRepository.save(Membership.builder()
+                .user(recruiter).tenant(tenant).status(MembershipStatus.ACTIVE)
+                .invitedBy(admin).joinedAt(recruiter.getCreatedAt()).build());
+
+        User hiringManager = userRepository.save(User.builder()
+                .email(DEMO_HIRING_MANAGER_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                .name("Karthik Iyer").role(Role.HIRING_MANAGER).build());
+        membershipRepository.save(Membership.builder()
+                .user(hiringManager).tenant(tenant).status(MembershipStatus.ACTIVE)
+                .invitedBy(admin).joinedAt(hiringManager.getCreatedAt()).build());
+    }
+
+    // PA7: exactly one seeded platform admin account, credentials documented in the README - no
+    // tenant, no EnterpriseProfile, /admin resolves nothing tenant-scoped for this user.
+    private void seedPlatformAdmin() {
+        userRepository.save(User.builder()
+                .email(PLATFORM_ADMIN_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                .name("Vikisol Platform Admin").role(Role.PLATFORM_ADMIN).build());
     }
 
     private List<CandidateProfile> seedCandidates() {

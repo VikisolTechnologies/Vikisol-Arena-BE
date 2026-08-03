@@ -62,4 +62,13 @@ public class EnterpriseProfile extends BaseEntity {
     @Column(nullable = false)
     @Builder.Default
     private int unlockCreditsTotal = 10;
+
+    // Platform-admin-controlled (PA1: suspend/reactivate tenant) - a suspended tenant's users
+    // can't sign in (see AuthService), independent of any individual user's own account state.
+    // columnDefinition default needed so ddl-auto:update's ALTER TABLE ADD COLUMN NOT NULL
+    // succeeds against this table's pre-existing rows (same pattern as Milestone.amount).
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, columnDefinition = "varchar(255) not null default 'ACTIVE'")
+    @Builder.Default
+    private TenantStatus status = TenantStatus.ACTIVE;
 }

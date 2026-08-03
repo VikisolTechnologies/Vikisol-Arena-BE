@@ -22,7 +22,7 @@ import java.util.UUID;
 @RestController
 @RequestMapping("/enterprise/postings")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ENTERPRISE')")
+@PreAuthorize("hasAnyRole('RECRUITER','COMPANY_ADMIN')")
 public class JobPostingController {
 
     private final JobPostingService jobPostingService;

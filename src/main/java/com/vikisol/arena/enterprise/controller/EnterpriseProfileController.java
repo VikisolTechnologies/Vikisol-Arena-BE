@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/enterprise/profile")
 @RequiredArgsConstructor
-@PreAuthorize("hasRole('ENTERPRISE')")
+@PreAuthorize("hasAnyRole('RECRUITER','COMPANY_ADMIN')")
 public class EnterpriseProfileController {
 
     private final EnterpriseProfileService enterpriseProfileService;
