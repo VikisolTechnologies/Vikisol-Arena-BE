@@ -12,4 +12,8 @@ import java.util.UUID;
 public interface JobPostingRepository extends JpaRepository<JobPosting, UUID> {
     Page<JobPosting> findByStatus(PostingStatus status, Pageable pageable);
     Page<JobPosting> findByEnterprise(EnterpriseProfile enterprise, Pageable pageable);
+
+    // "Active" = anything that isn't closed (open or paused) - matches arena-web's createPosting()
+    // limit check in enterprise.ts exactly (`readPostings().filter((p) => p.status !== "closed")`).
+    long countByEnterpriseAndStatusNot(EnterpriseProfile enterprise, PostingStatus status);
 }

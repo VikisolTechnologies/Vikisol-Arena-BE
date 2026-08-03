@@ -1,10 +1,12 @@
 package com.vikisol.arena.enterprise.service;
 
 import com.vikisol.arena.common.dto.PagedResponse;
+import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.dto.CreatePostingRequest;
 import com.vikisol.arena.enterprise.dto.JobPostingResponse;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
+import com.vikisol.arena.enterprise.entity.Plan;
 import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
 import com.vikisol.arena.jobs.entity.EmploymentType;
 import com.vikisol.arena.jobs.entity.JobPosting;
@@ -41,6 +43,17 @@ public class JobPostingService {
     @Transactional
     public JobPostingResponse createPosting(UUID userId, CreatePostingRequest request) {
         EnterpriseProfile enterprise = requireEnterprise(userId);
+
+        // Plan-based active-posting cap - mirrors arena-web's POSTING_LIMITS (plan.ts) and the
+        // check createPosting() does in enterprise.ts before AUDIT.md flagged it as ungated.
+        // "Active" = anything not closed (open or paused); closed postings don't count.
+        int limit = postingLimitFor(enterprise.getPlan());
+        long activeCount = jobPostingRepository.countByEnterpriseAndStatusNot(enterprise, PostingStatus.CLOSED);
+        if (activeCount >= limit) {
+            throw new BadRequestException("Your " + enterprise.getPlan().wireValue() + " plan allows " + limit
+                    + " active posting" + (limit == 1 ? "" : "s") + ".");
+        }
+
         JobPosting posting = JobPosting.builder()
                 .enterprise(enterprise)
                 .title(request.title())
@@ -65,6 +78,17 @@ public class JobPostingService {
         }
         posting.setStatus(status);
         jobPostingRepository.save(posting);
+    }
+
+    // Mirrors arena-web's POSTING_LIMITS constant (plan.ts) exactly: free:1, pro:10,
+    // enterprise:Infinity. Integer.MAX_VALUE stands in for Infinity since the count comparison
+    // (`activeCount >= limit`) is never going to be reached by a real enterprise's posting volume.
+    private int postingLimitFor(Plan plan) {
+        return switch (plan) {
+            case FREE -> 1;
+            case PRO -> 10;
+            case ENTERPRISE -> Integer.MAX_VALUE;
+        };
     }
 
     private JobPosting requirePosting(UUID id) {
