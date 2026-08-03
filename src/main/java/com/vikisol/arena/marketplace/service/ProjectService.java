@@ -32,8 +32,17 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ProjectService {
 
+    // Field-for-field mirror of arena-web's MILESTONE_LABELS/MILESTONE_SPLIT (myProjects.ts) -
+    // changed from this service's prior 4 generic labels to these exact 3 so the tranche split
+    // below is unambiguous (a 30/40/30 split only means something against exactly 3 milestones).
+    // Reasonable-call note: the brief only asked for the `amount` field + award-time calculation,
+    // but "apply the same 30/40/30 split" isn't well-defined against 4 arbitrary milestones, so
+    // this also aligns the labels/count with arena-web's real feature rather than inventing a
+    // 4-way split arena-web doesn't have. DataSeeder's demo award uses the same list for the same
+    // reason (its seeded milestone amounts would otherwise stay 0/inconsistent with real awards).
     private static final List<String> DEFAULT_MILESTONE_LABELS =
-            List.of("Kickoff call scheduled", "First milestone delivered", "Final review", "Project complete");
+            List.of("Kickoff & plan", "Midpoint delivery", "Final delivery");
+    private static final double[] MILESTONE_SPLIT = {0.3, 0.4, 0.3};
 
     private final ProjectRepository projectRepository;
     private final BidRepository bidRepository;
@@ -132,10 +141,13 @@ public class ProjectService {
         project.setAwardedBidId(bidId);
         projectRepository.save(project);
 
+        // 30/40/30 tranche split against the awarded bid's amount - matches
+        // MILESTONE_SPLIT/awardProject() in arena-web's myProjects.ts exactly.
         List<Milestone> milestones = new java.util.ArrayList<>();
         for (int i = 0; i < DEFAULT_MILESTONE_LABELS.size(); i++) {
+            int tranche = (int) Math.round(awarded.getAmount() * MILESTONE_SPLIT[i]);
             milestones.add(Milestone.builder().project(project).label(DEFAULT_MILESTONE_LABELS.get(i))
-                    .orderIndex(i).status(MilestoneStatus.PENDING).build());
+                    .orderIndex(i).amount(tranche).status(MilestoneStatus.PENDING).build());
         }
         milestoneRepository.saveAll(milestones);
 

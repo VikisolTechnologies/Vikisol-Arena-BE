@@ -35,7 +35,7 @@ public class ProjectMapper {
     }
 
     public MilestoneResponse toResponse(Milestone m) {
-        return new MilestoneResponse(m.getId().toString(), m.getLabel(), m.getStatus() == MilestoneStatus.ACCEPTED, m.getStatus().wireValue());
+        return new MilestoneResponse(m.getId().toString(), m.getLabel(), m.getAmount(), m.getStatus() == MilestoneStatus.ACCEPTED, m.getStatus().wireValue());
     }
 
     public ProjectResponse toResponse(Project p, List<Bid> bids, List<Milestone> milestones, UUID viewingUserId) {

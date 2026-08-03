@@ -303,10 +303,15 @@ public class DataSeeder implements ApplicationRunner {
                 project.setAwardedBidId(top.getId());
                 projectRepository.save(project);
 
-                List<String> labels = List.of("Kickoff call scheduled", "First milestone delivered", "Final review", "Project complete");
+                // Matches ProjectService.award()'s real 30/40/30 tranche split (mirrors arena-web's
+                // MILESTONE_SPLIT in myProjects.ts) so seeded demo milestones carry the same
+                // non-zero, coherent `amount` a real award would produce.
+                List<String> labels = List.of("Kickoff & plan", "Midpoint delivery", "Final delivery");
+                double[] split = {0.3, 0.4, 0.3};
                 for (int i = 0; i < labels.size(); i++) {
+                    int tranche = (int) Math.round(top.getAmount() * split[i]);
                     milestoneRepository.save(Milestone.builder().project(project).label(labels.get(i)).orderIndex(i)
-                            .status(i == 0 ? MilestoneStatus.ACCEPTED : MilestoneStatus.PENDING).build());
+                            .amount(tranche).status(i == 0 ? MilestoneStatus.ACCEPTED : MilestoneStatus.PENDING).build());
                 }
             }
         }
