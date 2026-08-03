@@ -69,6 +69,10 @@ All in `src/main/resources/application.yml`, same override style as `HRLMS-BE`:
 | `CORS_ORIGINS` | `http://localhost:3000,http://localhost:3001` | Allowed frontend origins |
 | `STORAGE_ROOT_DIR` | `./uploads` | Local-disk file storage root |
 | `SEED_ENABLED` | `true` | Toggle demo data seeding |
+| `RESEND_API_KEY` | *(blank)* | Resend API key - blank means `NoopEmailProvider` (log-only) stays active, see Integrations below |
+| `RESEND_FROM` | `Vikisol Arena <no-reply@arena.vikisol.dev>` | Resend "from" address |
+| `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` | *(blank)* | Meta WhatsApp Cloud API creds - blank means `NoopWhatsAppProvider` stays active (not wired at any call site yet either way, see Integrations) |
+| `TEAMS_TENANT_ID` / `TEAMS_CLIENT_ID` / `TEAMS_CLIENT_SECRET` / `TEAMS_ORGANIZER_EMAIL` | *(blank)* | Azure AD app-only Graph creds for real Teams meeting links - blank means `NoopMeetingLinkProvider` (placeholder link) stays active |
 
 ## What's implemented
 
@@ -78,7 +82,8 @@ Decisions) - Interviews (propose/confirm slots) - Marketplace (projects, bids, a
 deliverables, two-way ratings) - Enterprise (profile, postings, applicant pipeline, talent search,
 unlock credits, shortlist) - Messaging (shared bidirectional conversations) - Notifications -
 Activity feed - Local-disk file storage behind a swappable interface - Pagination + ETag caching
-on every list endpoint - Realistic Indian-context seed data.
+on every list endpoint - Realistic Indian-context seed data - Email/WhatsApp/meeting-link
+integration scaffolding (see Integrations below).
 
 That covers every domain named in the brief, in the requested priority order.
 
@@ -105,6 +110,53 @@ That covers every domain named in the brief, in the requested priority order.
 - **No payments** - unlock-credit *gating* is real (enforced server-side, returns a clear error at
   zero credits - AUDIT.md flagged this as unverified in the mock; it's now a real, tested check),
   but there's no checkout/payment flow to buy more credits.
+- **No live Resend/WhatsApp/Microsoft Graph credentials.** The provider interfaces, Noop
+  fallbacks, and real (currently-dormant) implementations all exist (`integration/provider/`) and
+  are wired at their real call sites, but none of the three external services have been
+  provisioned yet - see "Integrations" below for exactly what's real vs. stubbed and what env vars
+  a real deployment needs to set.
+
+## Integrations (Phase 5 scaffolding)
+
+`integration/provider/` holds three provider abstractions, each following the same
+interface -> Noop -> real shape (mirrors HRLMS-BE's own `integration/provider/` package,
+independently implemented - no shared code):
+
+| Interface | Noop (active today) | Real implementation | Status |
+|---|---|---|---|
+| `EmailProvider` | `NoopEmailProvider` (logs subject+recipient) | `ResendEmailProvider` (Resend HTTP API) | Real implementation written, untested against a live account - no `RESEND_API_KEY` provisioned |
+| `WhatsAppProvider` | `NoopWhatsAppProvider` (logs template+recipient) | `WhatsAppBusinessProvider` (Meta Cloud API) | Real implementation written, untested - no BSP account chosen/provisioned; **not wired at any call site** (see below) |
+| `MeetingLinkProvider` | `NoopMeetingLinkProvider` (returns `https://meet.arena.dev/{id}`, same as the old mock) | `TeamsMeetingLinkProvider` (Graph app-only OAuth2) | Real implementation written, untested - no Azure AD app registered for Arena |
+
+`integration/config/IntegrationProviderConfig.java` is the single place that picks real vs. Noop -
+each real provider's `isConfigured()` is checked once at startup and the winner becomes the
+`@Primary` bean. With zero env vars set (the state of this repo today), every one of the three
+resolves to its Noop implementation, so the app runs with no external calls made anywhere.
+
+**Wired call sites:**
+- `AuthService.signUp()` - fires a welcome `EmailProvider.sendEmail(...)` after account creation.
+- `ApplicationService.advanceStageAsEnterprise()` - fires a stage-change email to the candidate
+  when an enterprise moves them through the pipeline (the one place `notifyStageChanged` already
+  fired before this change; `advanceStageAsCandidate` still doesn't notify, same as before).
+- `InterviewService.confirmSlot()` - calls `MeetingLinkProvider.createMeetingLink(...)` to populate
+  `Interview.meetingLink` (a field that didn't exist on the entity before this change - added since
+  arena-web's mock/`types.ts` already has `Interview.meetingLink` and generates the exact
+  `https://meet.arena.dev/{id}` placeholder that `NoopMeetingLinkProvider` now also returns, so this
+  is a non-breaking, behavior-preserving addition), then fires a confirmation email with the join
+  link.
+
+Every one of these calls is wrapped in try/catch with a `log.warn` on failure - a notification
+failure never fails the underlying business operation (signup/stage-change/interview-confirm all
+still succeed even if the email/meeting-link call throws). Confirmed by reading HRLMS-BE's own
+`EmailService` send methods, which follow the identical catch-and-log-don't-propagate pattern.
+
+**WhatsApp is deliberately not wired at any call site.** `WhatsAppProvider`/
+`NoopWhatsAppProvider`/`WhatsAppBusinessProvider` are fully built and ready, but there is no
+phone-number field anywhere in Arena's domain model (`User`, `CandidateProfile`,
+`EnterpriseProfile`) to send to - wiring a call site would mean fabricating contact data. Add a
+`phone` field to `CandidateProfile` (and thread it through the profile DTOs/seed data) before
+wiring this in, most naturally alongside the same `advanceStageAsEnterprise` stage-change call
+site email fires from today.
 
 ## Decisions worth knowing about
 
