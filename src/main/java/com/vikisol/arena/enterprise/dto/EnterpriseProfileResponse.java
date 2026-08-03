@@ -13,6 +13,7 @@ public record EnterpriseProfileResponse(
         int seatsUsed,
         int seatsTotal,
         int unlockCreditsUsed,
-        int unlockCreditsTotal
+        int unlockCreditsTotal,
+        String status
 ) {
 }

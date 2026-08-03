@@ -11,6 +11,6 @@ public class EnterpriseProfileMapper {
         return new EnterpriseProfileResponse(
                 p.getCompanyName(), p.getLogoEmoji(), p.getIndustry().wireValue(), p.getSize().wireValue(),
                 p.getHiringFor(), p.getPlan().wireValue(), p.getSeatsUsed(), p.getSeatsTotal(),
-                p.getUnlockCreditsUsed(), p.getUnlockCreditsTotal());
+                p.getUnlockCreditsUsed(), p.getUnlockCreditsTotal(), p.getStatus().wireValue());
     }
 }
