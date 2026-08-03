@@ -1,12 +1,14 @@
 package com.vikisol.arena.marketplace.service;
 
 import com.vikisol.arena.marketplace.dto.BidResponse;
+import com.vikisol.arena.marketplace.dto.DeliverableResponse;
 import com.vikisol.arena.marketplace.dto.MilestoneResponse;
 import com.vikisol.arena.marketplace.dto.ProjectResponse;
 import com.vikisol.arena.marketplace.entity.Bid;
 import com.vikisol.arena.marketplace.entity.Milestone;
 import com.vikisol.arena.marketplace.entity.MilestoneStatus;
 import com.vikisol.arena.marketplace.entity.Project;
+import com.vikisol.arena.marketplace.repository.DeliverableRepository;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -19,6 +21,7 @@ import java.util.UUID;
 public class ProjectMapper {
 
     private final CandidateProfileRepository candidateProfileRepository;
+    private final DeliverableRepository deliverableRepository;
 
     public BidResponse toResponse(Bid bid) {
         String bidderName = bid.getBidderUser().getName();
@@ -35,7 +38,11 @@ public class ProjectMapper {
     }
 
     public MilestoneResponse toResponse(Milestone m) {
-        return new MilestoneResponse(m.getId().toString(), m.getLabel(), m.getAmount(), m.getStatus() == MilestoneStatus.ACCEPTED, m.getStatus().wireValue());
+        DeliverableResponse deliverable = deliverableRepository.findByMilestoneIdOrderBySubmittedAtDesc(m.getId()).stream()
+                .findFirst()
+                .map(d -> new DeliverableResponse(d.getNote(), d.getSubmittedAt().toString()))
+                .orElse(null);
+        return new MilestoneResponse(m.getId().toString(), m.getLabel(), m.getAmount(), m.getStatus() == MilestoneStatus.ACCEPTED, m.getStatus().wireValue(), deliverable);
     }
 
     public ProjectResponse toResponse(Project p, List<Bid> bids, List<Milestone> milestones, UUID viewingUserId) {
