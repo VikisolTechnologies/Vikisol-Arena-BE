@@ -35,6 +35,12 @@ public class ApplicantController {
         return ResponseEntity.ok(ApiResponse.ok(applicantService.getApplicantsForPosting(postingId, pageable)));
     }
 
+    @GetMapping("/applicants/{applicantId}")
+    public ResponseEntity<ApiResponse<ApplicantResponse>> getApplicant(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID applicantId) {
+        return ResponseEntity.ok(ApiResponse.ok(applicantService.getApplicant(principal.getId(), applicantId)));
+    }
+
     @PutMapping("/applicants/{applicantId}/stage")
     public ResponseEntity<ApiResponse<ApplicantResponse>> moveStage(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID applicantId, @Valid @RequestBody AdvanceStageRequest request) {

@@ -5,10 +5,13 @@ import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.applications.service.ApplicationService;
 import com.vikisol.arena.common.dto.PagedResponse;
+import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.dto.ApplicantResponse;
+import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.profile.service.CandidateProfileMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,11 +28,27 @@ public class ApplicantService {
 
     private final ApplicationRepository applicationRepository;
     private final ApplicationService applicationService;
+    private final EnterpriseProfileService enterpriseProfileService;
     private final CandidateProfileMapper candidateProfileMapper;
 
     @Transactional(readOnly = true)
     public PagedResponse<ApplicantResponse> getApplicantsForPosting(UUID postingId, Pageable pageable) {
         return PagedResponse.of(applicationRepository.findByJobPostingId(postingId, pageable), this::toResponse);
+    }
+
+    // Fills a real gap: arena-web's enterprise/interviews/[applicationId] page needs to look up
+    // a single application by id, but the only single-application-by-id endpoint that existed
+    // (GET /applications, i.e. "my applications") is TALENT-only and always 403s for an
+    // enterprise caller - that page has been silently broken in real mode since it was built.
+    @Transactional(readOnly = true)
+    public ApplicantResponse getApplicant(UUID enterpriseUserId, UUID applicantId) {
+        Application application = applicationRepository.findById(applicantId)
+                .orElseThrow(() -> new ResourceNotFoundException("Applicant not found: " + applicantId));
+        EnterpriseProfile actingTenant = enterpriseProfileService.getEntityForUser(enterpriseUserId);
+        if (!application.getJobPosting().getEnterprise().getId().equals(actingTenant.getId())) {
+            throw new AccessDeniedException("Not your applicant");
+        }
+        return toResponse(application);
     }
 
     @Transactional
