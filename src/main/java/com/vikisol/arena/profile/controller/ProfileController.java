@@ -5,6 +5,7 @@ import com.vikisol.arena.common.dto.ApiResponse;
 import com.vikisol.arena.profile.dto.CandidateProfileResponse;
 import com.vikisol.arena.profile.dto.ConsentDto;
 import com.vikisol.arena.profile.dto.UpdateAutonomyRequest;
+import com.vikisol.arena.profile.dto.UpdateProfileDetailsRequest;
 import com.vikisol.arena.profile.dto.UpdateSkillsRequest;
 import com.vikisol.arena.profile.entity.AutonomyLevel;
 import com.vikisol.arena.profile.service.CandidateProfileService;
@@ -28,6 +29,14 @@ public class ProfileController {
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<CandidateProfileResponse>> getMyProfile(@AuthenticationPrincipal UserPrincipal principal) {
         return ResponseEntity.ok(ApiResponse.ok(profileService.getMyProfile(principal.getId())));
+    }
+
+    @PutMapping("/me/details")
+    public ResponseEntity<ApiResponse<CandidateProfileResponse>> updateDetails(
+            @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody UpdateProfileDetailsRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.updateDetails(
+                principal.getId(), request.name(), request.title(), request.industry(),
+                request.experienceYears(), request.rateFloor(), request.openTo())));
     }
 
     @PutMapping("/me/skills")

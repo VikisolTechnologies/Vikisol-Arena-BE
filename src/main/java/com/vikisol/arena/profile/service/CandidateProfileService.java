@@ -9,6 +9,8 @@ import com.vikisol.arena.profile.entity.AutonomyLevel;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.entity.CandidateSkill;
 import com.vikisol.arena.profile.entity.ConsentSettings;
+import com.vikisol.arena.profile.entity.Industry;
+import com.vikisol.arena.profile.entity.OpenTo;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -44,9 +46,24 @@ public class CandidateProfileService {
     }
 
     @Transactional
+    public CandidateProfileResponse updateDetails(UUID userId, String name, String title, String industry,
+                                                    int experienceYears, int rateFloor, List<String> openTo) {
+        CandidateProfile profile = getEntityForUser(userId);
+        profile.setName(name);
+        profile.setTitle(title);
+        profile.setIndustry(Industry.fromWireValue(industry));
+        profile.setExperienceYears(experienceYears);
+        profile.setRateFloor(rateFloor);
+        // Hibernate's @ElementCollection needs a mutable backing list to manage - Stream.toList()
+        // returns an immutable one, which blows up with UnsupportedOperationException on flush.
+        profile.setOpenTo(new java.util.ArrayList<>(openTo.stream().map(OpenTo::fromWireValue).toList()));
+        return saveAndScore(profile);
+    }
+
+    @Transactional
     public CandidateProfileResponse updateSkills(UUID userId, List<String> skillNames) {
         CandidateProfile profile = getEntityForUser(userId);
-        profile.setSkills(skillNames.stream().map(n -> new CandidateSkill(n, false)).toList());
+        profile.setSkills(new java.util.ArrayList<>(skillNames.stream().map(n -> new CandidateSkill(n, false)).toList()));
         return saveAndScore(profile);
     }
 
