@@ -40,4 +40,17 @@ public class Interview extends BaseEntity {
     // never modeled it); added here since Phase 5's meeting-link integration needs somewhere real
     // to persist the result.
     private String meetingLink;
+
+    // Mirrors arena-web's `Interview.notes` (types.ts) - free-form text either participant can
+    // jot during the call (InterviewRoom.tsx's notes textarea isn't gated by canGiveFeedback, so
+    // both the candidate and enterprise side may write here).
+    @Column(columnDefinition = "TEXT")
+    private String notes;
+
+    // Mirrors arena-web's `Interview.feedback` (types.ts) - null until the enterprise side submits
+    // structured post-interview feedback via InterviewService.submitFeedback(). All-null-columns
+    // reads back as a null InterviewFeedback (standard JPA embeddable behavior), so no separate
+    // presence flag is needed.
+    @Embedded
+    private InterviewFeedback feedback;
 }

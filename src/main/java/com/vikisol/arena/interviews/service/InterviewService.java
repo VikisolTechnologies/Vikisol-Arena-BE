@@ -3,14 +3,20 @@ package com.vikisol.arena.interviews.service;
 import com.vikisol.arena.activity.entity.ActivityEventType;
 import com.vikisol.arena.activity.service.ActivityService;
 import com.vikisol.arena.applications.entity.Application;
+import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
+import com.vikisol.arena.applications.service.ApplicationService;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.integration.provider.EmailMessage;
 import com.vikisol.arena.integration.provider.EmailProvider;
 import com.vikisol.arena.integration.provider.MeetingLinkProvider;
+import com.vikisol.arena.interviews.dto.InterviewFeedbackDto;
 import com.vikisol.arena.interviews.dto.InterviewResponse;
 import com.vikisol.arena.interviews.dto.InterviewSlotDto;
+import com.vikisol.arena.interviews.dto.SubmitInterviewFeedbackRequest;
 import com.vikisol.arena.interviews.entity.Interview;
+import com.vikisol.arena.interviews.entity.InterviewFeedback;
+import com.vikisol.arena.interviews.entity.InterviewRecommendation;
 import com.vikisol.arena.interviews.entity.InterviewSlot;
 import com.vikisol.arena.interviews.entity.InterviewStatus;
 import com.vikisol.arena.interviews.repository.InterviewRepository;
@@ -34,6 +40,7 @@ public class InterviewService {
 
     private final InterviewRepository interviewRepository;
     private final ApplicationRepository applicationRepository;
+    private final ApplicationService applicationService;
     private final NotificationService notificationService;
     private final ActivityService activityService;
     private final MeetingLinkProvider meetingLinkProvider;
@@ -126,6 +133,57 @@ public class InterviewService {
         return toResponse(interview);
     }
 
+    // Notes are shared, editable state either side of the interview may write - matches
+    // InterviewRoom.tsx, where the notes textarea isn't gated by canGiveFeedback, only the
+    // "End & give feedback" action is. Reuses assertParticipant, same participant check
+    // confirmSlot()/propose() already apply.
+    @Transactional
+    public InterviewResponse saveNotes(UUID actingUserId, UUID interviewId, String notes) {
+        Interview interview = interviewRepository.findById(interviewId)
+                .orElseThrow(() -> new ResourceNotFoundException("Interview not found: " + interviewId));
+        assertParticipant(actingUserId, interview.getApplication());
+
+        interview.setNotes(notes);
+        return toResponse(interviewRepository.save(interview));
+    }
+
+    // Enterprise-only (matches arena-web's canGiveFeedback, only ever true on the
+    // /enterprise/interviews/[applicationId] route) - submitting feedback both completes the
+    // interview and, in the same transaction, folds the recommendation into the application's
+    // pipeline stage exactly like submitInterviewFeedback() does in interviews.ts:
+    // advance -> offer, reject -> rejected, hold -> stays at interview. Reuses
+    // ApplicationService.advanceStageAsEnterprise() rather than duplicating the ownership check /
+    // notification / stage-change email it already does for ApplicantService.moveStage().
+    @Transactional
+    public InterviewResponse submitFeedback(UUID enterpriseUserId, UUID interviewId, SubmitInterviewFeedbackRequest request) {
+        Interview interview = interviewRepository.findById(interviewId)
+                .orElseThrow(() -> new ResourceNotFoundException("Interview not found: " + interviewId));
+        Application application = interview.getApplication();
+        if (!application.getJobPosting().getEnterprise().getUser().getId().equals(enterpriseUserId)) {
+            throw new AccessDeniedException("Not your interview");
+        }
+
+        InterviewRecommendation recommendation = InterviewRecommendation.fromWireValue(request.recommendation());
+        interview.setFeedback(InterviewFeedback.builder()
+                .rating(request.rating())
+                .strengths(request.strengths())
+                .concerns(request.concerns())
+                .recommendation(recommendation)
+                .submittedAt(Instant.now())
+                .build());
+        interview.setStatus(InterviewStatus.COMPLETED);
+        interview = interviewRepository.save(interview);
+
+        ApplicationStage nextStage = switch (recommendation) {
+            case ADVANCE -> ApplicationStage.OFFER;
+            case REJECT -> ApplicationStage.REJECTED;
+            case HOLD -> ApplicationStage.INTERVIEW;
+        };
+        applicationService.advanceStageAsEnterprise(enterpriseUserId, application.getId(), nextStage);
+
+        return toResponse(interview);
+    }
+
     private void assertParticipant(UUID userId, Application application) {
         boolean isCandidate = application.getCandidate().getUser().getId().equals(userId);
         boolean isEnterprise = application.getJobPosting().getEnterprise().getUser().getId().equals(userId);
@@ -153,7 +211,22 @@ public class InterviewService {
                         .toList(),
                 i.getConfirmedSlotId() == null ? null : i.getConfirmedSlotId().toString(),
                 i.getStatus().wireValue(),
-                i.getMeetingLink()
+                i.getMeetingLink(),
+                i.getNotes(),
+                toFeedbackDto(i.getFeedback())
+        );
+    }
+
+    private InterviewFeedbackDto toFeedbackDto(InterviewFeedback f) {
+        if (f == null || f.getRecommendation() == null) {
+            return null;
+        }
+        return new InterviewFeedbackDto(
+                f.getRating() == null ? 0 : f.getRating(),
+                f.getStrengths(),
+                f.getConcerns(),
+                f.getRecommendation().wireValue(),
+                f.getSubmittedAt() == null ? null : f.getSubmittedAt().toString()
         );
     }
 }

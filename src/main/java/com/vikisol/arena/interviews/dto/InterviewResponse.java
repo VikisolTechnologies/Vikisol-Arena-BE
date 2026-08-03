@@ -9,6 +9,8 @@ public record InterviewResponse(
         List<InterviewSlotDto> proposedSlots,
         String confirmedSlotId,
         String status,
-        String meetingLink
+        String meetingLink,
+        String notes,
+        InterviewFeedbackDto feedback
 ) {
 }
