@@ -45,7 +45,9 @@ public class TalentSearchService {
         EnterpriseProfile enterprise = requireEnterprise(enterpriseUserId);
         Industry industryEnum = (industry == null || industry.isBlank() || "All".equalsIgnoreCase(industry))
                 ? null : Industry.fromWireValue(industry);
-        String normalizedText = (text == null || text.isBlank()) ? null : text.toLowerCase();
+        // Always a non-null string ("" means "no filter") - the repository query relies on this,
+        // see the comment on CandidateProfileRepository.search().
+        String normalizedText = (text == null || text.isBlank()) ? "" : text.toLowerCase();
 
         return PagedResponse.of(
                 candidateProfileRepository.search(normalizedText, industryEnum, remoteOnly, pageable),

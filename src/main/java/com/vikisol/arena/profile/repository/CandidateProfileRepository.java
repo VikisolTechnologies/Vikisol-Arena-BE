@@ -16,12 +16,17 @@ public interface CandidateProfileRepository extends JpaRepository<CandidateProfi
 
     Optional<CandidateProfile> findByUserId(UUID userId);
 
+    // `:text` is intentionally never null-checked here (always compared/used as a plain string,
+    // caller passes "" for "no filter") - a `:text is null or ... :text ...` pattern in the same
+    // query left Postgres/pgJDBC unable to infer a consistent parameter type for :text across its
+    // two different usages (the null-check and the LIKE), producing "operator does not exist:
+    // text ~~ bytea" at runtime regardless of the actual value passed in.
     @Query("""
             select c from CandidateProfile c
             where c.consent.searchableByEnterprises = true
               and (:industry is null or c.industry = :industry)
               and (:remoteOnly = false or c.remote = true)
-              and (:text is null or
+              and (:text = '' or
                    lower(c.title) like concat('%', :text, '%') or
                    lower(c.location) like concat('%', :text, '%'))
             """)
