@@ -1,11 +1,16 @@
 package com.vikisol.arena.enterprise.service;
 
+import com.vikisol.arena.audit.AuditActions;
+import com.vikisol.arena.audit.AuditService;
+import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.dto.TalentSearchResult;
+import com.vikisol.arena.enterprise.entity.CreditLedgerEntry;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.entity.UnlockedCandidate;
+import com.vikisol.arena.enterprise.repository.CreditLedgerRepository;
 import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
 import com.vikisol.arena.enterprise.repository.UnlockedCandidateRepository;
 import com.vikisol.arena.matching.ScoringService;
@@ -38,6 +43,9 @@ public class TalentSearchService {
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final EnterpriseProfileService enterpriseProfileService;
     private final UnlockedCandidateRepository unlockedCandidateRepository;
+    private final CreditLedgerRepository creditLedgerRepository;
+    private final AuditService auditService;
+    private final UserRepository userRepository;
     private final CandidateProfileMapper candidateProfileMapper;
     private final ScoringService scoringService;
 
@@ -78,6 +86,14 @@ public class TalentSearchService {
         unlockedCandidateRepository.save(UnlockedCandidate.builder().enterprise(enterprise).candidate(candidate).build());
         enterprise.setUnlockCreditsUsed(enterprise.getUnlockCreditsUsed() + 1);
         enterpriseProfileRepository.save(enterprise);
+
+        int balanceAfter = enterprise.getUnlockCreditsTotal() - enterprise.getUnlockCreditsUsed();
+        creditLedgerRepository.save(CreditLedgerEntry.builder()
+                .tenant(enterprise).actor(userRepository.getReferenceById(enterpriseUserId)).delta(-1)
+                .reason("Unlocked " + candidate.getName()).balanceAfter(balanceAfter).build());
+        auditService.record(enterprise.getId(), enterpriseUserId, AuditActions.CANDIDATE_UNLOCKED, candidate.getName());
+        auditService.record(enterprise.getId(), enterpriseUserId, AuditActions.CREDIT_SPENT,
+                "1 credit for " + candidate.getName(), "balance: " + balanceAfter);
     }
 
     private TalentSearchResult toResult(CandidateProfile candidate, EnterpriseProfile enterprise) {

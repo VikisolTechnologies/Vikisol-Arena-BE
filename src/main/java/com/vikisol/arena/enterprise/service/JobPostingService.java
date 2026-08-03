@@ -1,5 +1,7 @@
 package com.vikisol.arena.enterprise.service;
 
+import com.vikisol.arena.audit.AuditActions;
+import com.vikisol.arena.audit.AuditService;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
@@ -26,6 +28,7 @@ public class JobPostingService {
 
     private final JobPostingRepository jobPostingRepository;
     private final EnterpriseProfileService enterpriseProfileService;
+    private final AuditService auditService;
     private final JobPostingMapper mapper;
 
     @Transactional(readOnly = true)
@@ -66,7 +69,9 @@ public class JobPostingService {
                 .description(request.description())
                 .status(PostingStatus.OPEN)
                 .build();
-        return mapper.toResponse(jobPostingRepository.save(posting));
+        JobPosting saved = jobPostingRepository.save(posting);
+        auditService.record(enterprise.getId(), userId, AuditActions.POSTING_CREATED, saved.getTitle());
+        return mapper.toResponse(saved);
     }
 
     @Transactional
@@ -81,6 +86,9 @@ public class JobPostingService {
         }
         posting.setStatus(status);
         jobPostingRepository.save(posting);
+        if (status == PostingStatus.CLOSED) {
+            auditService.record(actingTenant.getId(), userId, AuditActions.POSTING_CLOSED, posting.getTitle());
+        }
     }
 
     // Mirrors arena-web's POSTING_LIMITS constant (plan.ts) exactly: free:1, pro:10,

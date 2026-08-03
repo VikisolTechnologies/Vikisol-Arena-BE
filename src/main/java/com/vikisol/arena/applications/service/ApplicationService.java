@@ -8,6 +8,8 @@ import com.vikisol.arena.activity.entity.ActivityEventType;
 import com.vikisol.arena.activity.service.ActivityService;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.common.exception.BadRequestException;
+import com.vikisol.arena.audit.AuditActions;
+import com.vikisol.arena.audit.AuditService;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
@@ -37,6 +39,7 @@ public class ApplicationService {
     private final CandidateProfileRepository candidateProfileRepository;
     private final JobPostingRepository jobPostingRepository;
     private final EnterpriseProfileService enterpriseProfileService;
+    private final AuditService auditService;
     private final ApplicationMapper mapper;
     private final NotificationService notificationService;
     private final ActivityService activityService;
@@ -122,6 +125,8 @@ public class ApplicationService {
         application.setStage(stage);
         Application saved = applicationRepository.save(application);
         notificationService.notifyStageChanged(saved);
+        auditService.record(actingTenant.getId(), enterpriseUserId, AuditActions.STAGE_MOVED,
+                saved.getCandidate().getName() + " on " + saved.getJobPosting().getTitle(), "stage: " + stage.wireValue());
 
         // Best-effort - a notification failure must never fail the stage transition itself (same
         // resilience contract as the welcome email in AuthService/meeting-link creation in

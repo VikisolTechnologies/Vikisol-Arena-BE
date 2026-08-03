@@ -2,6 +2,8 @@ package com.vikisol.arena.interviews.service;
 
 import com.vikisol.arena.activity.entity.ActivityEventType;
 import com.vikisol.arena.activity.service.ActivityService;
+import com.vikisol.arena.audit.AuditActions;
+import com.vikisol.arena.audit.AuditService;
 import com.vikisol.arena.applications.entity.Application;
 import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
@@ -44,6 +46,7 @@ public class InterviewService {
     private final ApplicationRepository applicationRepository;
     private final ApplicationService applicationService;
     private final EnterpriseProfileService enterpriseProfileService;
+    private final AuditService auditService;
     private final NotificationService notificationService;
     private final ActivityService activityService;
     private final MeetingLinkProvider meetingLinkProvider;
@@ -75,6 +78,17 @@ public class InterviewService {
                 "Interview slots proposed", application.getJobPosting().getEnterprise().getCompanyName()
                         + " proposed 3 interview slots for " + application.getJobPosting().getTitle() + ".",
                 application.getJobPosting().getId(), null, true);
+
+        // propose() is reachable from either side of the application (assertParticipant covers
+        // both) - only audit it when the caller is actually the enterprise side, matching the
+        // spec's "recruiter/admin action" scope. Candidate-initiated proposals aren't audited.
+        try {
+            EnterpriseProfile actingTenant = enterpriseProfileService.getEntityForUser(actingUserId);
+            auditService.record(actingTenant.getId(), actingUserId, AuditActions.INTERVIEW_SCHEDULED,
+                    application.getCandidate().getName() + " for " + application.getJobPosting().getTitle());
+        } catch (ResourceNotFoundException ignored) {
+            // Candidate proposed it themselves (or a non-tenant user) - nothing to audit.
+        }
 
         return toResponse(interview);
     }
@@ -177,6 +191,8 @@ public class InterviewService {
                 .build());
         interview.setStatus(InterviewStatus.COMPLETED);
         interview = interviewRepository.save(interview);
+        auditService.record(actingTenant.getId(), enterpriseUserId, AuditActions.FEEDBACK_SUBMITTED,
+                application.getCandidate().getName(), "recommendation: " + recommendation.wireValue());
 
         ApplicationStage nextStage = switch (recommendation) {
             case ADVANCE -> ApplicationStage.OFFER;

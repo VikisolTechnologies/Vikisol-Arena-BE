@@ -1,5 +1,7 @@
 package com.vikisol.arena.messaging.service;
 
+import com.vikisol.arena.audit.AuditActions;
+import com.vikisol.arena.audit.AuditService;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
@@ -33,6 +35,7 @@ public class ConversationService {
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
     private final EnterpriseProfileService enterpriseProfileService;
+    private final AuditService auditService;
     private final NotificationService notificationService;
 
     @Transactional(readOnly = true)
@@ -83,6 +86,15 @@ public class ConversationService {
 
         User recipient = conversation.getUserA().getId().equals(userId) ? conversation.getUserB() : conversation.getUserA();
         notificationService.notify(recipient, NotificationType.SYSTEM, "New message", requireUser(userId).getName() + " sent you a message.");
+
+        // Same "only audit the enterprise side" scoping as InterviewService.propose() - a
+        // conversation can be sent from either participant.
+        try {
+            var tenant = enterpriseProfileService.getEntityForUser(userId);
+            auditService.record(tenant.getId(), userId, AuditActions.MESSAGE_SENT, recipient.getName());
+        } catch (ResourceNotFoundException ignored) {
+            // Candidate sent it - nothing to audit.
+        }
 
         return toResponse(message, userId);
     }
