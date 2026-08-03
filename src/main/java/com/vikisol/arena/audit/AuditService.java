@@ -3,13 +3,17 @@ package com.vikisol.arena.audit;
 import com.vikisol.arena.audit.entity.AuditEvent;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
+import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
+import java.util.List;
 import java.util.UUID;
 
 // Called explicitly at each meaningful action site (see DECISIONS.md for why not an aspect).
@@ -40,5 +44,30 @@ public class AuditService {
 
     public void record(UUID tenantId, UUID actorUserId, String action, String target) {
         record(tenantId, actorUserId, action, target, null);
+    }
+
+    // CA3 (audit log): filterable by actor/action/date, chronological. actorId/action stay
+    // nullable ("no filter"); since is never passed through as null (see
+    // AuditEventRepository.search()'s comment) - Instant.EPOCH stands in for "no lower bound".
+    @Transactional(readOnly = true)
+    public PagedResponse<AuditEventResponse> search(UUID tenantId, UUID actorId, String action, Instant since, Pageable pageable) {
+        return PagedResponse.of(
+                auditEventRepository.search(tenantId, actorId, action, since == null ? Instant.EPOCH : since, pageable),
+                this::toResponse);
+    }
+
+    // CA3 "export CSV" - same filters as search(), unpaged. Capped rather than truly unbounded so
+    // a very long-lived tenant can't accidentally request an unbounded result set into memory.
+    @Transactional(readOnly = true)
+    public List<AuditEventResponse> exportAll(UUID tenantId, UUID actorId, String action, Instant since) {
+        return auditEventRepository.search(tenantId, actorId, action, since == null ? Instant.EPOCH : since,
+                        org.springframework.data.domain.PageRequest.of(0, 5000))
+                .map(this::toResponse).getContent();
+    }
+
+    private AuditEventResponse toResponse(AuditEvent e) {
+        return new AuditEventResponse(
+                e.getId().toString(), e.getActor().getName(), e.getAction(), e.getTarget(), e.getMetadata(),
+                e.getCreatedAt().toString());
     }
 }

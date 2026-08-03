@@ -7,6 +7,7 @@ import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.dto.TalentSearchResult;
+import com.vikisol.arena.enterprise.dto.admin.ConsentEntryResponse;
 import com.vikisol.arena.enterprise.entity.CreditLedgerEntry;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.entity.UnlockedCandidate;
@@ -94,6 +95,19 @@ public class TalentSearchService {
         auditService.record(enterprise.getId(), enterpriseUserId, AuditActions.CANDIDATE_UNLOCKED, candidate.getName());
         auditService.record(enterprise.getId(), enterpriseUserId, AuditActions.CREDIT_SPENT,
                 "1 credit for " + candidate.getName(), "balance: " + balanceAfter);
+    }
+
+    // CA6 (consent & compliance view): every candidate this tenant has unlocked, with their
+    // *current* consent state - not a snapshot from unlock time, so a withdrawal shows up here
+    // immediately (G8's own requirement).
+    @Transactional(readOnly = true)
+    public List<ConsentEntryResponse> getConsentView(UUID enterpriseUserId) {
+        EnterpriseProfile enterprise = requireEnterprise(enterpriseUserId);
+        return unlockedCandidateRepository.findByEnterpriseId(enterprise.getId()).stream()
+                .map(u -> new ConsentEntryResponse(
+                        u.getCandidate().getId().toString(), u.getCandidate().getName(), u.getCreatedAt().toString(),
+                        u.getCandidate().getConsent().isSearchableByEnterprises()))
+                .toList();
     }
 
     private TalentSearchResult toResult(CandidateProfile candidate, EnterpriseProfile enterprise) {

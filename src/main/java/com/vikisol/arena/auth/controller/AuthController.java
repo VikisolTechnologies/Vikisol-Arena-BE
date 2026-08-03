@@ -1,5 +1,6 @@
 package com.vikisol.arena.auth.controller;
 
+import com.vikisol.arena.auth.dto.AcceptInvitationRequest;
 import com.vikisol.arena.auth.dto.SessionResponse;
 import com.vikisol.arena.auth.dto.SignInRequest;
 import com.vikisol.arena.auth.dto.SignUpRequest;
@@ -8,6 +9,9 @@ import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.auth.service.AuthService;
 import com.vikisol.arena.common.dto.ApiResponse;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.enterprise.dto.admin.InvitationPreviewResponse;
+import com.vikisol.arena.enterprise.service.TeamService;
+import com.vikisol.arena.security.jwt.JwtTokenProvider;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -22,6 +26,8 @@ public class AuthController {
 
     private final AuthService authService;
     private final UserRepository userRepository;
+    private final TeamService teamService;
+    private final JwtTokenProvider jwtTokenProvider;
 
     @PostMapping("/signup")
     public ResponseEntity<ApiResponse<SessionResponse>> signUp(@Valid @RequestBody SignUpRequest request) {
@@ -45,5 +51,21 @@ public class AuthController {
         User user = userRepository.findById(principal.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
         return ResponseEntity.ok(ApiResponse.ok(authService.currentSession(user)));
+    }
+
+    // Unauthenticated (permitAll via SecurityConfig's "/auth/**" rule) - lets the accept-invite
+    // page confirm which company/role someone's joining before they set a password.
+    @GetMapping("/invitations/{token}")
+    public ResponseEntity<ApiResponse<InvitationPreviewResponse>> previewInvitation(@PathVariable String token) {
+        return ResponseEntity.ok(ApiResponse.ok(teamService.previewInvitation(token)));
+    }
+
+    @PostMapping("/invitations/accept")
+    public ResponseEntity<ApiResponse<SessionResponse>> acceptInvitation(@Valid @RequestBody AcceptInvitationRequest request) {
+        User user = teamService.acceptInvitation(request.token(), request.name(), request.password());
+        String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
+        String candidateId = null; // invited roles are never TALENT
+        return ResponseEntity.ok(ApiResponse.ok("Account created",
+                new SessionResponse(user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), token)));
     }
 }
