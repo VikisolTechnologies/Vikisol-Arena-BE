@@ -5,6 +5,9 @@ import com.vikisol.arena.activity.service.ActivityService;
 import com.vikisol.arena.applications.entity.Application;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.integration.provider.EmailMessage;
+import com.vikisol.arena.integration.provider.EmailProvider;
+import com.vikisol.arena.integration.provider.MeetingLinkProvider;
 import com.vikisol.arena.interviews.dto.InterviewResponse;
 import com.vikisol.arena.interviews.dto.InterviewSlotDto;
 import com.vikisol.arena.interviews.entity.Interview;
@@ -13,6 +16,7 @@ import com.vikisol.arena.interviews.entity.InterviewStatus;
 import com.vikisol.arena.interviews.repository.InterviewRepository;
 import com.vikisol.arena.notifications.service.NotificationService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -23,6 +27,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class InterviewService {
@@ -31,6 +36,8 @@ public class InterviewService {
     private final ApplicationRepository applicationRepository;
     private final NotificationService notificationService;
     private final ActivityService activityService;
+    private final MeetingLinkProvider meetingLinkProvider;
+    private final EmailProvider emailProvider;
 
     @Transactional(readOnly = true)
     public Optional<InterviewResponse> getForApplication(UUID applicationId) {
@@ -68,18 +75,53 @@ public class InterviewService {
                 .orElseThrow(() -> new ResourceNotFoundException("Interview not found: " + interviewId));
         assertParticipant(actingUserId, interview.getApplication());
 
-        boolean slotExists = interview.getProposedSlots().stream().anyMatch(s -> s.getId().equals(slotId));
-        if (!slotExists) {
-            throw new ResourceNotFoundException("Slot not found: " + slotId);
-        }
+        InterviewSlot confirmedSlot = interview.getProposedSlots().stream()
+                .filter(s -> s.getId().equals(slotId)).findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Slot not found: " + slotId));
+
         interview.setConfirmedSlotId(slotId);
         interview.setStatus(InterviewStatus.CONFIRMED);
+
+        // Best-effort - a meeting-link/calendar failure must never block the confirmation itself
+        // (same resilience contract HRLMS-BE applies to its own Microsoft 365 calls: the interview
+        // still gets confirmed even if Graph is unreachable). Runs through NoopMeetingLinkProvider
+        // today (no TEAMS_* env vars configured), which returns the same
+        // `https://meet.arena.dev/{id}` placeholder the mock already used - non-breaking.
+        Application application = interview.getApplication();
+        List<String> attendeeEmails = List.of(
+                application.getCandidate().getUser().getEmail(),
+                application.getJobPosting().getEnterprise().getUser().getEmail());
+        try {
+            String meetingLink = meetingLinkProvider.createMeetingLink(
+                    interview.getId(),
+                    application.getJobPosting().getTitle() + " Interview",
+                    confirmedSlot.getStart(),
+                    confirmedSlot.getDurationMinutes(),
+                    attendeeEmails);
+            interview.setMeetingLink(meetingLink);
+        } catch (Exception e) {
+            log.warn("Meeting-link creation failed for interview {}: {}", interview.getId(), e.getMessage());
+        }
+
         interview = interviewRepository.save(interview);
 
         notificationService.notifyInterviewConfirmed(interview.getApplication());
         activityService.log(interview.getApplication().getCandidate().getUser(), ActivityEventType.INTERVIEW_CONFIRMED,
                 "Interview confirmed", "Confirmed an interview slot for " + interview.getApplication().getJobPosting().getTitle() + ".",
                 interview.getApplication().getJobPosting().getId(), null, false);
+
+        try {
+            emailProvider.sendEmail(EmailMessage.to(
+                    application.getCandidate().getUser().getEmail(),
+                    "Interview confirmed - " + application.getJobPosting().getTitle(),
+                    "<p>Hi " + application.getCandidate().getName() + ",</p><p>Your interview for <b>"
+                            + application.getJobPosting().getTitle() + "</b> at " + application.getJobPosting().getEnterprise().getCompanyName()
+                            + " is confirmed for " + confirmedSlot.getStart() + ".</p>"
+                            + (interview.getMeetingLink() != null ? "<p>Join link: <a href=\"" + interview.getMeetingLink() + "\">" + interview.getMeetingLink() + "</a></p>" : "")
+                            + "<p>- The Vikisol Arena team</p>"));
+        } catch (Exception e) {
+            log.warn("Interview-confirmation email failed for interview {}: {}", interview.getId(), e.getMessage());
+        }
 
         return toResponse(interview);
     }
@@ -110,7 +152,8 @@ public class InterviewService {
                         .map(s -> new InterviewSlotDto(s.getId().toString(), s.getStart().toString(), s.getDurationMinutes()))
                         .toList(),
                 i.getConfirmedSlotId() == null ? null : i.getConfirmedSlotId().toString(),
-                i.getStatus().wireValue()
+                i.getStatus().wireValue(),
+                i.getMeetingLink()
         );
     }
 }

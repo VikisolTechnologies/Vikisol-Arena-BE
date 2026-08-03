@@ -32,4 +32,12 @@ public class Interview extends BaseEntity {
     @Column(nullable = false)
     @Builder.Default
     private InterviewStatus status = InterviewStatus.PROPOSED;
+
+    // Field-for-field mirror of arena-web's `Interview.meetingLink` (types.ts) - plain string today
+    // so a future WebRTC/Daily.co/Zoom embed only changes what MeetingEmbed renders, not this
+    // contract. Populated by MeetingLinkProvider when a slot is confirmed - see
+    // InterviewService.confirmSlot(). Did not previously exist on this entity (the prior pass
+    // never modeled it); added here since Phase 5's meeting-link integration needs somewhere real
+    // to persist the result.
+    private String meetingLink;
 }

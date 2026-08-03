@@ -8,6 +8,7 @@ public record InterviewResponse(
         String applicationId,
         List<InterviewSlotDto> proposedSlots,
         String confirmedSlotId,
-        String status
+        String status,
+        String meetingLink
 ) {
 }
