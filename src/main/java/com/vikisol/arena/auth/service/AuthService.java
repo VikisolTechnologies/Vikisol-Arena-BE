@@ -9,11 +9,14 @@ import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
+import com.vikisol.arena.integration.provider.EmailMessage;
+import com.vikisol.arena.integration.provider.EmailProvider;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import com.vikisol.arena.security.jwt.JwtTokenProvider;
 import com.vikisol.arena.seed.SeedDataFactory;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -21,6 +24,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService {
@@ -32,6 +36,7 @@ public class AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final AuthenticationManager authenticationManager;
     private final SeedDataFactory seedDataFactory;
+    private final EmailProvider emailProvider;
 
     @Transactional
     public SessionResponse signUp(SignUpRequest request) {
@@ -58,6 +63,23 @@ public class AuthService {
         }
 
         String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
+
+        // Best-effort welcome email - a notification failure must never fail signup itself (mirrors
+        // how HRLMS-BE's own EmailService.send* helpers catch and log rather than propagate). Runs
+        // through NoopEmailProvider today since no RESEND_API_KEY is configured; see
+        // integration/config/IntegrationProviderConfig.
+        try {
+            emailProvider.sendEmail(EmailMessage.to(user.getEmail(),
+                    "Welcome to Vikisol Arena",
+                    "<p>Hi " + user.getName() + ",</p><p>Your Vikisol Arena account is ready. "
+                            + (role == Role.TALENT
+                                    ? "Complete your profile to start getting matched to roles."
+                                    : "Post your first job to start building your pipeline.")
+                            + "</p><p>- The Vikisol Arena team</p>"));
+        } catch (Exception e) {
+            log.warn("Welcome email failed for {}: {}", user.getEmail(), e.getMessage());
+        }
+
         return new SessionResponse(role.wireValue(), candidateId, user.getName(), user.getEmail(), token);
     }
 
