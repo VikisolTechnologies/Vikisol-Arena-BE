@@ -65,6 +65,14 @@ public class AuditService {
                 .map(this::toResponse).getContent();
     }
 
+    // PA1 dashboard: latest activity across every tenant, not just one - see
+    // AuditEventRepository.findAllByOrderByCreatedAtDesc()'s comment.
+    @Transactional(readOnly = true)
+    public List<AuditEventResponse> recentGlobal(int limit) {
+        return auditEventRepository.findAllByOrderByCreatedAtDesc(org.springframework.data.domain.PageRequest.of(0, limit))
+                .map(this::toResponse).getContent();
+    }
+
     private AuditEventResponse toResponse(AuditEvent e) {
         return new AuditEventResponse(
                 e.getId().toString(), e.getActor().getName(), e.getAction(), e.getTarget(), e.getMetadata(),

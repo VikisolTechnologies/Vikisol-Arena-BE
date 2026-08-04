@@ -21,4 +21,7 @@ public final class AuditActions {
     public static final String TENANT_SUSPENDED = "tenant.suspended";
     public static final String TENANT_REACTIVATED = "tenant.reactivated";
     public static final String MODERATION_TAKEDOWN = "moderation.takedown";
+    public static final String MODERATION_DISMISSED = "moderation.dismissed";
+    public static final String SUBSCRIPTION_ADJUSTED = "subscription.adjusted";
+    public static final String FLAG_TOGGLED = "flag.toggled";
 }

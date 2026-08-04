@@ -34,4 +34,10 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
     List<AuditEvent> findByTenantIdAndActorIdAndCreatedAtAfter(UUID tenantId, UUID actorId, Instant since);
 
     Page<AuditEvent> findByTenantIdOrderByCreatedAtDesc(UUID tenantId, Pageable pageable);
+
+    // PA1 dashboard's cross-tenant recent-activity feed - unlike search() above, this is
+    // deliberately not tenant-scoped (platform_admin has no tenant of its own, see
+    // DECISIONS.md), so a plain derived query is fine (no null-parameter ambiguity to work
+    // around when there's no parameter at all).
+    Page<AuditEvent> findAllByOrderByCreatedAtDesc(Pageable pageable);
 }

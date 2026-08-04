@@ -13,6 +13,7 @@ import com.vikisol.arena.jobs.entity.EmploymentType;
 import com.vikisol.arena.jobs.entity.JobPosting;
 import com.vikisol.arena.jobs.entity.PostingStatus;
 import com.vikisol.arena.jobs.repository.JobPostingRepository;
+import com.vikisol.arena.platform.service.ModerationService;
 import com.vikisol.arena.profile.entity.Industry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -30,6 +31,7 @@ public class JobPostingService {
     private final EnterpriseProfileService enterpriseProfileService;
     private final AuditService auditService;
     private final JobPostingMapper mapper;
+    private final ModerationService moderationService;
 
     @Transactional(readOnly = true)
     public PagedResponse<JobPostingResponse> getMyPostings(UUID userId, Pageable pageable) {
@@ -71,6 +73,7 @@ public class JobPostingService {
                 .build();
         JobPosting saved = jobPostingRepository.save(posting);
         auditService.record(enterprise.getId(), userId, AuditActions.POSTING_CREATED, saved.getTitle());
+        moderationService.autoFlag(saved);
         return mapper.toResponse(saved);
     }
 
