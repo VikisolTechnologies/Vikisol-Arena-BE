@@ -57,19 +57,36 @@ if [ -z "$TENANT_A_TOKEN" ] || [ -z "$TENANT_B_TOKEN" ]; then
   exit 2
 fi
 
-echo "== Discovering a real posting + applicant + interview owned by Tenant A =="
-POSTING_ID=$(curl -s "$BASE/enterprise/postings?page=0&size=1" -H "Authorization: Bearer $TENANT_A_TOKEN" | json_field "data.content.0.id")
+echo "== Discovering a real posting + applicant owned by Tenant A =="
+POSTING_ID=""
 APPLICANT_ID=""
-if [ -n "$POSTING_ID" ]; then
-  for pid in $(curl -s "$BASE/enterprise/postings?page=0&size=20" -H "Authorization: Bearer $TENANT_A_TOKEN" | "$PY" -c "
+for pid in $(curl -s "$BASE/enterprise/postings?page=0&size=20" -H "Authorization: Bearer $TENANT_A_TOKEN" | "$PY" -c "
 import sys,json
 d = json.load(sys.stdin)
 print(' '.join(p['id'] for p in d['data']['content']))"); do
-    APPLICANT_ID=$(curl -s "$BASE/enterprise/postings/$pid/applicants?page=0&size=1" -H "Authorization: Bearer $TENANT_A_TOKEN" | json_field "data.content.0.id")
-    if [ -n "$APPLICANT_ID" ]; then POSTING_ID="$pid"; break; fi
-  done
-fi
+  APPLICANT_ID=$(curl -s "$BASE/enterprise/postings/$pid/applicants?page=0&size=1" -H "Authorization: Bearer $TENANT_A_TOKEN" | json_field "data.content.0.id")
+  if [ -n "$APPLICANT_ID" ]; then POSTING_ID="$pid"; break; fi
+done
 echo "  posting=$POSTING_ID applicant=$APPLICANT_ID"
+
+echo "== Discovering an applicant that already has an interview (not every application has one) =="
+INTERVIEW_APPLICANT_ID=""
+for pid in $(curl -s "$BASE/enterprise/postings?page=0&size=20" -H "Authorization: Bearer $TENANT_A_TOKEN" | "$PY" -c "
+import sys,json
+d = json.load(sys.stdin)
+print(' '.join(p['id'] for p in d['data']['content']))"); do
+  for aid in $(curl -s "$BASE/enterprise/postings/$pid/applicants?page=0&size=20" -H "Authorization: Bearer $TENANT_A_TOKEN" | "$PY" -c "
+import sys,json
+d = json.load(sys.stdin)
+print(' '.join(a['id'] for a in d['data']['content']))"); do
+    HAS_INTERVIEW=$(curl -s "$BASE/interviews/by-application/$aid" -H "Authorization: Bearer $TENANT_A_TOKEN" | "$PY" -c "
+import sys,json
+d = json.load(sys.stdin)
+print('yes' if d.get('data') else '')" 2>/dev/null)
+    if [ -n "$HAS_INTERVIEW" ]; then INTERVIEW_APPLICANT_ID="$aid"; break 2; fi
+  done
+done
+echo "  applicant_with_interview=$INTERVIEW_APPLICANT_ID"
 
 echo ""
 echo "== Cross-tenant reads (Tenant B token against Tenant A's objects) - expect 403 =="
@@ -79,9 +96,15 @@ if [ -n "$POSTING_ID" ]; then
 fi
 if [ -n "$APPLICANT_ID" ]; then
   assert_status "$BASE/enterprise/applicants/$APPLICANT_ID" GET "$TENANT_B_TOKEN" 403 "GET applicant owned by another tenant"
+fi
+if [ -n "$INTERVIEW_APPLICANT_ID" ]; then
   # Tenant B has no relationship at all to Tenant A's application (not the candidate, not the
   # hiring tenant) - a clean "genuinely uninvolved" party, unlike guessing at a talent account.
-  assert_status "$BASE/interviews/by-application/$APPLICANT_ID" GET "$TENANT_B_TOKEN" 403 "GET interview by application - uninvolved tenant"
+  # Only meaningful against an application that actually has an interview - GET .../by-application
+  # returns 200+null (nothing to protect yet) when none exists, which isn't a 403 case at all.
+  assert_status "$BASE/interviews/by-application/$INTERVIEW_APPLICANT_ID" GET "$TENANT_B_TOKEN" 403 "GET interview by application - uninvolved tenant"
+else
+  echo "SKIP  no applicant with an existing interview found - can't test this check"
 fi
 
 echo ""
