@@ -57,9 +57,17 @@ public class InterviewService {
     private final MeetingLinkProvider meetingLinkProvider;
     private final EmailProvider emailProvider;
 
+    // IDOR fix (found via the ARENA-SHIP-IT.md endpoint audit): this previously took no caller
+    // identity at all - any authenticated user of any role could read any interview's slots/
+    // notes/feedback by application id. Reuses the same assertParticipant() every mutating
+    // interview endpoint already goes through.
     @Transactional(readOnly = true)
-    public Optional<InterviewResponse> getForApplication(UUID applicationId) {
-        return interviewRepository.findByApplicationId(applicationId).map(this::toResponse);
+    public Optional<InterviewResponse> getForApplication(UUID userId, UUID applicationId) {
+        Optional<Interview> interview = interviewRepository.findByApplicationId(applicationId);
+        if (interview.isPresent()) {
+            assertParticipant(userId, interview.get());
+        }
+        return interview.map(this::toResponse);
     }
 
     // HM1: "My interviews" - only ones specifically assigned to this hiring manager, never the

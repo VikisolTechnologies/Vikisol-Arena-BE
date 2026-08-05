@@ -28,11 +28,12 @@ public class ApplicantController {
 
     @GetMapping("/postings/{postingId}/applicants")
     public ResponseEntity<ApiResponse<PagedResponse<ApplicantResponse>>> getApplicants(
+            @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable UUID postingId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "appliedAt"));
-        return ResponseEntity.ok(ApiResponse.ok(applicantService.getApplicantsForPosting(postingId, pageable)));
+        return ResponseEntity.ok(ApiResponse.ok(applicantService.getApplicantsForPosting(principal.getId(), postingId, pageable)));
     }
 
     @GetMapping("/applicants/{applicantId}")

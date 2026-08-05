@@ -39,9 +39,19 @@ public class JobPostingService {
         return PagedResponse.of(jobPostingRepository.findByEnterprise(enterprise, pageable), mapper::toResponse);
     }
 
+    // IDOR fix (found via the ARENA-SHIP-IT.md endpoint audit): this was previously a bare
+    // findById with no tenant check at all - any recruiter could fetch any other tenant's
+    // posting by guessing/enumerating its UUID. This endpoint is only reachable by
+    // RECRUITER/COMPANY_ADMIN (JobPostingController's class-level @PreAuthorize), never
+    // candidates, so the fix is the same tenant-id comparison setStatus() already uses.
     @Transactional(readOnly = true)
-    public JobPostingResponse getPosting(UUID id) {
-        return mapper.toResponse(requirePosting(id));
+    public JobPostingResponse getPosting(UUID userId, UUID id) {
+        JobPosting posting = requirePosting(id);
+        EnterpriseProfile actingTenant = requireEnterprise(userId);
+        if (!posting.getEnterprise().getId().equals(actingTenant.getId())) {
+            throw new AccessDeniedException("Not your posting");
+        }
+        return mapper.toResponse(posting);
     }
 
     @Transactional

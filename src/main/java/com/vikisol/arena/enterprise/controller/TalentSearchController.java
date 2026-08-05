@@ -36,8 +36,9 @@ public class TalentSearchController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<CandidateProfileResponse>> getCandidateDetail(@PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(talentSearchService.getCandidateDetail(id)));
+    public ResponseEntity<ApiResponse<CandidateProfileResponse>> getCandidateDetail(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(talentSearchService.getCandidateDetail(principal.getId(), id)));
     }
 
     @PostMapping("/{id}/unlock")

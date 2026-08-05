@@ -1,5 +1,6 @@
 package com.vikisol.arena.enterprise.service;
 
+import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.audit.AuditActions;
 import com.vikisol.arena.audit.AuditService;
 import com.vikisol.arena.auth.repository.UserRepository;
@@ -49,6 +50,7 @@ public class TalentSearchService {
     private final UserRepository userRepository;
     private final CandidateProfileMapper candidateProfileMapper;
     private final ScoringService scoringService;
+    private final ApplicationRepository applicationRepository;
 
     @Transactional(readOnly = true)
     public PagedResponse<TalentSearchResult> search(UUID enterpriseUserId, String text, String industry, boolean remoteOnly, Pageable pageable) {
@@ -64,11 +66,19 @@ public class TalentSearchService {
                 c -> toResult(c, enterprise));
     }
 
+    // Business-logic IDOR fix (found via the ARENA-SHIP-IT.md endpoint audit): this previously
+    // returned the full profile - including cvUrl/cvFileName, the actual paid asset - to any
+    // recruiter/company_admin regardless of unlock state, completely bypassing the credit
+    // paywall search() results already respect client-side. Full access is granted for free
+    // when the candidate directly applied to one of the caller's own postings (matches the
+    // documented "direct applicants are visible for free" model - see enterprise.ts's
+    // hasDirectlyApplied() comment on the frontend, previously mock-only, now real here too).
     @Transactional(readOnly = true)
-    public CandidateProfileResponse getCandidateDetail(UUID id) {
+    public CandidateProfileResponse getCandidateDetail(UUID enterpriseUserId, UUID id) {
         CandidateProfile candidate = candidateProfileRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate not found: " + id));
-        return candidateProfileMapper.toResponse(candidate);
+        EnterpriseProfile enterprise = requireEnterprise(enterpriseUserId);
+        return redactIfLocked(candidateProfileMapper.toResponse(candidate), enterprise, candidate.getId());
     }
 
     @Transactional
@@ -114,9 +124,23 @@ public class TalentSearchService {
         boolean unlocked = unlockedCandidateRepository.existsByEnterpriseIdAndCandidateId(enterprise.getId(), candidate.getId());
         int matchPercentage = scoringService.computeMatchPercentage(candidate, Set.of(), null);
         return new TalentSearchResult(
-                candidateProfileMapper.toResponse(candidate), matchPercentage,
+                redactIfLocked(candidateProfileMapper.toResponse(candidate), enterprise, candidate.getId()), matchPercentage,
                 IndianData.pick(FIT_BLURBS), String.join(", ", candidate.getOpenTo().stream().map(o -> o.wireValue()).toList()),
                 unlocked);
+    }
+
+    // The only actually-paywalled field: the CV file link. Everything else (skills, title,
+    // location, career health) is meant to be visible pre-unlock so a recruiter can decide
+    // whether a candidate is worth a credit at all - only the resume itself is gated.
+    private CandidateProfileResponse redactIfLocked(CandidateProfileResponse response, EnterpriseProfile enterprise, UUID candidateId) {
+        boolean fullAccess = unlockedCandidateRepository.existsByEnterpriseIdAndCandidateId(enterprise.getId(), candidateId)
+                || applicationRepository.existsByCandidateIdAndJobPostingEnterpriseId(candidateId, enterprise.getId());
+        if (fullAccess) return response;
+        return new CandidateProfileResponse(
+                response.id(), response.name(), response.avatarEmoji(), response.title(), response.industry(),
+                response.location(), response.remote(), response.skills(), response.experienceYears(), response.rateFloor(),
+                response.openTo(), response.careerHealth(), response.consent(), response.autonomy(), response.bio(),
+                null, null);
     }
 
     private EnterpriseProfile requireEnterprise(UUID userId) {

@@ -8,6 +8,8 @@ import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.dto.ApplicantResponse;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
+import com.vikisol.arena.jobs.entity.JobPosting;
+import com.vikisol.arena.jobs.repository.JobPostingRepository;
 import com.vikisol.arena.profile.service.CandidateProfileMapper;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
@@ -30,9 +32,20 @@ public class ApplicantService {
     private final ApplicationService applicationService;
     private final EnterpriseProfileService enterpriseProfileService;
     private final CandidateProfileMapper candidateProfileMapper;
+    private final JobPostingRepository jobPostingRepository;
 
+    // IDOR fix (found via the ARENA-SHIP-IT.md endpoint audit): this previously took no caller
+    // identity at all - any recruiter/company_admin could list another tenant's full applicant
+    // roster by posting id. Fetching the posting first (not just checking applications) also
+    // gives a real 404 for a genuinely nonexistent posting rather than an empty page either way.
     @Transactional(readOnly = true)
-    public PagedResponse<ApplicantResponse> getApplicantsForPosting(UUID postingId, Pageable pageable) {
+    public PagedResponse<ApplicantResponse> getApplicantsForPosting(UUID enterpriseUserId, UUID postingId, Pageable pageable) {
+        JobPosting posting = jobPostingRepository.findById(postingId)
+                .orElseThrow(() -> new ResourceNotFoundException("Posting not found: " + postingId));
+        EnterpriseProfile actingTenant = enterpriseProfileService.getEntityForUser(enterpriseUserId);
+        if (!posting.getEnterprise().getId().equals(actingTenant.getId())) {
+            throw new AccessDeniedException("Not your posting");
+        }
         return PagedResponse.of(applicationRepository.findByJobPostingId(postingId, pageable), this::toResponse);
     }
 

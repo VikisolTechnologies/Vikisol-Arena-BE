@@ -1,13 +1,18 @@
 package com.vikisol.arena.profile.service;
 
+import com.vikisol.arena.common.service.FileSigningService;
 import com.vikisol.arena.profile.dto.CandidateProfileResponse;
 import com.vikisol.arena.profile.dto.ConsentDto;
 import com.vikisol.arena.profile.dto.SkillDto;
 import com.vikisol.arena.profile.entity.CandidateProfile;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 
 @Component
+@RequiredArgsConstructor
 public class CandidateProfileMapper {
+
+    private final FileSigningService fileSigningService;
 
     public CandidateProfileResponse toResponse(CandidateProfile p) {
         return new CandidateProfileResponse(
@@ -26,7 +31,7 @@ public class CandidateProfileMapper {
                 new ConsentDto(p.getConsent().isAutoApply(), p.getConsent().isSearchableByEnterprises()),
                 p.getAutonomy().wireValue(),
                 p.getBio(),
-                p.getCvUrl(),
+                fileSigningService.sign(p.getCvUrl()),
                 p.getCvFileName()
         );
     }

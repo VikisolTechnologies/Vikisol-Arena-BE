@@ -27,8 +27,9 @@ public class InterviewController {
     private final InterviewService interviewService;
 
     @GetMapping("/by-application/{applicationId}")
-    public ResponseEntity<ApiResponse<InterviewResponse>> getForApplication(@PathVariable UUID applicationId) {
-        return ResponseEntity.ok(ApiResponse.ok(interviewService.getForApplication(applicationId).orElse(null)));
+    public ResponseEntity<ApiResponse<InterviewResponse>> getForApplication(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID applicationId) {
+        return ResponseEntity.ok(ApiResponse.ok(interviewService.getForApplication(principal.getId(), applicationId).orElse(null)));
     }
 
     @PostMapping("/propose/{applicationId}")

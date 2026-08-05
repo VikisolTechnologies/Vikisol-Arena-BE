@@ -37,8 +37,9 @@ public class JobPostingController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<JobPostingResponse>> getPosting(@PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(jobPostingService.getPosting(id)));
+    public ResponseEntity<ApiResponse<JobPostingResponse>> getPosting(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(jobPostingService.getPosting(principal.getId(), id)));
     }
 
     @PostMapping
