@@ -176,25 +176,36 @@ public class DataSeeder implements ApplicationRunner {
     // Gives the Company Admin console (CA1-CA7) and Hiring Manager lite (HM1-HM3) real,
     // multi-person tenant data to show against on the demo company from day one, rather than
     // only being exercisable by manually inviting someone through the UI first.
+    // Existence-checked (like RoleMigration.backfillDemoAccounts()) - discovered live deploying
+    // to Railway that these two idempotency guards can genuinely collide: RoleMigration runs
+    // first and only backs these accounts in when it finds a pre-existing DEMO_ENTERPRISE_EMAIL
+    // tenant, so it correctly no-ops on a truly fresh database, but a database that's gone
+    // through a partial/failed earlier boot (e.g. a crashed deploy that got as far as
+    // RoleMigration but not this far) can already have one of these rows present.
     private void seedDemoRecruiterAndHiringManager(User admin, EnterpriseProfile tenant) {
-        User recruiter = userRepository.save(User.builder()
-                .email(DEMO_RECRUITER_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
-                .name("Priyanka Rao").role(Role.RECRUITER).build());
-        membershipRepository.save(Membership.builder()
-                .user(recruiter).tenant(tenant).status(MembershipStatus.ACTIVE)
-                .invitedBy(admin).joinedAt(recruiter.getCreatedAt()).build());
+        if (userRepository.findByEmailIgnoreCase(DEMO_RECRUITER_EMAIL).isEmpty()) {
+            User recruiter = userRepository.save(User.builder()
+                    .email(DEMO_RECRUITER_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                    .name("Priyanka Rao").role(Role.RECRUITER).build());
+            membershipRepository.save(Membership.builder()
+                    .user(recruiter).tenant(tenant).status(MembershipStatus.ACTIVE)
+                    .invitedBy(admin).joinedAt(recruiter.getCreatedAt()).build());
+        }
 
-        User hiringManager = userRepository.save(User.builder()
-                .email(DEMO_HIRING_MANAGER_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
-                .name("Karthik Iyer").role(Role.HIRING_MANAGER).build());
-        membershipRepository.save(Membership.builder()
-                .user(hiringManager).tenant(tenant).status(MembershipStatus.ACTIVE)
-                .invitedBy(admin).joinedAt(hiringManager.getCreatedAt()).build());
+        if (userRepository.findByEmailIgnoreCase(DEMO_HIRING_MANAGER_EMAIL).isEmpty()) {
+            User hiringManager = userRepository.save(User.builder()
+                    .email(DEMO_HIRING_MANAGER_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                    .name("Karthik Iyer").role(Role.HIRING_MANAGER).build());
+            membershipRepository.save(Membership.builder()
+                    .user(hiringManager).tenant(tenant).status(MembershipStatus.ACTIVE)
+                    .invitedBy(admin).joinedAt(hiringManager.getCreatedAt()).build());
+        }
     }
 
     // PA7: exactly one seeded platform admin account, credentials documented in the README - no
     // tenant, no EnterpriseProfile, /admin resolves nothing tenant-scoped for this user.
     private void seedPlatformAdmin() {
+        if (userRepository.findByEmailIgnoreCase(PLATFORM_ADMIN_EMAIL).isPresent()) return;
         userRepository.save(User.builder()
                 .email(PLATFORM_ADMIN_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
                 .name("Vikisol Platform Admin").role(Role.PLATFORM_ADMIN).build());
