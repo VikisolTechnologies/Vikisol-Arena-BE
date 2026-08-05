@@ -18,6 +18,9 @@ import com.vikisol.arena.integration.provider.EmailProvider;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import com.vikisol.arena.security.jwt.JwtTokenProvider;
+import com.vikisol.arena.security.jwt.RefreshTokenService;
+import com.vikisol.arena.security.jwt.TokenDenylistService;
+import com.vikisol.arena.security.service.TotpService;
 import com.vikisol.arena.seed.SeedDataFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -28,10 +31,25 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Set;
+import java.util.UUID;
+
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class AuthService {
+
+    // Login lockout (checklist §1) - 5 bad passwords locks the account for 15 minutes.
+    private static final int MAX_FAILED_ATTEMPTS = 5;
+    private static final Duration LOCKOUT_DURATION = Duration.ofMinutes(15);
+
+    // 2FA is mandatory for these roles once enabled - see checklist §1 ("2FA mandatory for
+    // internal platform admins and company admins"). Enrollment itself (setup/enable) is
+    // available to any authenticated user; sign-in only branches into the MFA-pending flow if
+    // the account actually has totpEnabled=true, so non-admin roles are never forced to enroll.
+    private static final Set<Role> MFA_ELIGIBLE_ROLES = Set.of(Role.COMPANY_ADMIN, Role.PLATFORM_ADMIN);
 
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
@@ -39,12 +57,15 @@ public class AuthService {
     private final MembershipRepository membershipRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final RefreshTokenService refreshTokenService;
+    private final TokenDenylistService tokenDenylistService;
+    private final TotpService totpService;
     private final AuthenticationManager authenticationManager;
     private final SeedDataFactory seedDataFactory;
     private final EmailProvider emailProvider;
 
     @Transactional
-    public SessionResponse signUp(SignUpRequest request) {
+    public SignInOutcome signUp(SignUpRequest request) {
         if (userRepository.existsByEmailIgnoreCase(request.email())) {
             throw new BadRequestException("An account with this email already exists");
         }
@@ -57,11 +78,9 @@ public class AuthService {
                 .build();
         user = userRepository.save(user);
 
-        String candidateId = null;
         if (role == Role.TALENT) {
             CandidateProfile profile = seedDataFactory.blankCandidateProfile(user);
-            profile = candidateProfileRepository.save(profile);
-            candidateId = profile.getId().toString();
+            candidateProfileRepository.save(profile);
         } else if (role == Role.COMPANY_ADMIN) {
             // The only enterprise-side role this public signup endpoint ever creates - it's a
             // new tenant's first user (see ARENA-ENTERPRISE-SUITE.md). RECRUITER/HIRING_MANAGER
@@ -75,8 +94,6 @@ public class AuthService {
         } else {
             throw new BadRequestException("This account type can't be created directly - ask your admin for an invite.");
         }
-
-        String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
 
         // Best-effort welcome email - a notification failure must never fail signup itself (mirrors
         // how HRLMS-BE's own EmailService.send* helpers catch and log rather than propagate). Runs
@@ -94,19 +111,34 @@ public class AuthService {
             log.warn("Welcome email failed for {}: {}", user.getEmail(), e.getMessage());
         }
 
-        return new SessionResponse(role.wireValue(), candidateId, user.getName(), user.getEmail(), token);
+        // A brand-new account never has TOTP enabled yet, so signup always issues a full session
+        // directly - no MFA branch possible here.
+        return issueSession(user);
     }
 
-    @Transactional(readOnly = true)
-    public SessionResponse signIn(SignInRequest request) {
+    @Transactional
+    public SignInOutcome signIn(SignInRequest request) {
+        User user = userRepository.findByEmailIgnoreCase(request.email()).orElse(null);
+
+        if (user != null && user.getLockedUntil() != null && user.getLockedUntil().isAfter(Instant.now())) {
+            long minutesLeft = Math.max(1, Duration.between(Instant.now(), user.getLockedUntil()).toMinutes());
+            throw new BadRequestException("Too many failed attempts. Try again in " + minutesLeft + " minute(s).");
+        }
+
         try {
             authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(request.email().toLowerCase(), request.password()));
         } catch (BadCredentialsException ex) {
+            if (user != null) recordFailedAttempt(user);
             throw new BadCredentialsException("Invalid email or password");
         }
-        User user = userRepository.findByEmailIgnoreCase(request.email())
-                .orElseThrow(() -> new BadCredentialsException("Invalid email or password"));
+        // user is guaranteed non-null past this point - authenticationManager would have thrown
+        // BadCredentialsException (caught above) for an unknown email.
+        if (user.getFailedLoginAttempts() > 0 || user.getLockedUntil() != null) {
+            user.setFailedLoginAttempts(0);
+            user.setLockedUntil(null);
+            userRepository.save(user);
+        }
 
         if (user.getRole().hasTenant()) {
             membershipRepository.findByUserId(user.getId()).ifPresent(m -> {
@@ -116,14 +148,78 @@ public class AuthService {
             });
         }
 
-        String candidateId = null;
-        if (user.getRole() == Role.TALENT) {
-            candidateId = candidateProfileRepository.findByUserId(user.getId())
-                    .map(p -> p.getId().toString())
-                    .orElse(null);
+        if (user.isTotpEnabled() && MFA_ELIGIBLE_ROLES.contains(user.getRole())) {
+            return new SignInOutcome.MfaRequired(jwtTokenProvider.generateMfaPendingToken(user.getId()));
         }
-        String token = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
-        return new SessionResponse(user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), token);
+        return issueSession(user);
+    }
+
+    @Transactional
+    public SignInOutcome verifyMfa(String pendingToken, String code) {
+        if (!jwtTokenProvider.validateToken(pendingToken) || !jwtTokenProvider.isMfaPending(pendingToken)) {
+            throw new BadCredentialsException("This verification step has expired - please sign in again");
+        }
+        UUID userId = jwtTokenProvider.getUserIdFromMfaPendingToken(pendingToken);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new BadCredentialsException("Account not found"));
+        if (!totpService.verifyCode(user.getTotpSecret(), code)) {
+            throw new BadCredentialsException("Incorrect verification code");
+        }
+        return issueSession(user);
+    }
+
+    /** Rotates the presented refresh token and mints a fresh access token. Throws
+     * BadCredentialsException (translated to 401) if the refresh token is invalid, expired, or a
+     * detected reuse - callers should treat that as "the session is over," not retry. */
+    @Transactional(readOnly = true)
+    public RefreshResult refreshAccessToken(String refreshToken) {
+        RefreshTokenService.Result rotated = refreshTokenService.rotate(refreshToken);
+        User user = userRepository.findById(rotated.userId())
+                .orElseThrow(() -> new BadCredentialsException("Account not found"));
+        String accessToken = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
+        return new RefreshResult(accessToken, rotated.token());
+    }
+
+    public void signOut(String refreshToken, String accessToken) {
+        if (refreshToken != null) {
+            refreshTokenService.revoke(refreshToken);
+        }
+        if (accessToken != null && jwtTokenProvider.validateToken(accessToken)) {
+            tokenDenylistService.denylist(jwtTokenProvider.getJtiFromToken(accessToken), jwtTokenProvider.getExpiryFromToken(accessToken));
+        }
+    }
+
+    @Transactional
+    public TotpSetupResult setupTotp(UUID userId) {
+        User user = requireUser(userId);
+        String secret = totpService.generateSecret();
+        user.setTotpSecret(secret);
+        userRepository.save(user);
+        return new TotpSetupResult(secret, totpService.otpAuthUri(secret, user.getEmail(), "Vikisol Arena"));
+    }
+
+    @Transactional
+    public void enableTotp(UUID userId, String code) {
+        User user = requireUser(userId);
+        if (user.getTotpSecret() == null) {
+            throw new BadRequestException("Call /auth/2fa/setup first");
+        }
+        if (!totpService.verifyCode(user.getTotpSecret(), code)) {
+            throw new BadRequestException("Incorrect verification code");
+        }
+        user.setTotpEnabled(true);
+        userRepository.save(user);
+    }
+
+    @Transactional
+    public void disableTotp(UUID userId, String code) {
+        User user = requireUser(userId);
+        if (!user.isTotpEnabled() || !totpService.verifyCode(user.getTotpSecret(), code)) {
+            throw new BadRequestException("Incorrect verification code");
+        }
+        user.setTotpEnabled(false);
+        user.setTotpSecret(null);
+        userRepository.save(user);
     }
 
     @Transactional(readOnly = true)
@@ -134,6 +230,46 @@ public class AuthService {
                     .map(p -> p.getId().toString())
                     .orElse(null);
         }
-        return new SessionResponse(user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), null);
+        return SessionResponse.of(user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), null);
+    }
+
+    private void recordFailedAttempt(User user) {
+        int attempts = user.getFailedLoginAttempts() + 1;
+        user.setFailedLoginAttempts(attempts);
+        if (attempts >= MAX_FAILED_ATTEMPTS) {
+            user.setLockedUntil(Instant.now().plus(LOCKOUT_DURATION));
+        }
+        userRepository.save(user);
+    }
+
+    private SignInOutcome.Success issueSession(User user) {
+        String candidateId = null;
+        if (user.getRole() == Role.TALENT) {
+            candidateId = candidateProfileRepository.findByUserId(user.getId())
+                    .map(p -> p.getId().toString())
+                    .orElse(null);
+        }
+        String accessToken = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
+        String refreshToken = refreshTokenService.issue(user.getId());
+        SessionResponse session = SessionResponse.of(user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), accessToken);
+        return new SignInOutcome.Success(session, refreshToken);
+    }
+
+    private User requireUser(UUID userId) {
+        return userRepository.findById(userId).orElseThrow(() -> new BadCredentialsException("Account not found"));
+    }
+
+    public sealed interface SignInOutcome {
+        record Success(SessionResponse session, String refreshToken) implements SignInOutcome {
+        }
+
+        record MfaRequired(String pendingToken) implements SignInOutcome {
+        }
+    }
+
+    public record RefreshResult(String accessToken, String refreshToken) {
+    }
+
+    public record TotpSetupResult(String secret, String otpAuthUri) {
     }
 }

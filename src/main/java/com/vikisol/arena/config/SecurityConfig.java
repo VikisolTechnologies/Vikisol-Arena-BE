@@ -50,7 +50,14 @@ public class SecurityConfig {
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/auth/**").permitAll()
+                        // Was a blanket "/auth/**".permitAll() - found live-testing the
+                        // signout/denylist flow that this silently let an unauthenticated (or
+                        // just-revoked) caller reach /auth/me with a null Authentication,
+                        // NPE-ing instead of 401ing (see DECISIONS.md). Enumerate only the
+                        // genuinely-public auth endpoints explicitly instead.
+                        .requestMatchers(HttpMethod.POST, "/auth/signup", "/auth/signin", "/auth/refresh",
+                                "/auth/signout", "/auth/2fa/verify", "/auth/invitations/accept").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/auth/invitations/*").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/files/**").permitAll()

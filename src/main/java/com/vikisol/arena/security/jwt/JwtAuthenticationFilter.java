@@ -18,27 +18,32 @@ import java.io.IOException;
 
 // Stateless Bearer-token auth (Authorization: Bearer <token>) rather than HRLMS-BE's HttpOnly
 // cookie approach - a deliberate simplification for a fresh SPA-backed API with no existing
-// cookie/CSRF infrastructure. Noted as a decision in the README.
+// cookie/CSRF infrastructure. Noted as a decision in the README. The refresh token IS a cookie
+// (see RefreshCookieHelper) but never reaches this filter - /auth/refresh reads it directly.
 @Component
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtTokenProvider jwtTokenProvider;
     private final CustomUserDetailsService userDetailsService;
+    private final TokenDenylistService tokenDenylistService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         String token = getTokenFromRequest(request);
 
-        if (StringUtils.hasText(token) && jwtTokenProvider.validateToken(token)) {
-            String email = jwtTokenProvider.getEmailFromToken(token);
-            UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+        if (StringUtils.hasText(token) && jwtTokenProvider.validateToken(token) && !jwtTokenProvider.isMfaPending(token)) {
+            String jti = jwtTokenProvider.getJtiFromToken(token);
+            if (!tokenDenylistService.isDenylisted(jti)) {
+                String email = jwtTokenProvider.getEmailFromToken(token);
+                UserDetails userDetails = userDetailsService.loadUserByUsername(email);
 
-            UsernamePasswordAuthenticationToken authentication =
-                    new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
-            authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
-            SecurityContextHolder.getContext().setAuthentication(authentication);
+                UsernamePasswordAuthenticationToken authentication =
+                        new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
         }
 
         filterChain.doFilter(request, response);

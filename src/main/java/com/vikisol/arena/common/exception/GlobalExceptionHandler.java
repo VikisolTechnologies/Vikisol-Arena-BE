@@ -33,9 +33,15 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(new ApiResponse<>(false, ex.getMessage(), null));
     }
 
+    // sign-in itself always forces the generic "Invalid email or password" message deliberately
+    // (don't leak which of the two was wrong) - but /auth/refresh and /auth/2fa/verify now throw
+    // this same exception type with genuinely useful messages ("Refresh token is invalid or
+    // expired," "Incorrect verification code"), so this falls back to ex.getMessage() when one
+    // was actually set rather than always overwriting it.
     @ExceptionHandler(AuthenticationException.class)
     public ResponseEntity<ApiResponse<Void>> handleAuthentication(AuthenticationException ex) {
-        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ApiResponse<>(false, "Invalid email or password", null));
+        String message = (ex.getMessage() != null && !ex.getMessage().isBlank()) ? ex.getMessage() : "Invalid email or password";
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(new ApiResponse<>(false, message, null));
     }
 
     @ExceptionHandler(AccessDeniedException.class)

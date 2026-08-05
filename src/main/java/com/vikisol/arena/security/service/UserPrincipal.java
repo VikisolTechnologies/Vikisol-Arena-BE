@@ -47,6 +47,11 @@ public class UserPrincipal implements UserDetails {
         return true;
     }
 
+    // Lockout (checklist §1) is enforced explicitly in AuthService.signIn() BEFORE
+    // authenticationManager.authenticate() is ever called, with its own user-facing message
+    // ("try again in N minutes") - not wired through this UserDetails contract, since
+    // DaoAuthenticationProvider would throw a generic LockedException here instead, losing that
+    // message. Always true is correct for this class's actual role in the auth flow.
     @Override
     public boolean isAccountNonLocked() {
         return true;

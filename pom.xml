@@ -81,6 +81,32 @@
             <artifactId>spring-boot-starter-actuator</artifactId>
         </dependency>
 
+        <!-- Refresh-token/jti-denylist storage (RefreshTokenService, TokenDenylistService) and
+             the Redis-backed rate limiter (RateLimitFilter) - see DECISIONS.md. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+        </dependency>
+
+        <!-- Replaces ddl-auto:update - see DECISIONS.md's pg_dump-baseline entry. Postgres
+             support was split out of flyway-core starting Flyway 10. -->
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-core</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.flywaydb</groupId>
+            <artifactId>flyway-database-postgresql</artifactId>
+        </dependency>
+
+        <!-- Dormant unless SENTRY_DSN is set (matches the Noop-provider pattern already used for
+             email/WhatsApp/Teams - see IntegrationProviderConfig). -->
+        <dependency>
+            <groupId>io.sentry</groupId>
+            <artifactId>sentry-spring-boot-starter-jakarta</artifactId>
+            <version>7.16.0</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
