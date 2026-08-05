@@ -3,6 +3,12 @@ server:
   servlet:
     # Versioned so a future /api/v2 can exist without breaking existing clients (mirrors HRLMS-BE).
     context-path: /api/v1
+  # Railway terminates TLS at its edge and forwards plain HTTP with X-Forwarded-Proto/-For to
+  # this app - without this, request.isSecure() (HSTS header emission) and
+  # request.getRemoteAddr() (rate-limit IP keying) would both see the proxy, not the real
+  # client. "framework" lets Spring itself apply the forwarded headers rather than requiring a
+  # container-level (Tomcat valve) config.
+  forward-headers-strategy: framework
 
 spring:
   application:

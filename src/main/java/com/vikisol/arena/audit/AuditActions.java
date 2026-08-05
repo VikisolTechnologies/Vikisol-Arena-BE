@@ -24,4 +24,7 @@ public final class AuditActions {
     public static final String MODERATION_DISMISSED = "moderation.dismissed";
     public static final String SUBSCRIPTION_ADJUSTED = "subscription.adjusted";
     public static final String FLAG_TOGGLED = "flag.toggled";
+    public static final String CONSENT_CHANGED = "consent.changed";
+    public static final String DATA_EXPORTED = "data.exported";
+    public static final String ACCOUNT_DELETED = "account.deleted";
 }

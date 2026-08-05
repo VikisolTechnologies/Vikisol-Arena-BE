@@ -23,16 +23,17 @@ import java.util.Base64;
 @Slf4j
 public class FileSigningService {
 
-    private static final long EXPIRY_SECONDS = 600; // 10 minutes - long enough for a page load + resume viewing
-
-    @Value("${app.file-signing.secret:${app.jwt.secret:local-dev-only-arena-secret-do-not-use-in-any-deployed-environment-change-me}}")
+    @Value("${app.storage.signing-secret}")
     private String secret;
+
+    @Value("${app.storage.signed-url-ttl-ms}")
+    private long ttlMs;
 
     /** Appends `?exp=...&sig=...` to an already-built `/files/...` URL. No-op on blank input. */
     public String sign(String url) {
         if (url == null || url.isBlank()) return url;
         String path = extractPath(url);
-        long exp = Instant.now().getEpochSecond() + EXPIRY_SECONDS;
+        long exp = Instant.now().getEpochSecond() + (ttlMs / 1000);
         String sig = hmac(path, exp);
         String separator = url.contains("?") ? "&" : "?";
         return url + separator + "exp=" + exp + "&sig=" + sig;

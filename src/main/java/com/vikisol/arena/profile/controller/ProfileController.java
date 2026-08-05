@@ -2,6 +2,7 @@ package com.vikisol.arena.profile.controller;
 
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.profile.dto.CandidateDataExport;
 import com.vikisol.arena.profile.dto.CandidateProfileResponse;
 import com.vikisol.arena.profile.dto.ConsentDto;
 import com.vikisol.arena.profile.dto.UpdateAutonomyRequest;
@@ -10,11 +11,14 @@ import com.vikisol.arena.profile.dto.UpdateSkillsRequest;
 import com.vikisol.arena.profile.entity.AutonomyLevel;
 import com.vikisol.arena.profile.service.CandidateProfileService;
 import com.vikisol.arena.security.service.UserPrincipal;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -62,5 +66,26 @@ public class ProfileController {
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody UpdateAutonomyRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(
                 profileService.updateAutonomy(principal.getId(), AutonomyLevel.fromWireValue(request.autonomy()))));
+    }
+
+    // DPDP self-service data rights (ARENA-SHIP-IT.md #5).
+    @GetMapping("/me/export")
+    public ResponseEntity<ApiResponse<CandidateDataExport>> exportMyData(@AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.exportMyData(principal.getId())));
+    }
+
+    @DeleteMapping("/me")
+    public ResponseEntity<ApiResponse<Void>> deleteMyAccount(
+            @AuthenticationPrincipal UserPrincipal principal, HttpServletRequest request) {
+        profileService.deleteMyAccount(principal.getId(), extractBearerToken(request));
+        return ResponseEntity.ok(ApiResponse.ok("Your account and personal data have been erased", null));
+    }
+
+    private String extractBearerToken(HttpServletRequest request) {
+        String bearer = request.getHeader(HttpHeaders.AUTHORIZATION);
+        if (StringUtils.hasText(bearer) && bearer.startsWith("Bearer ")) {
+            return bearer.substring(7);
+        }
+        return null;
     }
 }

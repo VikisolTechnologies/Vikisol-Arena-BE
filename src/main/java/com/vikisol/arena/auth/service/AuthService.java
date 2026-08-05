@@ -124,6 +124,12 @@ public class AuthService {
             long minutesLeft = Math.max(1, Duration.between(Instant.now(), user.getLockedUntil()).toMinutes());
             throw new BadRequestException("Too many failed attempts. Try again in " + minutesLeft + " minute(s).");
         }
+        // DPDP right-to-erasure (ProfileController's DELETE /me) - a deleted account can never
+        // sign in again, checked before authenticate() so this doesn't also count as/trigger a
+        // failed-attempt lockout increment for what is really "this account no longer exists."
+        if (user != null && user.getDeletedAt() != null) {
+            throw new BadCredentialsException("Invalid email or password");
+        }
 
         try {
             authenticationManager.authenticate(

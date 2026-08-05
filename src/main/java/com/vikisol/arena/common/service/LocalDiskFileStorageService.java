@@ -71,6 +71,17 @@ public class LocalDiskFileStorageService implements FileStorageService {
         }
     }
 
+    @Override
+    public void delete(String url) {
+        if (url == null || !url.startsWith(publicBaseUrl)) return;
+        try {
+            String relative = url.substring(publicBaseUrl.length()).replaceFirst("^/", "");
+            Files.deleteIfExists(Path.of(rootDir, relative));
+        } catch (IOException e) {
+            log.warn("Could not delete file at {}: {}", url, e.getMessage());
+        }
+    }
+
     private String sanitize(String value) {
         if (value == null || value.isBlank()) return "unspecified";
         String cleaned = value.replaceAll("[^a-zA-Z0-9_-]", "");

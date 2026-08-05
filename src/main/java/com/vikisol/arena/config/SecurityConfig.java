@@ -2,6 +2,7 @@ package com.vikisol.arena.config;
 
 import com.vikisol.arena.security.jwt.JwtAuthenticationEntryPoint;
 import com.vikisol.arena.security.jwt.JwtAuthenticationFilter;
+import com.vikisol.arena.security.ratelimit.RateLimitFilter;
 import com.vikisol.arena.security.service.CustomUserDetailsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +31,7 @@ public class SecurityConfig {
 
     private final JwtAuthenticationEntryPoint authenticationEntryPoint;
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final RateLimitFilter rateLimitFilter;
     private final CustomUserDetailsService userDetailsService;
 
     @Value("${app.cors.allowed-origins:http://localhost:3000}")
@@ -47,6 +49,19 @@ public class SecurityConfig {
                     return config;
                 }))
                 .csrf(csrf -> csrf.disable())
+                // PRODUCTION-CHECKLIST.md security headers. X-Content-Type-Options: nosniff and
+                // X-Frame-Options: DENY are Spring Security defaults already; CSP is not, and is
+                // added explicitly. This is a pure JSON API (Swagger UI is disabled outside dev -
+                // see application.yml's springdoc.api-docs.enabled), so a blanket-deny default
+                // is safe: there's no first-party HTML/JS for the API itself to serve. HSTS is
+                // conditional on the request already being HTTPS (Spring's own behavior) - see
+                // server.forward-headers-strategy in application.yml for why that's still
+                // correct behind Railway's TLS-terminating proxy.
+                .headers(headers -> headers
+                        .contentSecurityPolicy(csp -> csp.policyDirectives(
+                                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"))
+                        .httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).maxAgeInSeconds(31536000))
+                )
                 .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
@@ -64,7 +79,10 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())
-                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
+                .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
+                // After JWT auth so an authenticated bucket can key by user id, not just IP -
+                // see RateLimitFilter's own comment.
+                .addFilterAfter(rateLimitFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }

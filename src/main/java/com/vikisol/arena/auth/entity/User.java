@@ -59,4 +59,9 @@ public class User extends BaseEntity {
     private int failedLoginAttempts = 0;
 
     private Instant lockedUntil;
+
+    // DPDP right-to-erasure (see ProfileController's DELETE /me and V2__account_deletion.sql).
+    // Null = active account. Set once, never cleared - a real account deletion, not a
+    // reactivatable suspension (that's TenantStatus.SUSPENDED at the tenant level instead).
+    private Instant deletedAt;
 }

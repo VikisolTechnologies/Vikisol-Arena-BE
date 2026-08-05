@@ -15,6 +15,10 @@ public interface FileStorageService {
      */
     StoredFile store(MultipartFile file, String module, String entityId, String documentType);
 
+    /** Best-effort - used by DPDP right-to-erasure. Never throws; a missing/already-gone file
+     * is not an error the caller needs to handle. */
+    void delete(String url);
+
     record StoredFile(String url, String fileName, long sizeBytes) {
     }
 }
