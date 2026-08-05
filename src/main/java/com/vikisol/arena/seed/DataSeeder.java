@@ -100,7 +100,16 @@ public class DataSeeder implements ApplicationRunner {
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
-        if (userRepository.count() > 0) {
+        // Was userRepository.count() > 0 - broke on a genuinely fresh database (first hit
+        // deploying to Railway staging) because RoleMigration.backfillDemoAccounts() runs first
+        // (@Order(HIGHEST_PRECEDENCE)) and unconditionally seeds exactly one user, the platform
+        // admin, regardless of whether DataSeeder has ever run. That made this guard see
+        // count()==1 and skip all the rich demo data (companies, candidates, postings,
+        // applications, interviews, marketplace) - it only ever worked locally because local dev
+        // always ran against an already-populated-from-before-this-suite database, never a truly
+        // empty one. EnterpriseProfile is something only DataSeeder itself ever creates, so it
+        // can't be tripped by RoleMigration's unrelated seeding.
+        if (enterpriseProfileRepository.count() > 0) {
             log.info("Seed data already present - skipping DataSeeder");
             return;
         }
