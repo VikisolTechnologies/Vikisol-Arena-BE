@@ -1,0 +1,7 @@
+target/
+uploads/
+*.log
+.git/
+.gitignore
+scripts/
+README.md
