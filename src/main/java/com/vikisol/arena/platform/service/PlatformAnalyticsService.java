@@ -1,9 +1,7 @@
 package com.vikisol.arena.platform.service;
 
 import com.vikisol.arena.applications.repository.ApplicationRepository;
-import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
-import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.entity.TenantStatus;
 import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
 import com.vikisol.arena.interviews.repository.InterviewRepository;
@@ -16,14 +14,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
-import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-// PA5 (platform analytics). Tenant/user breakdowns are computed in-memory over findAll() rather
-// than group-by queries - at this scale (a demo-stage platform, not millions of tenants) that's
-// simpler to read and verify than several hand-written aggregate queries, matching
-// AdminDashboardService's existing "stream over what's already loaded" style for CA1.
+// PA5 (platform analytics). Tenant/user breakdowns are SQL COUNT/GROUP BY aggregates - this used
+// to load every tenant and every user row into memory (EnterpriseProfileRepository.findAll(),
+// UserRepository.findAll()) just to count them in Java, on every dashboard load.
 @Service
 @RequiredArgsConstructor
 public class PlatformAnalyticsService {
@@ -36,14 +32,12 @@ public class PlatformAnalyticsService {
 
     @Transactional(readOnly = true)
     public PlatformAnalyticsResponse getAnalytics() {
-        List<EnterpriseProfile> tenants = enterpriseProfileRepository.findAll();
-        List<User> users = userRepository.findAll();
+        Map<String, Long> tenantsByPlan = enterpriseProfileRepository.countByPlanGrouped().stream()
+                .collect(Collectors.toMap(pc -> pc.getPlan().wireValue(), EnterpriseProfileRepository.PlanCount::getCount));
+        Map<String, Long> usersByRole = userRepository.countByRoleGrouped().stream()
+                .collect(Collectors.toMap(rc -> rc.getRole().wireValue(), UserRepository.RoleCount::getCount));
 
-        Map<String, Long> tenantsByPlan = tenants.stream()
-                .collect(Collectors.groupingBy(t -> t.getPlan().wireValue(), Collectors.counting()));
-        Map<String, Long> usersByRole = users.stream()
-                .collect(Collectors.groupingBy(u -> u.getRole().wireValue(), Collectors.counting()));
-        long tenantsSuspended = tenants.stream().filter(t -> t.getStatus() == TenantStatus.SUSPENDED).count();
+        long tenantsSuspended = enterpriseProfileRepository.countByStatus(TenantStatus.SUSPENDED);
 
         Instant sevenDaysAgo = Instant.now().minus(7, ChronoUnit.DAYS);
         long newTenants7d = enterpriseProfileRepository.countByCreatedAtAfter(sevenDaysAgo);
@@ -52,8 +46,8 @@ public class PlatformAnalyticsService {
         long postingsOpen = jobPostingRepository.countByStatus(PostingStatus.OPEN);
 
         return new PlatformAnalyticsResponse(
-                tenants.size(), tenantsSuspended, tenantsByPlan,
-                users.size(), usersByRole,
+                (int) enterpriseProfileRepository.count(), tenantsSuspended, tenantsByPlan,
+                (int) userRepository.count(), usersByRole,
                 (int) jobPostingRepository.count(), postingsOpen,
                 (int) applicationRepository.count(), (int) interviewRepository.count(),
                 newTenants7d, newUsers7d);

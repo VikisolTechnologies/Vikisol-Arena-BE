@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -16,6 +17,11 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByEmailIgnoreCase(String email);
     boolean existsByEmailIgnoreCase(String email);
     long countByCreatedAtAfter(Instant since);
+
+    // PA5 (platform analytics): user-count-by-role breakdown as a SQL GROUP BY instead of
+    // PlatformAnalyticsService loading every user row into memory and counting in Java.
+    @Query("select u.role as role, count(u) as count from User u group by u.role")
+    List<RoleCount> countByRoleGrouped();
 
     // PA3 (global user search). `q` is always a non-null, possibly-empty string from the
     // service layer (see EnterpriseProfileRepository.search()'s identical comment); `role`
@@ -27,4 +33,9 @@ public interface UserRepository extends JpaRepository<User, UUID> {
             order by u.createdAt desc
             """)
     Page<User> search(@Param("q") String q, @Param("role") Role role, Pageable pageable);
+
+    interface RoleCount {
+        Role getRole();
+        long getCount();
+    }
 }

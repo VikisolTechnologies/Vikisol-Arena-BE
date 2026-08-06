@@ -5,6 +5,7 @@ import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.common.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.BatchSize;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -23,7 +24,11 @@ public class Interview extends BaseEntity {
     @JoinColumn(name = "application_id", nullable = false, unique = true)
     private Application application;
 
+    // EAGER (every response DTO needs it) but @BatchSize keeps a multi-row load (e.g.
+    // getMyAssignedInterviews) from issuing one secondary select per interview - up to this many
+    // interviews' proposedSlots get pulled in a single `where interview_id in (...)` query instead.
     @OneToMany(mappedBy = "interview", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.EAGER)
+    @BatchSize(size = 25)
     @Builder.Default
     private List<InterviewSlot> proposedSlots = new ArrayList<>();
 

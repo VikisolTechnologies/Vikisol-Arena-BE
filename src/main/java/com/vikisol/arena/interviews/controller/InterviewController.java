@@ -1,6 +1,7 @@
 package com.vikisol.arena.interviews.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.interviews.dto.AssignHiringManagerRequest;
 import com.vikisol.arena.interviews.dto.ConfirmSlotRequest;
 import com.vikisol.arena.interviews.dto.HiringManagerInterviewResponse;
@@ -11,12 +12,13 @@ import com.vikisol.arena.interviews.service.InterviewService;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -65,11 +67,20 @@ public class InterviewController {
         return ResponseEntity.ok(ApiResponse.ok(interviewService.submitFeedback(principal.getId(), interviewId, request)));
     }
 
-    // HM1: "My interviews" - only ones assigned to the caller.
+    // HM1: "My interviews" - only ones assigned to the caller. Paginated (page/size, same
+    // convention as ProjectController) - previously an unbounded List, see
+    // InterviewService.getMyAssignedInterviews()'s comment. NOTE: this changes the response body
+    // from a bare JSON array to a PagedResponse<> wrapper (content/page/size/totalElements/
+    // totalPages/last) - matches every other paginated list endpoint in this API, but any existing
+    // frontend caller of GET /interviews/mine expecting a bare array will need updating.
     @GetMapping("/mine")
     @PreAuthorize("hasRole('HIRING_MANAGER')")
-    public ResponseEntity<ApiResponse<List<HiringManagerInterviewResponse>>> mine(@AuthenticationPrincipal UserPrincipal principal) {
-        return ResponseEntity.ok(ApiResponse.ok(interviewService.getMyAssignedInterviews(principal.getId())));
+    public ResponseEntity<ApiResponse<PagedResponse<HiringManagerInterviewResponse>>> mine(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return ResponseEntity.ok(ApiResponse.ok(interviewService.getMyAssignedInterviews(principal.getId(), pageable)));
     }
 
     @GetMapping("/mine/{interviewId}")

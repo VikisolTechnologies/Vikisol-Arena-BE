@@ -2,7 +2,8 @@ package com.vikisol.arena.enterprise.service;
 
 import com.vikisol.arena.audit.AuditActions;
 import com.vikisol.arena.audit.AuditEventRepository;
-import com.vikisol.arena.audit.entity.AuditEvent;
+import com.vikisol.arena.audit.AuditEventRepository.AuditActionCount;
+import com.vikisol.arena.audit.AuditEventRepository.AuditActionTimestamp;
 import com.vikisol.arena.enterprise.dto.admin.AdminDashboardResponse;
 import com.vikisol.arena.enterprise.entity.CreditLedgerEntry;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
@@ -17,7 +18,9 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * CA1 (Admin dashboard): per-recruiter activity + team totals + credit balance/burn, derived
@@ -40,9 +43,17 @@ public class AdminDashboardService {
         Instant since = Instant.now().minus(rangeDays, ChronoUnit.DAYS);
 
         List<Membership> members = membershipRepository.findByTenantIdAndStatus(tenant.getId(), MembershipStatus.ACTIVE);
+        List<UUID> actorIds = members.stream().map(m -> m.getUser().getId()).toList();
+
+        // Two SQL aggregate queries for the whole team at once (COUNT/GROUP BY, and a targeted
+        // timestamp-only fetch for the one action that needs actual times, not just a count)
+        // instead of one full unindexed-in-Java query per team member - see AuditEventRepository.
+        Map<UUID, Map<String, Long>> countsByActor = batchActionCounts(tenant.getId(), actorIds, since);
+        Map<UUID, List<Instant>> stageMoveTimesByActor = batchStageMoveTimestamps(tenant.getId(), actorIds, since);
 
         List<AdminDashboardResponse.RecruiterActivity> activity = members.stream()
-                .map(m -> activityFor(tenant.getId(), m, since))
+                .map(m -> activityFor(m, countsByActor.getOrDefault(m.getUser().getId(), Map.of()),
+                        stageMoveTimesByActor.getOrDefault(m.getUser().getId(), List.of())))
                 .toList();
 
         int postings = activity.stream().mapToInt(AdminDashboardResponse.RecruiterActivity::postings).sum();
@@ -63,20 +74,36 @@ public class AdminDashboardService {
                 creditsSpentInRange);
     }
 
-    private AdminDashboardResponse.RecruiterActivity activityFor(UUID tenantId, Membership member, Instant since) {
+    // One query for every member's per-action counts across the whole team (instead of one query
+    // per member, each pulling and counting full audit rows in Java).
+    private Map<UUID, Map<String, Long>> batchActionCounts(UUID tenantId, List<UUID> actorIds, Instant since) {
+        if (actorIds.isEmpty()) return Map.of();
+        return auditEventRepository.countActionsByActorIn(tenantId, actorIds, since).stream()
+                .collect(Collectors.groupingBy(AuditActionCount::getActorId,
+                        Collectors.toMap(AuditActionCount::getAction, AuditActionCount::getCount)));
+    }
+
+    // One query for every member's STAGE_MOVED timestamps across the whole team (instead of one
+    // query per member) - avgHoursBetweenStageMoves needs the actual times, not just a count.
+    private Map<UUID, List<Instant>> batchStageMoveTimestamps(UUID tenantId, List<UUID> actorIds, Instant since) {
+        if (actorIds.isEmpty()) return Map.of();
+        return auditEventRepository.findActionTimestampsByActorIn(tenantId, actorIds, AuditActions.STAGE_MOVED, since).stream()
+                .collect(Collectors.groupingBy(AuditActionTimestamp::getActorId,
+                        Collectors.mapping(AuditActionTimestamp::getCreatedAt, Collectors.toList())));
+    }
+
+    private AdminDashboardResponse.RecruiterActivity activityFor(Membership member, Map<String, Long> counts, List<Instant> stageMoveTimesUnsorted) {
         UUID actorId = member.getUser().getId();
-        List<AuditEvent> events = auditEventRepository.findByTenantIdAndActorIdAndCreatedAtAfter(tenantId, actorId, since);
 
-        int postings = countAction(events, AuditActions.POSTING_CREATED);
-        int unlocks = countAction(events, AuditActions.CANDIDATE_UNLOCKED);
-        int interviews = countAction(events, AuditActions.INTERVIEW_SCHEDULED);
-        int messages = countAction(events, AuditActions.MESSAGE_SENT);
+        int postings = counts.getOrDefault(AuditActions.POSTING_CREATED, 0L).intValue();
+        int unlocks = counts.getOrDefault(AuditActions.CANDIDATE_UNLOCKED, 0L).intValue();
+        int interviews = counts.getOrDefault(AuditActions.INTERVIEW_SCHEDULED, 0L).intValue();
+        int messages = counts.getOrDefault(AuditActions.MESSAGE_SENT, 0L).intValue();
 
-        List<Instant> stageMoveTimes = events.stream()
-                .filter(e -> e.getAction().equals(AuditActions.STAGE_MOVED))
-                .map(AuditEvent::getCreatedAt)
-                .sorted()
-                .toList();
+        // Query already orders by createdAt, but re-sort defensively - this list is tiny (one
+        // member's stage moves in range), so it costs nothing to not depend on stream-collector
+        // ordering guarantees.
+        List<Instant> stageMoveTimes = stageMoveTimesUnsorted.stream().sorted().toList();
 
         Double avgGapHours = null;
         if (stageMoveTimes.size() > 1) {
@@ -87,9 +114,5 @@ public class AdminDashboardService {
         return new AdminDashboardResponse.RecruiterActivity(
                 actorId.toString(), member.getUser().getName(), member.getUser().getRole().wireValue(),
                 postings, unlocks, stageMoveTimes.size(), interviews, messages, avgGapHours);
-    }
-
-    private int countAction(List<AuditEvent> events, String action) {
-        return (int) events.stream().filter(e -> e.getAction().equals(action)).count();
     }
 }

@@ -26,7 +26,9 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -57,27 +59,54 @@ public class ProjectService {
 
     @Transactional(readOnly = true)
     public PagedResponse<ProjectResponse> getOpenProjects(Pageable pageable, UUID viewingUserId) {
-        return PagedResponse.of(projectRepository.findByStatus(ProjectStatus.OPEN, pageable),
-                p -> mapper.toResponse(p, bidRepository.findByProjectIdOrderByAmountDesc(p.getId()), List.of(), viewingUserId));
+        var page = projectRepository.findByStatus(ProjectStatus.OPEN, pageable);
+        var bidsByProject = batchBidsForProjects(page.getContent());
+        var bidderProfiles = batchBidderProfiles(bidsByProject.values().stream().flatMap(List::stream).toList());
+        return PagedResponse.of(page,
+                p -> mapper.toResponse(p, bidsByProject.getOrDefault(p.getId(), List.of()), List.of(), viewingUserId, bidderProfiles));
     }
 
     @Transactional(readOnly = true)
     public ProjectResponse getProject(UUID id, UUID viewingUserId) {
         Project project = requireProject(id);
-        return mapper.toResponse(project, bidRepository.findByProjectIdOrderByAmountDesc(id),
-                milestoneRepository.findByProjectIdOrderByOrderIndexAsc(id), viewingUserId);
+        List<Bid> bids = bidRepository.findByProjectIdOrderByAmountDesc(id);
+        return mapper.toResponse(project, bids,
+                milestoneRepository.findByProjectIdOrderByOrderIndexAsc(id), viewingUserId, batchBidderProfiles(bids));
     }
 
     @Transactional(readOnly = true)
     public PagedResponse<ProjectResponse> getMyProjects(UUID userId, Pageable pageable) {
-        return PagedResponse.of(projectRepository.findByPostedByUserId(userId, pageable),
-                p -> mapper.toResponse(p, bidRepository.findByProjectIdOrderByAmountDesc(p.getId()),
-                        milestoneRepository.findByProjectIdOrderByOrderIndexAsc(p.getId()), userId));
+        var page = projectRepository.findByPostedByUserId(userId, pageable);
+        var bidsByProject = batchBidsForProjects(page.getContent());
+        var bidderProfiles = batchBidderProfiles(bidsByProject.values().stream().flatMap(List::stream).toList());
+        return PagedResponse.of(page,
+                p -> mapper.toResponse(p, bidsByProject.getOrDefault(p.getId(), List.of()),
+                        milestoneRepository.findByProjectIdOrderByOrderIndexAsc(p.getId()), userId, bidderProfiles));
     }
 
     @Transactional(readOnly = true)
     public PagedResponse<BidResponse> getMyBids(UUID userId, Pageable pageable) {
-        return PagedResponse.of(bidRepository.findByBidderUserIdOrderBySubmittedAtDesc(userId, pageable), mapper::toResponse);
+        var page = bidRepository.findByBidderUserIdOrderBySubmittedAtDesc(userId, pageable);
+        var bidderProfiles = batchBidderProfiles(page.getContent());
+        return PagedResponse.of(page, b -> mapper.toResponse(b, bidderProfiles));
+    }
+
+    // One query for all bids across a page of projects (instead of one query per project), and
+    // grouped by project id so the mapper never needs to touch the repository per row.
+    private Map<UUID, List<Bid>> batchBidsForProjects(List<Project> projects) {
+        if (projects.isEmpty()) return Map.of();
+        List<UUID> projectIds = projects.stream().map(Project::getId).toList();
+        return bidRepository.findByProjectIdInOrderByAmountDesc(projectIds).stream()
+                .collect(Collectors.groupingBy(b -> b.getProject().getId()));
+    }
+
+    // One query for every bidder's candidate profile across a set of bids (instead of one query
+    // per bid) - the display-name/avatar-emoji override in ProjectMapper needs these.
+    private Map<UUID, CandidateProfile> batchBidderProfiles(List<Bid> bids) {
+        if (bids.isEmpty()) return Map.of();
+        List<UUID> bidderIds = bids.stream().map(b -> b.getBidderUser().getId()).distinct().toList();
+        return candidateProfileRepository.findByUserIdIn(bidderIds).stream()
+                .collect(Collectors.toMap(c -> c.getUser().getId(), c -> c));
     }
 
     @Transactional
@@ -152,7 +181,7 @@ public class ProjectService {
         milestoneRepository.saveAll(milestones);
 
         notificationService.notifyBidAwarded(awarded);
-        return mapper.toResponse(project, bids, milestones, userId);
+        return mapper.toResponse(project, bids, milestones, userId, batchBidderProfiles(bids));
     }
 
     @Transactional

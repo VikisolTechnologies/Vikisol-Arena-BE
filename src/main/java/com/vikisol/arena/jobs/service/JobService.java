@@ -13,6 +13,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -27,8 +28,15 @@ public class JobService {
     public PagedResponse<JobResponse> getOpenJobs(Pageable pageable, UUID viewingUserId) {
         CandidateProfile candidate = viewingUserId == null ? null
                 : candidateProfileRepository.findByUserId(viewingUserId).orElse(null);
-        return PagedResponse.of(jobPostingRepository.findByStatus(PostingStatus.OPEN, pageable),
-                job -> jobMapper.toResponse(job, candidate));
+        var page = jobPostingRepository.findByStatus(PostingStatus.OPEN, pageable);
+        // One query for every posting's skills across the page (instead of one query per posting)
+        // - see JobPostingRepository.findByIdInFetchingSkills for why this is a separate batched
+        // call rather than folded into the findByStatus @EntityGraph.
+        List<UUID> jobIds = page.getContent().stream().map(JobPosting::getId).toList();
+        if (!jobIds.isEmpty()) {
+            jobPostingRepository.findByIdInFetchingSkills(jobIds);
+        }
+        return PagedResponse.of(page, job -> jobMapper.toResponse(job, candidate));
     }
 
     @Transactional(readOnly = true)

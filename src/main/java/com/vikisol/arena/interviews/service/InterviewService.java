@@ -11,6 +11,7 @@ import com.vikisol.arena.applications.service.ApplicationService;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
+import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
@@ -31,6 +32,7 @@ import com.vikisol.arena.interviews.repository.InterviewRepository;
 import com.vikisol.arena.notifications.service.NotificationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -72,12 +74,14 @@ public class InterviewService {
 
     // HM1: "My interviews" - only ones specifically assigned to this hiring manager, never the
     // tenant's whole pipeline (that's what distinguishes hiring_manager from recruiter/
-    // company_admin - see HM4, DECISIONS.md).
+    // company_admin - see HM4, DECISIONS.md). Was an unbounded List - now paginated like every
+    // other list endpoint in this codebase (see InterviewController for the page/size wiring),
+    // and the underlying query fetches all four associations toHiringManagerResponse() reads in
+    // one go instead of once per row - see InterviewRepository.findByAssignedHiringManagerId().
     @Transactional(readOnly = true)
-    public List<HiringManagerInterviewResponse> getMyAssignedInterviews(UUID hiringManagerUserId) {
-        return interviewRepository.findByAssignedHiringManagerIdOrderByCreatedAtDesc(hiringManagerUserId).stream()
-                .map(this::toHiringManagerResponse)
-                .toList();
+    public PagedResponse<HiringManagerInterviewResponse> getMyAssignedInterviews(UUID hiringManagerUserId, Pageable pageable) {
+        return PagedResponse.of(interviewRepository.findByAssignedHiringManagerId(hiringManagerUserId, pageable),
+                this::toHiringManagerResponse);
     }
 
     @Transactional(readOnly = true)
@@ -149,7 +153,17 @@ public class InterviewService {
         return toResponse(interview);
     }
 
-    @Transactional
+    // Deliberately NOT @Transactional: this method spans two synchronous external HTTP calls
+    // (meeting-link/calendar creation, then a confirmation email) that can together take up to
+    // ~50s under a slow provider. Previously the whole method - DB reads/writes included - ran
+    // inside one @Transactional block, holding a pooled DB connection checked out for that entire
+    // span; under load with several confirmations in flight that starves the pool for every other
+    // request. The DB phase below now runs to completion and commits (each JpaRepository call is
+    // transactional on its own - see SimpleJpaRepository - exactly like every other bare
+    // repository call already made outside an explicit @Transactional elsewhere in this codebase)
+    // *before* either slow external call starts, so no connection sits idle-in-transaction while
+    // waiting on Graph/Resend. Both external calls keep their existing try/catch: a provider
+    // failure must never block the confirmation itself (same resilience contract as before).
     public InterviewResponse confirmSlot(UUID actingUserId, UUID interviewId, UUID slotId) {
         Interview interview = interviewRepository.findById(interviewId)
                 .orElseThrow(() -> new ResourceNotFoundException("Interview not found: " + interviewId));
@@ -161,12 +175,15 @@ public class InterviewService {
 
         interview.setConfirmedSlotId(slotId);
         interview.setStatus(InterviewStatus.CONFIRMED);
+        interview = interviewRepository.save(interview);
 
-        // Best-effort - a meeting-link/calendar failure must never block the confirmation itself
-        // (same resilience contract HRLMS-BE applies to its own Microsoft 365 calls: the interview
-        // still gets confirmed even if Graph is unreachable). Runs through NoopMeetingLinkProvider
-        // today (no TEAMS_* env vars configured), which returns the same
-        // `https://meet.arena.dev/{id}` placeholder the mock already used - non-breaking.
+        notificationService.notifyInterviewConfirmed(interview.getApplication());
+        activityService.log(interview.getApplication().getCandidate().getUser(), ActivityEventType.INTERVIEW_CONFIRMED,
+                "Interview confirmed", "Confirmed an interview slot for " + interview.getApplication().getJobPosting().getTitle() + ".",
+                interview.getApplication().getJobPosting().getId(), null, false);
+
+        // --- DB phase committed above; everything from here on is a slow external call (or
+        // persisting its result) and intentionally runs with no open transaction. ---
         Application application = interview.getApplication();
         List<String> attendeeEmails = List.of(
                 application.getCandidate().getUser().getEmail(),
@@ -179,16 +196,10 @@ public class InterviewService {
                     confirmedSlot.getDurationMinutes(),
                     attendeeEmails);
             interview.setMeetingLink(meetingLink);
+            interview = interviewRepository.save(interview);
         } catch (Exception e) {
             log.warn("Meeting-link creation failed for interview {}: {}", interview.getId(), e.getMessage());
         }
-
-        interview = interviewRepository.save(interview);
-
-        notificationService.notifyInterviewConfirmed(interview.getApplication());
-        activityService.log(interview.getApplication().getCandidate().getUser(), ActivityEventType.INTERVIEW_CONFIRMED,
-                "Interview confirmed", "Confirmed an interview slot for " + interview.getApplication().getJobPosting().getTitle() + ".",
-                interview.getApplication().getJobPosting().getId(), null, false);
 
         try {
             emailProvider.sendEmail(EmailMessage.to(

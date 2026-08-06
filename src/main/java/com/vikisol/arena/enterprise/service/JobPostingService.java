@@ -21,6 +21,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.UUID;
 
 @Service
@@ -36,7 +37,15 @@ public class JobPostingService {
     @Transactional(readOnly = true)
     public PagedResponse<JobPostingResponse> getMyPostings(UUID userId, Pageable pageable) {
         EnterpriseProfile enterprise = requireEnterprise(userId);
-        return PagedResponse.of(jobPostingRepository.findByEnterprise(enterprise, pageable), mapper::toResponse);
+        var page = jobPostingRepository.findByEnterprise(enterprise, pageable);
+        // One query for every posting's skills across the page (instead of one query per posting)
+        // - see JobPostingRepository.findByIdInFetchingSkills for why this is a separate batched
+        // call rather than an @EntityGraph on findByEnterprise itself.
+        List<UUID> jobIds = page.getContent().stream().map(JobPosting::getId).toList();
+        if (!jobIds.isEmpty()) {
+            jobPostingRepository.findByIdInFetchingSkills(jobIds);
+        }
+        return PagedResponse.of(page, mapper::toResponse);
     }
 
     // IDOR fix (found via the ARENA-SHIP-IT.md endpoint audit): this was previously a bare
