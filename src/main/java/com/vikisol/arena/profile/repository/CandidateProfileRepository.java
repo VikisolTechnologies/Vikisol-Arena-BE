@@ -29,6 +29,15 @@ public interface CandidateProfileRepository extends JpaRepository<CandidateProfi
     // Hibernate paginate in memory (loads the full unbounded result set, then slices it in Java) -
     // worse than the per-row lazy loads this is meant to fix. See the IN-batched fetches below,
     // called once per page after this query returns, for the actual N+1 fix.
+    @Query("""
+            select c from CandidateProfile c
+            where c.consent.searchableByEnterprises = true
+              and (:industry is null or c.industry = :industry)
+              and (:remoteOnly = false or c.remote = true)
+              and (:text = '' or
+                   lower(c.title) like concat('%', :text, '%') or
+                   lower(c.location) like concat('%', :text, '%'))
+            """)
     Page<CandidateProfile> search(@Param("text") String text, @Param("industry") Industry industry,
                                    @Param("remoteOnly") boolean remoteOnly, Pageable pageable);
 
