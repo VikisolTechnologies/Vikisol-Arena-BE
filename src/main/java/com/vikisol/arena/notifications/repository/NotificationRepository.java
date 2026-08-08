@@ -12,7 +12,6 @@ import java.util.UUID;
 
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
     Page<Notification> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
-    long countByUserIdAndReadFalse(UUID userId);
 
     // Bulk "mark all read" in one statement, rather than the frontend firing N PUT
     // /notifications/{id}/read requests for a "mark all read" action.
