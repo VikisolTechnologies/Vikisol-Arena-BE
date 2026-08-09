@@ -37,8 +37,19 @@ import com.vikisol.arena.marketplace.repository.BidRepository;
 import com.vikisol.arena.marketplace.repository.MilestoneRepository;
 import com.vikisol.arena.marketplace.repository.ProjectRepository;
 import com.vikisol.arena.matching.ScoringService;
+import com.vikisol.arena.follows.entity.Follow;
+import com.vikisol.arena.follows.repository.FollowRepository;
 import com.vikisol.arena.notifications.entity.NotificationType;
 import com.vikisol.arena.notifications.service.NotificationService;
+import com.vikisol.arena.posts.entity.Post;
+import com.vikisol.arena.posts.entity.PostAudience;
+import com.vikisol.arena.posts.entity.PostIntentType;
+import com.vikisol.arena.posts.entity.PostJoinRequest;
+import com.vikisol.arena.posts.entity.PostJoinStatus;
+import com.vikisol.arena.posts.entity.PostStatus;
+import com.vikisol.arena.posts.entity.PostVisibility;
+import com.vikisol.arena.posts.repository.PostJoinRequestRepository;
+import com.vikisol.arena.posts.repository.PostRepository;
 import com.vikisol.arena.profile.entity.AutonomyLevel;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.entity.CandidateSkill;
@@ -46,6 +57,13 @@ import com.vikisol.arena.profile.entity.ConsentSettings;
 import com.vikisol.arena.profile.entity.Industry;
 import com.vikisol.arena.profile.entity.OpenTo;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
+import com.vikisol.arena.rooms.entity.Room;
+import com.vikisol.arena.rooms.entity.RoomMember;
+import com.vikisol.arena.rooms.entity.RoomMemberRole;
+import com.vikisol.arena.rooms.entity.RoomMessage;
+import com.vikisol.arena.rooms.repository.RoomMemberRepository;
+import com.vikisol.arena.rooms.repository.RoomMessageRepository;
+import com.vikisol.arena.rooms.repository.RoomRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.ApplicationArguments;
@@ -96,6 +114,12 @@ public class DataSeeder implements ApplicationRunner {
     private final ScoringService scoringService;
     private final PasswordEncoder passwordEncoder;
     private final JdbcTemplate jdbcTemplate;
+    private final PostRepository postRepository;
+    private final PostJoinRequestRepository postJoinRequestRepository;
+    private final RoomRepository roomRepository;
+    private final RoomMemberRepository roomMemberRepository;
+    private final RoomMessageRepository roomMessageRepository;
+    private final FollowRepository followRepository;
 
     @Override
     @Transactional
@@ -122,6 +146,7 @@ public class DataSeeder implements ApplicationRunner {
         seedMarketplace(companies, candidates);
         seedEnterpriseEngagement(companies.get(0), candidates);
         seedDemoActivityAndNotifications(candidates.get(0));
+        seedPostsRoomsAndFollows(candidates);
         seedPlatformAdmin();
 
         log.info("Seed complete: {} companies, {} candidates, {} postings", companies.size(), candidates.size(), postings.size());
@@ -407,6 +432,89 @@ public class DataSeeder implements ApplicationRunner {
                 "Your agent is live and scanning for roles that match your profile.");
         notificationService.notify(user, NotificationType.SYSTEM, "Complete your profile",
                 "Add a bio and verify more skills to improve your career health score.");
+    }
+
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md Phase A: a handful of demo Posts (mix of ACTIVITY/ASK/
+    // UPDATE), some with an approved join -> a real Room with messages, plus a few Follows - so
+    // the new Feed/Rooms surfaces aren't empty on first click-through, same purpose as this
+    // class's other seed methods.
+    private void seedPostsRoomsAndFollows(List<CandidateProfile> candidates) {
+        CandidateProfile demo = candidates.get(0);
+        User demoUser = demo.getUser();
+
+        record PostSeed(PostIntentType intent, String body, String location, PostVisibility visibility, Integer capacity) {}
+        List<PostSeed> seeds = List.of(
+                new PostSeed(PostIntentType.ACTIVITY, "Badminton at 6pm today, Gachibowli - need 2 more for doubles", "Gachibowli", PostVisibility.PUBLIC, 4),
+                new PostSeed(PostIntentType.ASK, "Anyone used a good freelance invoicing tool for Indian clients? Tired of manual GST calculations.", null, PostVisibility.PUBLIC, null),
+                new PostSeed(PostIntentType.UPDATE, "Shipped a side project this weekend - a small habit tracker. First real users today!", null, null, null),
+                new PostSeed(PostIntentType.ACTIVITY, "Weekend trek to Ananthagiri Hills, Saturday early morning - open to 5 people, first-timers welcome", "Ananthagiri Hills", PostVisibility.APPROVAL, 6),
+                new PostSeed(PostIntentType.ASK, "Looking for a solid React Native mentor for a couple of hours a week - happy to pay for the time.", null, PostVisibility.APPROVAL, null)
+        );
+
+        List<Post> savedPosts = new ArrayList<>();
+        for (int i = 0; i < seeds.size(); i++) {
+            PostSeed seed = seeds.get(i);
+            // First few authored by the demo talent account so its own Feed/Rooms views have
+            // real "mine" data; the rest spread across other seeded candidates for a populated feed.
+            CandidateProfile author = i < 2 ? demo : IndianData.pick(candidates.subList(1, candidates.size()));
+            Post post = postRepository.save(Post.builder()
+                    .authorUser(author.getUser())
+                    .intentType(seed.intent())
+                    .body(seed.body())
+                    .locationText(seed.location())
+                    .audience(PostAudience.GLOBAL)
+                    .visibility(seed.visibility() == null ? PostVisibility.PUBLIC : seed.visibility())
+                    .capacity(seed.capacity())
+                    .status(PostStatus.OPEN)
+                    .build());
+            backdate("arena_posts", post.getId(), IndianData.intBetween(0, 3));
+            savedPosts.add(post);
+        }
+
+        // Approve a join on the first ACTIVITY post (savedPosts.get(0), PUBLIC visibility) so the
+        // demo talent account (its author) has a real Room with messages to open on first visit.
+        Post activityPost = savedPosts.get(0);
+        CandidateProfile joiner = candidates.get(1);
+        PostJoinRequest joinRequest = postJoinRequestRepository.save(PostJoinRequest.builder()
+                .post(activityPost).user(joiner.getUser())
+                .status(PostJoinStatus.APPROVED).decidedAt(Instant.now())
+                .build());
+        activityPost.setSpotsFilled(activityPost.getSpotsFilled() + 1);
+        postRepository.save(activityPost);
+
+        Room room = roomRepository.save(Room.builder().post(activityPost).build());
+        roomMemberRepository.save(RoomMember.builder().room(room).user(activityPost.getAuthorUser()).role(RoomMemberRole.ADMIN).lastReadAt(Instant.now()).build());
+        roomMemberRepository.save(RoomMember.builder().room(room).user(joiner.getUser()).role(RoomMemberRole.MEMBER).build());
+
+        List<String> demoMessages = List.of(
+                "Count me in - what time should we get there?",
+                "6pm sharp, court's booked till 7:30. Bring your own racket if you have one.",
+                "Perfect, see you there!"
+        );
+        User[] senders = { joiner.getUser(), activityPost.getAuthorUser(), joiner.getUser() };
+        for (int i = 0; i < demoMessages.size(); i++) {
+            roomMessageRepository.save(RoomMessage.builder().room(room).sender(senders[i]).content(demoMessages.get(i)).build());
+        }
+
+        // A pending join request on the APPROVAL-visibility trek post, so the demo account (if
+        // it's that post's author) or at least some author has something in their join-requests
+        // panel to act on. Kept separate from the auto-approved room above.
+        Post trekPost = savedPosts.get(3);
+        if (!trekPost.getAuthorUser().getId().equals(candidates.get(2).getUser().getId())) {
+            postJoinRequestRepository.save(PostJoinRequest.builder()
+                    .post(trekPost).user(candidates.get(2).getUser()).status(PostJoinStatus.PENDING).build());
+        }
+
+        // A few follow relationships radiating from the demo account both directions, so
+        // /identity's followers/following section isn't empty.
+        for (CandidateProfile c : IndianData.pickN(candidates.subList(1, candidates.size()), 3)) {
+            followRepository.save(Follow.builder().followerUser(demoUser).followingUser(c.getUser()).build());
+        }
+        for (CandidateProfile c : IndianData.pickN(candidates.subList(1, candidates.size()), 2)) {
+            if (!followRepository.existsByFollowerUserIdAndFollowingUserId(c.getUser().getId(), demoUser.getId())) {
+                followRepository.save(Follow.builder().followerUser(c.getUser()).followingUser(demoUser).build());
+            }
+        }
     }
 
     private void backdate(String table, java.util.UUID id, int daysAgo) {

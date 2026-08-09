@@ -1,0 +1,81 @@
+package com.vikisol.arena.posts.controller;
+
+import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PagedResponse;
+import com.vikisol.arena.posts.dto.CreatePostRequest;
+import com.vikisol.arena.posts.dto.PostJoinRequestResponse;
+import com.vikisol.arena.posts.dto.PostResponse;
+import com.vikisol.arena.posts.service.PostService;
+import com.vikisol.arena.security.service.UserPrincipal;
+import jakarta.validation.Valid;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/posts")
+@RequiredArgsConstructor
+@PreAuthorize("hasRole('TALENT')")
+public class PostController {
+
+    private final PostService postService;
+
+    @GetMapping("/feed")
+    public ResponseEntity<ApiResponse<List<PostResponse>>> getFeed(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.getFeed(principal.getId(), page, size)));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<ApiResponse<PostResponse>> getPost(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.getPost(id, principal.getId())));
+    }
+
+    @GetMapping("/mine")
+    public ResponseEntity<ApiResponse<PagedResponse<PostResponse>>> getMyPosts(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return ResponseEntity.ok(ApiResponse.ok(postService.getMyPosts(principal.getId(), pageable)));
+    }
+
+    @PostMapping
+    public ResponseEntity<ApiResponse<PostResponse>> create(
+            @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody CreatePostRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Post published", postService.create(principal.getId(), request)));
+    }
+
+    @PostMapping("/{id}/joins")
+    public ResponseEntity<ApiResponse<PostJoinRequestResponse>> requestJoin(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.requestJoin(principal.getId(), id)));
+    }
+
+    @GetMapping("/{id}/joins")
+    public ResponseEntity<ApiResponse<List<PostJoinRequestResponse>>> getJoinRequests(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.getJoinRequests(principal.getId(), id)));
+    }
+
+    @PutMapping("/{id}/joins/{joinId}/approve")
+    public ResponseEntity<ApiResponse<PostJoinRequestResponse>> approveJoin(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, true)));
+    }
+
+    @PutMapping("/{id}/joins/{joinId}/decline")
+    public ResponseEntity<ApiResponse<PostJoinRequestResponse>> declineJoin(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, false)));
+    }
+}

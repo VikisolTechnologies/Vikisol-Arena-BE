@@ -8,6 +8,8 @@ import com.vikisol.arena.notifications.entity.NotificationType;
 import com.vikisol.arena.notifications.repository.NotificationRepository;
 import com.vikisol.arena.marketplace.entity.Bid;
 import com.vikisol.arena.marketplace.entity.Project;
+import com.vikisol.arena.posts.entity.Post;
+import com.vikisol.arena.posts.entity.PostJoinRequest;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -74,5 +76,31 @@ public class NotificationService {
     public void notifyDeliverableReviewed(User deliverableOwner, String milestoneLabel, boolean accepted) {
         notify(deliverableOwner, NotificationType.SYSTEM, accepted ? "Deliverable accepted" : "Deliverable rejected",
                 "Your deliverable for milestone \"" + milestoneLabel + "\" was " + (accepted ? "accepted" : "sent back for changes") + ".");
+    }
+
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md Phase A (posts/rooms/follows) - all four reuse the
+    // existing SYSTEM type rather than adding new NotificationType values, since the enum is
+    // hand-mirrored on both frontend and backend and these events all fit "system" semantics.
+    public void notifyPostJoinRequested(Post post, PostJoinRequest joinRequest) {
+        notify(post.getAuthorUser(), NotificationType.SYSTEM, "New join request",
+                joinRequest.getUser().getName() + " wants to join \"" + preview(post.getBody()) + "\".");
+    }
+
+    public void notifyPostJoinApproved(PostJoinRequest joinRequest) {
+        notify(joinRequest.getUser(), NotificationType.SYSTEM, "Join request approved",
+                "You're in! \"" + preview(joinRequest.getPost().getBody()) + "\" now has a room.");
+    }
+
+    public void notifyPostJoinDeclined(PostJoinRequest joinRequest) {
+        notify(joinRequest.getUser(), NotificationType.SYSTEM, "Join request declined",
+                "Your request to join \"" + preview(joinRequest.getPost().getBody()) + "\" wasn't accepted this time.");
+    }
+
+    public void notifyNewFollower(User following, User follower) {
+        notify(following, NotificationType.SYSTEM, "New follower", follower.getName() + " started following you.");
+    }
+
+    private String preview(String body) {
+        return body.length() > 60 ? body.substring(0, 60) + "…" : body;
     }
 }
