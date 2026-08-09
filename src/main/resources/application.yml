@@ -128,6 +128,14 @@ teams:
   client-secret: ${TEAMS_CLIENT_SECRET:}
   organizer-email: ${TEAMS_ORGANIZER_EMAIL:}
 
+# ARENA-V2-PRODUCT-ARCHITECTURE.md §7.3 (Phase C) embedding-based feed ranking. Blank by default,
+# which keeps HashingEmbeddingProvider (a real, local, zero-dependency embedding, not a stub -
+# see its own class comment) active - same dormant-until-configured convention as resend/whatsapp/
+# teams above.
+openai:
+  api-key: ${OPENAI_API_KEY:}
+  embedding-model: ${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
+
 # Dormant unless SENTRY_DSN is set - blank dsn disables the Sentry Spring Boot starter entirely
 # (its auto-config no-ops with an empty DSN), matching the Noop-provider pattern used above.
 sentry:

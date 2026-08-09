@@ -49,4 +49,17 @@ public class FollowController {
     public ResponseEntity<ApiResponse<List<FollowerResponse>>> getMyFollowing(@AuthenticationPrincipal UserPrincipal principal) {
         return ResponseEntity.ok(ApiResponse.ok(followService.getFollowing(principal.getId())));
     }
+
+    // Phase C company-follow.
+    @PostMapping("/company/{companyId}")
+    public ResponseEntity<ApiResponse<Void>> followCompany(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID companyId) {
+        followService.followCompany(principal.getId(), companyId);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    @DeleteMapping("/company/{companyId}")
+    public ResponseEntity<ApiResponse<Void>> unfollowCompany(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID companyId) {
+        followService.unfollowCompany(principal.getId(), companyId);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
 }

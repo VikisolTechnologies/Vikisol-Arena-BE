@@ -4,10 +4,13 @@ import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.entity.VerificationLevel;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.dto.PagedResponse;
+import com.vikisol.arena.common.embedding.EmbeddingProvider;
+import com.vikisol.arena.common.embedding.EmbeddingUtil;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.common.geo.GeohashUtil;
 import com.vikisol.arena.common.util.AgeUtil;
+import com.vikisol.arena.follows.repository.FollowRepository;
 import com.vikisol.arena.follows.service.BlockService;
 import com.vikisol.arena.notifications.service.NotificationService;
 import com.vikisol.arena.posts.dto.CreatePostRequest;
@@ -31,6 +34,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -42,20 +46,28 @@ public class PostService {
     private final PostJoinRequestRepository postJoinRequestRepository;
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
+    private final FollowRepository followRepository;
     private final PostMapper mapper;
     private final FeedRankingService feedRankingService;
     private final RoomService roomService;
     private final NotificationService notificationService;
     private final BlockService blockService;
+    private final EmbeddingProvider embeddingProvider;
 
     @Transactional(readOnly = true)
     public List<PostResponse> getFeed(UUID viewingUserId, int page, int size) {
         List<Post> window = feedRankingService.getFeedWindow(viewingUserId, page, size);
         window = excludeBlocked(window, viewingUserId);
-        var authorProfiles = batchAuthorProfiles(window);
-        return window.stream()
-                .map(p -> mapper.toResponse(p, viewingUserId, myJoinStatus(p, viewingUserId), roomIdFor(p), authorProfiles))
-                .toList();
+        return toResponseList(window, viewingUserId);
+    }
+
+    // §"trends" - trending posts ranked by recent engagement velocity, reused as a feed sort
+    // option rather than a separate subsystem (see DECISIONS.md).
+    @Transactional(readOnly = true)
+    public List<PostResponse> getTrending(UUID viewingUserId, int page, int size) {
+        List<Post> window = feedRankingService.getTrendingWindow(viewingUserId, page, size);
+        window = excludeBlocked(window, viewingUserId);
+        return toResponseList(window, viewingUserId);
     }
 
     @Transactional(readOnly = true)
@@ -70,6 +82,40 @@ public class PostService {
         var authorProfiles = batchAuthorProfiles(page.getContent());
         return PagedResponse.of(page,
                 p -> mapper.toResponse(p, userId, myJoinStatus(p, userId), roomIdFor(p), authorProfiles));
+    }
+
+    // Profile-revamp "activity" tab (Phase C) - any user's own OPEN/FULL/CLOSED posts, respecting
+    // each post's own audience gate the same way the feed itself would: GLOBAL always visible,
+    // FOLLOWERS only visible to the target's own followers (or the target themself), CANCELLED
+    // excluded (nothing to show a visitor about a post that never happened).
+    @Transactional(readOnly = true)
+    public PagedResponse<PostResponse> getUserPosts(UUID targetUserId, UUID viewingUserId, Pageable pageable) {
+        boolean viewerFollowsTarget = viewingUserId != null
+                && followRepository.existsByFollowerUserIdAndFollowingUserId(viewingUserId, targetUserId);
+        boolean isSelf = viewingUserId != null && viewingUserId.equals(targetUserId);
+        var page = postRepository.findByAuthorUserIdOrderByCreatedAtDesc(targetUserId, pageable);
+        var visible = page.getContent().stream()
+                .filter(p -> p.getStatus() != PostStatus.CANCELLED)
+                .filter(p -> isSelf || p.getAudience() == PostAudience.GLOBAL
+                        || (p.getAudience() == PostAudience.FOLLOWERS && viewerFollowsTarget))
+                .toList();
+        // Post-fetch audience filtering means totalElements/totalPages reflect the raw per-page
+        // count, not a global count of visible-to-this-viewer posts - an accepted simplification
+        // (see getUserPosts' own comment) rather than a second, more complex counting query.
+        return new PagedResponse<>(toResponseList(visible, viewingUserId), page.getNumber(), page.getSize(),
+                page.getTotalElements(), page.getTotalPages(), page.isLast());
+    }
+
+    private List<PostResponse> toResponseList(List<Post> posts, UUID viewingUserId) {
+        var authorProfiles = batchAuthorProfiles(posts);
+        List<UUID> postIds = posts.stream().map(Post::getId).toList();
+        var commentCounts = mapper.batchCommentCounts(postIds);
+        var reactionCounts = mapper.batchReactionCounts(postIds);
+        var myReactedIds = mapper.batchMyReactedIds(postIds, viewingUserId);
+        return posts.stream()
+                .map(p -> mapper.toResponse(p, viewingUserId, myJoinStatus(p, viewingUserId), roomIdFor(p),
+                        authorProfiles, commentCounts, reactionCounts, myReactedIds))
+                .toList();
     }
 
     // ARENA-V2-PRODUCT-ARCHITECTURE.md §3.2 nearby discovery. Same geohash-prefix-then-Haversine
@@ -97,11 +143,7 @@ public class PostService {
                         GeohashUtil.distanceKm(centerLat, centerLng, b.getApproxLat(), b.getApproxLng())))
                 .toList();
         nearby = excludeBlocked(nearby, viewingUserId);
-
-        var authorProfiles = batchAuthorProfiles(nearby);
-        return nearby.stream()
-                .map(p -> mapper.toResponse(p, viewingUserId, myJoinStatus(p, viewingUserId), roomIdFor(p), authorProfiles))
-                .toList();
+        return toResponseList(nearby, viewingUserId);
     }
 
     @Transactional
@@ -141,6 +183,13 @@ public class PostService {
             double[] approx = GeohashUtil.decode(geohash);
             builder.geohash(geohash).approxLat(approx[0]).approxLng(approx[1]);
         }
+
+        // §7.3 feed ranking's "relevance" term (Phase C) - computed once here, not on every feed
+        // read, so scoring a window of posts is cheap cosine-similarity math, not N embedding
+        // calls per request. Tags included since they're often the most topic-dense words on a
+        // short post.
+        String embeddingInput = request.body() + " " + String.join(" ", request.tags());
+        builder.embedding(EmbeddingUtil.encode(embeddingProvider.embed(embeddingInput)));
 
         Post post = postRepository.save(builder.build());
         return mapper.toResponse(post, userId, null, null);

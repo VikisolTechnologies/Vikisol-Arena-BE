@@ -28,4 +28,11 @@ public interface FollowRepository extends JpaRepository<Follow, UUID> {
 
     @EntityGraph(attributePaths = "followingUser")
     List<Follow> findByFollowerUserIdOrderByCreatedAtDesc(UUID followerUserId);
+
+    // Phase C company-follow (see Follow's own class comment for the additive-column shape).
+    Optional<Follow> findByFollowerUserIdAndFollowingCompanyId(UUID followerUserId, UUID followingCompanyId);
+
+    boolean existsByFollowerUserIdAndFollowingCompanyId(UUID followerUserId, UUID followingCompanyId);
+
+    long countByFollowingCompanyId(UUID followingCompanyId);
 }

@@ -1,0 +1,47 @@
+package com.vikisol.arena.company.controller;
+
+import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PagedResponse;
+import com.vikisol.arena.company.dto.CompanyResponse;
+import com.vikisol.arena.company.service.CompanyService;
+import com.vikisol.arena.jobs.dto.JobResponse;
+import com.vikisol.arena.security.service.UserPrincipal;
+import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
+import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.web.bind.annotation.*;
+
+import java.util.UUID;
+
+@RestController
+@RequestMapping("/companies")
+@RequiredArgsConstructor
+@PreAuthorize("hasRole('TALENT')")
+public class CompanyController {
+
+    private final CompanyService companyService;
+
+    @GetMapping
+    public ResponseEntity<ApiResponse<PagedResponse<CompanyResponse>>> list(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(required = false) String query,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return ResponseEntity.ok(ApiResponse.ok(companyService.listCompanies(query, principal.getId(), pageable)));
+    }
+
+    @GetMapping("/{id}")
+    public ResponseEntity<ApiResponse<CompanyResponse>> get(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(companyService.getCompany(id, principal.getId())));
+    }
+
+    @GetMapping("/{id}/jobs")
+    public ResponseEntity<ApiResponse<PagedResponse<JobResponse>>> getJobs(
+            @PathVariable UUID id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return ResponseEntity.ok(ApiResponse.ok(companyService.getCompanyJobs(id, pageable)));
+    }
+}

@@ -10,11 +10,15 @@ import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.common.geo.CityCoordinates;
 import com.vikisol.arena.common.geo.GeohashUtil;
 import com.vikisol.arena.common.service.FileStorageService;
+import com.vikisol.arena.follows.dto.FollowCountsResponse;
+import com.vikisol.arena.follows.service.FollowService;
 import com.vikisol.arena.matching.ScoringService;
 import com.vikisol.arena.profile.dto.CandidateDataExport;
 import com.vikisol.arena.profile.dto.CandidateProfileResponse;
 import com.vikisol.arena.profile.dto.ConsentDto;
 import com.vikisol.arena.profile.dto.LocationConsentRequest;
+import com.vikisol.arena.profile.dto.PublicCandidateProfileResponse;
+import com.vikisol.arena.profile.dto.SkillDto;
 import com.vikisol.arena.profile.entity.AutonomyLevel;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.entity.CandidateSkill;
@@ -48,6 +52,7 @@ public class CandidateProfileService {
     private final RefreshTokenService refreshTokenService;
     private final TokenDenylistService tokenDenylistService;
     private final JwtTokenProvider jwtTokenProvider;
+    private final FollowService followService;
 
     @Transactional(readOnly = true)
     public CandidateProfile getEntityForUser(UUID userId) {
@@ -198,6 +203,26 @@ public class CandidateProfileService {
         }
 
         auditService.record(null, userId, AuditActions.ACCOUNT_DELETED, "self-service erasure request");
+    }
+
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md Phase C profile revamp - the public/other-user view
+    // `/identity` never had at all (see DECISIONS.md). userId here is the PROFILE OWNER's user
+    // id (not the profile id) since that's what Follow/Post already key on everywhere else.
+    @Transactional(readOnly = true)
+    public PublicCandidateProfileResponse getPublicProfile(UUID targetUserId, UUID viewingUserId) {
+        CandidateProfile profile = candidateProfileRepository.findByUserId(targetUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("Candidate not found"));
+        User user = profile.getUser();
+        FollowCountsResponse counts = followService.getCounts(targetUserId, viewingUserId);
+        String homeCity = profile.getLocationConsent() == LocationConsent.OFF ? null : profile.getHomeCity();
+        return new PublicCandidateProfileResponse(
+                profile.getId().toString(), profile.getName(), profile.getAvatarEmoji(), profile.getTitle(),
+                profile.getIndustry().wireValue(), profile.getLocation(), profile.isRemote(),
+                profile.getSkills().stream().map(s -> new SkillDto(s.getName(), s.isVerified())).toList(),
+                profile.getExperienceYears(), profile.getOpenTo().stream().map(o -> o.wireValue()).toList(),
+                profile.getCareerHealth(), profile.getBio(),
+                user.getVerificationLevel().wireValue(), user.isPhoneVerified(), homeCity,
+                counts.followerCount(), counts.followingCount(), counts.viewerFollows());
     }
 
     @Transactional

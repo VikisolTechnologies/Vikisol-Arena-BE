@@ -32,6 +32,10 @@ public record PostResponse(
         Double approxLat,
         Double approxLng,
         String exactMeetingPoint,
-        String requiredVerificationLevel
+        String requiredVerificationLevel,
+        // Phase C additions.
+        long commentCount,
+        long reactionCount,
+        Boolean myReacted
 ) {
 }

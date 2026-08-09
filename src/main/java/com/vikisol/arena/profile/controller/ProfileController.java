@@ -6,6 +6,7 @@ import com.vikisol.arena.profile.dto.CandidateDataExport;
 import com.vikisol.arena.profile.dto.CandidateProfileResponse;
 import com.vikisol.arena.profile.dto.ConsentDto;
 import com.vikisol.arena.profile.dto.LocationConsentRequest;
+import com.vikisol.arena.profile.dto.PublicCandidateProfileResponse;
 import com.vikisol.arena.profile.dto.UpdateAutonomyRequest;
 import com.vikisol.arena.profile.dto.UpdateProfileDetailsRequest;
 import com.vikisol.arena.profile.dto.UpdateSkillsRequest;
@@ -23,6 +24,8 @@ import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.util.UUID;
+
 @RestController
 @RequestMapping("/profile")
 @RequiredArgsConstructor
@@ -34,6 +37,14 @@ public class ProfileController {
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<CandidateProfileResponse>> getMyProfile(@AuthenticationPrincipal UserPrincipal principal) {
         return ResponseEntity.ok(ApiResponse.ok(profileService.getMyProfile(principal.getId())));
+    }
+
+    // Phase C profile revamp - the public/other-user view. {id} is a user id (matches how
+    // Follow/Post already key on user ids everywhere else in this API), not a profile id.
+    @GetMapping("/{id}")
+    public ResponseEntity<ApiResponse<PublicCandidateProfileResponse>> getPublicProfile(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.getPublicProfile(id, principal.getId())));
     }
 
     @PutMapping("/me/details")

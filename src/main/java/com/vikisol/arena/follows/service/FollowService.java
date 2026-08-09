@@ -4,9 +4,12 @@ import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
+import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
 import com.vikisol.arena.follows.dto.FollowCountsResponse;
 import com.vikisol.arena.follows.dto.FollowerResponse;
 import com.vikisol.arena.follows.entity.Follow;
+import com.vikisol.arena.follows.entity.FollowTargetType;
 import com.vikisol.arena.follows.repository.FollowRepository;
 import com.vikisol.arena.notifications.service.NotificationService;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
@@ -24,6 +27,7 @@ public class FollowService {
     private final FollowRepository followRepository;
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
+    private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final NotificationService notificationService;
 
     @Transactional
@@ -81,5 +85,38 @@ public class FollowService {
 
     private User requireUser(UUID id) {
         return userRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Account not found"));
+    }
+
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md Phase C company pages - same idempotent shape as
+    // follow(User)/unfollow(User) above, just against EnterpriseProfile instead of User.
+    @Transactional
+    public void followCompany(UUID followerUserId, UUID companyId) {
+        if (followRepository.existsByFollowerUserIdAndFollowingCompanyId(followerUserId, companyId)) {
+            return; // idempotent
+        }
+        User follower = requireUser(followerUserId);
+        EnterpriseProfile company = requireCompany(companyId);
+        followRepository.save(Follow.builder().followerUser(follower).followingCompany(company)
+                .targetType(FollowTargetType.COMPANY).build());
+    }
+
+    @Transactional
+    public void unfollowCompany(UUID followerUserId, UUID companyId) {
+        followRepository.findByFollowerUserIdAndFollowingCompanyId(followerUserId, companyId)
+                .ifPresent(followRepository::delete);
+    }
+
+    @Transactional(readOnly = true)
+    public long getCompanyFollowerCount(UUID companyId) {
+        return followRepository.countByFollowingCompanyId(companyId);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean viewerFollowsCompany(UUID viewingUserId, UUID companyId) {
+        return viewingUserId != null && followRepository.existsByFollowerUserIdAndFollowingCompanyId(viewingUserId, companyId);
+    }
+
+    private EnterpriseProfile requireCompany(UUID id) {
+        return enterpriseProfileRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Company not found: " + id));
     }
 }

@@ -2,9 +2,13 @@ package com.vikisol.arena.posts.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
 import com.vikisol.arena.common.dto.PagedResponse;
+import com.vikisol.arena.posts.dto.CreateCommentRequest;
 import com.vikisol.arena.posts.dto.CreatePostRequest;
+import com.vikisol.arena.posts.dto.PostCommentResponse;
 import com.vikisol.arena.posts.dto.PostJoinRequestResponse;
 import com.vikisol.arena.posts.dto.PostResponse;
+import com.vikisol.arena.posts.service.PostCommentService;
+import com.vikisol.arena.posts.service.PostReactionService;
 import com.vikisol.arena.posts.service.PostService;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
@@ -26,6 +30,8 @@ import java.util.UUID;
 public class PostController {
 
     private final PostService postService;
+    private final PostCommentService postCommentService;
+    private final PostReactionService postReactionService;
 
     @GetMapping("/feed")
     public ResponseEntity<ApiResponse<List<PostResponse>>> getFeed(
@@ -33,6 +39,22 @@ public class PostController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return ResponseEntity.ok(ApiResponse.ok(postService.getFeed(principal.getId(), page, size)));
+    }
+
+    @GetMapping("/trending")
+    public ResponseEntity<ApiResponse<List<PostResponse>>> getTrending(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.getTrending(principal.getId(), page, size)));
+    }
+
+    @GetMapping("/by-user/{userId}")
+    public ResponseEntity<ApiResponse<PagedResponse<PostResponse>>> getUserPosts(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID userId,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
+        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return ResponseEntity.ok(ApiResponse.ok(postService.getUserPosts(userId, principal.getId(), pageable)));
     }
 
     @GetMapping("/nearby")
@@ -93,5 +115,36 @@ public class PostController {
     public ResponseEntity<ApiResponse<PostJoinRequestResponse>> declineJoin(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId) {
         return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, false)));
+    }
+
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md Phase C - comments/reactions.
+    @GetMapping("/{id}/comments")
+    public ResponseEntity<ApiResponse<List<PostCommentResponse>>> getComments(@PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(postCommentService.getComments(id)));
+    }
+
+    @PostMapping("/{id}/comments")
+    public ResponseEntity<ApiResponse<PostCommentResponse>> addComment(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody CreateCommentRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(postCommentService.addComment(principal.getId(), id, request.content())));
+    }
+
+    @DeleteMapping("/{id}/comments/{commentId}")
+    public ResponseEntity<ApiResponse<Void>> deleteComment(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID commentId) {
+        postCommentService.deleteComment(principal.getId(), id, commentId);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    @PostMapping("/{id}/react")
+    public ResponseEntity<ApiResponse<Void>> react(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        postReactionService.react(principal.getId(), id);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    @DeleteMapping("/{id}/react")
+    public ResponseEntity<ApiResponse<Void>> unreact(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        postReactionService.unreact(principal.getId(), id);
+        return ResponseEntity.ok(ApiResponse.ok(null));
     }
 }

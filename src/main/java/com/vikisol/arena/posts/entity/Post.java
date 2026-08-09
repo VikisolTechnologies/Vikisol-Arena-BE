@@ -107,6 +107,12 @@ public class Post extends BaseEntity {
     @Builder.Default
     private List<String> mediaUrls = new ArrayList<>();
 
+    // Phase C §7.3 feed ranking - comma-joined float vector, computed once at creation time (see
+    // PostService.create) via the active EmbeddingProvider. Stored as TEXT, not a `vector`/array
+    // column - see EmbeddingUtil's own comment for why.
+    @Column(columnDefinition = "TEXT")
+    private String embedding;
+
     public boolean isJoinable() {
         return intentType == PostIntentType.ACTIVITY || intentType == PostIntentType.ASK;
     }
