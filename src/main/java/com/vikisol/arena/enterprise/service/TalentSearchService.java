@@ -173,13 +173,19 @@ public class TalentSearchService {
     // The only actually-paywalled field: the CV file link. Everything else (skills, title,
     // location, career health) is meant to be visible pre-unlock so a recruiter can decide
     // whether a candidate is worth a credit at all - only the resume itself is gated.
+    //
+    // Phase B geo fields (homeCity/approxLat/approxLng) are ALWAYS stripped here, regardless of
+    // unlock status - ARENA-V2-PRODUCT-ARCHITECTURE.md §5's location consent is scoped to
+    // peer-to-peer activity discovery (Feed/Map), never to enterprise recruiter search, and no
+    // unlock-credit "pays for" a candidate's approximate home location. locationConsent (just
+    // the tier label, e.g. "off"/"city"/"precise") is harmless to leave visible on its own.
     private CandidateProfileResponse redactIfLocked(CandidateProfileResponse response, boolean fullAccess) {
-        if (fullAccess) return response;
         return new CandidateProfileResponse(
                 response.id(), response.name(), response.avatarEmoji(), response.title(), response.industry(),
                 response.location(), response.remote(), response.skills(), response.experienceYears(), response.rateFloor(),
                 response.openTo(), response.careerHealth(), response.consent(), response.autonomy(), response.bio(),
-                null, null);
+                fullAccess ? response.cvUrl() : null, fullAccess ? response.cvFileName() : null,
+                response.locationConsent(), null, null, null);
     }
 
     private EnterpriseProfile requireEnterprise(UUID userId) {

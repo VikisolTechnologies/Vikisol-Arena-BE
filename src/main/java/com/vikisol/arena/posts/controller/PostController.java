@@ -35,6 +35,16 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.getFeed(principal.getId(), page, size)));
     }
 
+    @GetMapping("/nearby")
+    public ResponseEntity<ApiResponse<List<PostResponse>>> getNearby(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam double lat, @RequestParam double lng,
+            @RequestParam(defaultValue = "5") double radiusKm,
+            @RequestParam(required = false) Integer withinHours,
+            @RequestParam(required = false) String intentType) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.getNearby(principal.getId(), lat, lng, radiusKm, withinHours, intentType)));
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<PostResponse>> getPost(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.ok(postService.getPost(id, principal.getId())));
@@ -53,6 +63,12 @@ public class PostController {
     public ResponseEntity<ApiResponse<PostResponse>> create(
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody CreatePostRequest request) {
         return ResponseEntity.ok(ApiResponse.ok("Post published", postService.create(principal.getId(), request)));
+    }
+
+    @PutMapping("/{id}/cancel")
+    public ResponseEntity<ApiResponse<PostResponse>> cancel(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.cancel(principal.getId(), id)));
     }
 
     @PostMapping("/{id}/joins")

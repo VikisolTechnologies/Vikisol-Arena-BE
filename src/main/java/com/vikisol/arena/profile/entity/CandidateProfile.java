@@ -82,4 +82,18 @@ public class CandidateProfile extends BaseEntity {
     private String cvUrl;
 
     private String cvFileName;
+
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md §5 (Phase B). approxLat/approxLng are ALWAYS a
+    // geohash-decoded approximation, never the raw device coordinate - see DECISIONS.md's
+    // location entry for the full reasoning. Null geohash = no discovery-center set (OFF
+    // consent, or PRECISE/CITY consent granted but no position captured yet either way).
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, columnDefinition = "varchar(255) not null default 'OFF'")
+    @Builder.Default
+    private LocationConsent locationConsent = LocationConsent.OFF;
+
+    private String homeCity;
+    private String geohash;
+    private Double approxLat;
+    private Double approxLng;
 }

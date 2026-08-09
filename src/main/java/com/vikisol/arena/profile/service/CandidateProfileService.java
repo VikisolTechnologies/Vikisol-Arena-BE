@@ -5,17 +5,22 @@ import com.vikisol.arena.audit.AuditActions;
 import com.vikisol.arena.audit.AuditService;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
+import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.common.geo.CityCoordinates;
+import com.vikisol.arena.common.geo.GeohashUtil;
 import com.vikisol.arena.common.service.FileStorageService;
 import com.vikisol.arena.matching.ScoringService;
 import com.vikisol.arena.profile.dto.CandidateDataExport;
 import com.vikisol.arena.profile.dto.CandidateProfileResponse;
 import com.vikisol.arena.profile.dto.ConsentDto;
+import com.vikisol.arena.profile.dto.LocationConsentRequest;
 import com.vikisol.arena.profile.entity.AutonomyLevel;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.entity.CandidateSkill;
 import com.vikisol.arena.profile.entity.ConsentSettings;
 import com.vikisol.arena.profile.entity.Industry;
+import com.vikisol.arena.profile.entity.LocationConsent;
 import com.vikisol.arena.profile.entity.OpenTo;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import com.vikisol.arena.security.jwt.JwtTokenProvider;
@@ -98,6 +103,44 @@ public class CandidateProfileService {
                 "autoApply: %s -> %s; searchableByEnterprises: %s -> %s".formatted(
                         before.isAutoApply(), consent.autoApply(), before.isSearchableByEnterprises(), consent.searchableByEnterprises()));
         return response;
+    }
+
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md §5. This is the ONLY place a raw device coordinate ever
+    // touches this codebase, and it's discarded the instant it's encoded - only the resulting
+    // geohash (and its own decoded-back-to-center approximation) is ever persisted. Switching
+    // to OFF or CITY always clears any previously stored geohash/approxLat/approxLng, even if
+    // the caller doesn't resend lat/lng - a consent downgrade must actually remove data, not
+    // just stop collecting new data.
+    @Transactional
+    public CandidateProfileResponse updateLocationConsent(UUID userId, LocationConsentRequest request) {
+        CandidateProfile profile = getEntityForUser(userId);
+        LocationConsent consent = LocationConsent.valueOf(request.consent().trim().toUpperCase());
+        profile.setLocationConsent(consent);
+        profile.setGeohash(null);
+        profile.setApproxLat(null);
+        profile.setApproxLng(null);
+        profile.setHomeCity(null);
+
+        if (consent == LocationConsent.PRECISE && request.lat() != null && request.lng() != null) {
+            if (request.lat() < -90 || request.lat() > 90 || request.lng() < -180 || request.lng() > 180) {
+                throw new BadRequestException("Invalid coordinates");
+            }
+            String geohash = GeohashUtil.encode(request.lat(), request.lng());
+            double[] approx = GeohashUtil.decode(geohash);
+            profile.setGeohash(geohash);
+            profile.setApproxLat(approx[0]);
+            profile.setApproxLng(approx[1]);
+        } else if (consent == LocationConsent.CITY && request.city() != null && !request.city().isBlank()) {
+            profile.setHomeCity(request.city());
+            CityCoordinates.lookup(request.city()).ifPresent(center -> {
+                String geohash = GeohashUtil.encode(center[0], center[1]);
+                double[] approx = GeohashUtil.decode(geohash);
+                profile.setGeohash(geohash);
+                profile.setApproxLat(approx[0]);
+                profile.setApproxLng(approx[1]);
+            });
+        }
+        return saveAndScore(profile);
     }
 
     // DPDP data export (ARENA-SHIP-IT.md #5) - the candidate's own profile fields plus their

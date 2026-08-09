@@ -105,6 +105,9 @@ app:
     upload-per-minute: ${RATE_LIMIT_UPLOAD_PER_MIN:5}
     unlock-per-minute: ${RATE_LIMIT_UNLOCK_PER_MIN:20}
     messaging-per-minute: ${RATE_LIMIT_MESSAGING_PER_MIN:30}
+    # ARENA-V2-PRODUCT-ARCHITECTURE.md §4 (Phase B).
+    post-creation-per-minute: ${RATE_LIMIT_POST_CREATION_PER_MIN:5}
+    join-request-per-minute: ${RATE_LIMIT_JOIN_REQUEST_PER_MIN:10}
     default-per-minute: ${RATE_LIMIT_DEFAULT_PER_MIN:120}
 
 # Phase 5 integration scaffolding - Email/WhatsApp/Teams-meeting providers. All blank by default,

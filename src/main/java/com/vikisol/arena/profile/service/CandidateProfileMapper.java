@@ -32,7 +32,11 @@ public class CandidateProfileMapper {
                 p.getAutonomy().wireValue(),
                 p.getBio(),
                 fileSigningService.sign(p.getCvUrl()),
-                p.getCvFileName()
+                p.getCvFileName(),
+                p.getLocationConsent().wireValue(),
+                p.getHomeCity(),
+                p.getApproxLat(),
+                p.getApproxLng()
         );
     }
 }

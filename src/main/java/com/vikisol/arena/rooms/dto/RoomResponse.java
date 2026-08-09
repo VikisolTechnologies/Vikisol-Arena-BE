@@ -7,6 +7,8 @@ public record RoomResponse(
         String postIntentType,
         int memberCount,
         boolean unread,
+        boolean muted,
+        String postStatus,
         String lastMessageAt,
         String lastMessagePreview
 ) {

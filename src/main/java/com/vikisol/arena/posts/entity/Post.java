@@ -1,6 +1,7 @@
 package com.vikisol.arena.posts.entity;
 
 import com.vikisol.arena.auth.entity.User;
+import com.vikisol.arena.auth.entity.VerificationLevel;
 import com.vikisol.arena.common.entity.BaseEntity;
 import jakarta.persistence.*;
 import lombok.*;
@@ -40,8 +41,31 @@ public class Post extends BaseEntity {
     @Column(nullable = false, columnDefinition = "TEXT")
     private String body;
 
-    // Freeform text only - no geo/H3/PostGIS this phase (Phase B). Never rendered as a map pin.
+    // Freeform, author-typed description of roughly where (e.g. "Gachibowli") - always visible,
+    // never precise enough alone to be a real address.
     private String locationText;
+
+    // Phase B geo (only ever populated for ACTIVITY posts when the author had location consent
+    // != OFF at creation time) - geohash/approxLat/approxLng are the SAME "always an
+    // approximation, never the raw point" guarantee as CandidateProfile's own fields; the Map
+    // screen applies a second, independent jitter on top of this at serve time. Null for
+    // ASK/UPDATE posts and for ACTIVITY posts created with no location capture.
+    private String geohash;
+    private Double approxLat;
+    private Double approxLng;
+
+    // The real "where exactly" - a street address, a specific landmark, a video-call link,
+    // whatever the author needs joiners to actually get there. Deliberately a SEPARATE field
+    // from locationText/geohash: PostMapper only includes this in a PostResponse when the
+    // viewer is the author or an approved room member (§4: "exact meeting point revealed only
+    // inside the room, only to approved joiners"). Never touches the Map/Feed's public response.
+    @Column(columnDefinition = "TEXT")
+    private String exactMeetingPoint;
+
+    // §4: "creators can require a verification level to join." Null = no requirement beyond
+    // whatever PostVisibility already gates. Only meaningful for joinable (ACTIVITY/ASK) posts.
+    @Enumerated(EnumType.STRING)
+    private VerificationLevel requiredVerificationLevel;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
@@ -66,6 +90,10 @@ public class Post extends BaseEntity {
 
     private Instant startsAt;
     private Instant endsAt;
+
+    // PostLifecycleScheduler's reminder job sets this the moment it notifies room members that
+    // an activity is starting soon, so a post is never reminded twice.
+    private Instant remindedAt;
 
     @ElementCollection
     @CollectionTable(name = "arena_post_tags", joinColumns = @JoinColumn(name = "post_id"))

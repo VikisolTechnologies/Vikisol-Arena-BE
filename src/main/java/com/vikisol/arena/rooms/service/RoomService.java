@@ -3,6 +3,8 @@ package com.vikisol.arena.rooms.service;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.notifications.service.NotificationService;
+import com.vikisol.arena.platform.service.ModerationService;
 import com.vikisol.arena.posts.entity.Post;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import com.vikisol.arena.rooms.dto.RoomMemberResponse;
@@ -43,6 +45,8 @@ public class RoomService {
     private final RoomReportRepository roomReportRepository;
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
+    private final ModerationService moderationService;
+    private final NotificationService notificationService;
 
     @Transactional
     public Room getOrCreateForPost(Post post) {
@@ -122,8 +126,35 @@ public class RoomService {
     public void report(UUID userId, UUID roomId, String reason) {
         Room room = requireRoom(roomId);
         assertRoomMember(userId, room);
-        roomReportRepository.save(RoomReport.builder()
-                .room(room).reporter(requireUser(userId)).reason(reason).build());
+        User reporter = requireUser(userId);
+        // RoomReport is the immutable raw-evidence record; fileRoomReport() is what actually
+        // makes this actionable in the platform-admin queue - ARENA-V2-PRODUCT-ARCHITECTURE.md
+        // §4's explicit "wired into the platform-admin moderation queue" requirement.
+        roomReportRepository.save(RoomReport.builder().room(room).reporter(reporter).reason(reason).build());
+        moderationService.fileRoomReport(room, reporter, reason);
+    }
+
+    @Transactional
+    public void setMuted(UUID userId, UUID roomId, boolean muted) {
+        Room room = requireRoom(roomId);
+        RoomMember membership = roomMemberRepository.findByRoomIdAndUserId(room.getId(), userId)
+                .orElseThrow(() -> new AccessDeniedException("Not a member of this room"));
+        membership.setMuted(muted);
+        roomMemberRepository.save(membership);
+    }
+
+    // Called from PostService.cancel() - notifies every current room member (if a room even
+    // exists yet; a post with zero approved joins never got one) that the activity was
+    // cancelled by its author.
+    @Transactional
+    public void notifyRoomOfCancellation(Post post) {
+        roomRepository.findByPostId(post.getId()).ifPresent(room -> {
+            for (RoomMember member : roomMemberRepository.findByRoomId(room.getId())) {
+                if (!member.getUser().getId().equals(post.getAuthorUser().getId())) {
+                    notificationService.notifyPostCancelled(member.getUser(), post);
+                }
+            }
+        });
     }
 
     private void assertRoomMember(UUID userId, Room room) {
@@ -135,12 +166,15 @@ public class RoomService {
     private RoomResponse toResponse(Room room, RoomMember membership) {
         List<RoomMessage> messages = roomMessageRepository.findByRoomIdOrderByCreatedAtAsc(room.getId());
         RoomMessage last = messages.isEmpty() ? null : messages.get(messages.size() - 1);
-        boolean unread = last != null && (membership.getLastReadAt() == null || membership.getLastReadAt().isBefore(last.getCreatedAt()));
+        // Muted rooms never surface an unread badge, even with genuinely new messages - see
+        // RoomMember.muted's own doc comment.
+        boolean unread = !membership.isMuted() && last != null
+                && (membership.getLastReadAt() == null || membership.getLastReadAt().isBefore(last.getCreatedAt()));
         int memberCount = roomMemberRepository.findByRoomId(room.getId()).size();
         Post post = room.getPost();
         return new RoomResponse(
                 room.getId().toString(), post.getId().toString(), post.getBody(), post.getIntentType().wireValue(),
-                memberCount, unread,
+                memberCount, unread, membership.isMuted(), post.getStatus().wireValue(),
                 last == null ? room.getCreatedAt().toString() : last.getCreatedAt().toString(),
                 last == null ? null : truncate(last.getContent()));
     }

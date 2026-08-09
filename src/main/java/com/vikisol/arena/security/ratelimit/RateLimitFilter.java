@@ -53,6 +53,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private int unlockPerMinute;
     @Value("${app.rate-limit.messaging-per-minute:30}")
     private int messagingPerMinute;
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md §4 "rate limits on posting and joining" (Phase B).
+    @Value("${app.rate-limit.post-creation-per-minute:5}")
+    private int postCreationPerMinute;
+    @Value("${app.rate-limit.join-request-per-minute:10}")
+    private int joinRequestPerMinute;
     @Value("${app.rate-limit.default-per-minute:120}")
     private int defaultPerMinute;
 
@@ -103,6 +108,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
         }
         if (path.contains("/messages/")) {
             return new Bucket("messaging", messagingPerMinute);
+        }
+        if (path.endsWith("/joins") && "POST".equalsIgnoreCase(request.getMethod())) {
+            return new Bucket("join-request", joinRequestPerMinute);
+        }
+        if (path.endsWith("/posts") && "POST".equalsIgnoreCase(request.getMethod())) {
+            return new Bucket("post-creation", postCreationPerMinute);
         }
         return new Bucket("default", defaultPerMinute);
     }

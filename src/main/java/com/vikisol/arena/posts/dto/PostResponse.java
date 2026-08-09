@@ -24,6 +24,14 @@ public record PostResponse(
         Boolean mine,
         String myJoinStatus,
         String roomId,
-        String createdAt
+        String createdAt,
+        // Phase B additions. approxLat/approxLng are ALREADY jittered for display (see
+        // PostMapper) - never the stored value directly. exactMeetingPoint is only ever
+        // non-null when the viewer is the author or an approved room member - see
+        // PostMapper.toResponse's own comment.
+        Double approxLat,
+        Double approxLng,
+        String exactMeetingPoint,
+        String requiredVerificationLevel
 ) {
 }

@@ -5,6 +5,7 @@ import com.vikisol.arena.common.dto.ApiResponse;
 import com.vikisol.arena.profile.dto.CandidateDataExport;
 import com.vikisol.arena.profile.dto.CandidateProfileResponse;
 import com.vikisol.arena.profile.dto.ConsentDto;
+import com.vikisol.arena.profile.dto.LocationConsentRequest;
 import com.vikisol.arena.profile.dto.UpdateAutonomyRequest;
 import com.vikisol.arena.profile.dto.UpdateProfileDetailsRequest;
 import com.vikisol.arena.profile.dto.UpdateSkillsRequest;
@@ -53,6 +54,12 @@ public class ProfileController {
     public ResponseEntity<ApiResponse<CandidateProfileResponse>> updateConsent(
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody ConsentDto request) {
         return ResponseEntity.ok(ApiResponse.ok(profileService.updateConsent(principal.getId(), request)));
+    }
+
+    @PutMapping("/me/location")
+    public ResponseEntity<ApiResponse<CandidateProfileResponse>> updateLocationConsent(
+            @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody LocationConsentRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.updateLocationConsent(principal.getId(), request)));
     }
 
     @PostMapping(value = "/me/cv", consumes = "multipart/form-data")

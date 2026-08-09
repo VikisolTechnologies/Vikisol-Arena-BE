@@ -13,6 +13,7 @@ import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
+import java.time.LocalDate;
 
 // Table prefixed "arena_" - see README decisions: this local Postgres database already contained
 // unrelated tables (including one literally named "users") from a prior, unrelated project.
@@ -64,4 +65,27 @@ public class User extends BaseEntity {
     // Null = active account. Set once, never cleared - a real account deletion, not a
     // reactivatable suspension (that's TenantStatus.SUSPENDED at the tenant level instead).
     private Instant deletedAt;
+
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md §4 safety suite (Phase B). Self-attested, not
+    // cryptographically verified - see DECISIONS.md. Null = not yet captured; every
+    // ACTIVITY-post create/join gate requires this to be set and >= 18 years ago.
+    private LocalDate dateOfBirth;
+
+    // Phone verification (VerificationService). Number is captured at OTP-request time;
+    // phoneVerified only flips true after a correct OTP confirm.
+    private String phoneNumber;
+
+    @Column(nullable = false, columnDefinition = "boolean not null default false")
+    @Builder.Default
+    private boolean phoneVerified = false;
+
+    // Hashed (never plaintext) pending OTP + its expiry - both null once confirmed or expired.
+    // Single pending code at a time by design (a new request overwrites any unconfirmed one).
+    private String pendingOtpHash;
+    private Instant pendingOtpExpiresAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, columnDefinition = "varchar(255) not null default 'BASIC'")
+    @Builder.Default
+    private VerificationLevel verificationLevel = VerificationLevel.BASIC;
 }

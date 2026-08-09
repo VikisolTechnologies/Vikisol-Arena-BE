@@ -244,12 +244,24 @@ public class DataSeeder implements ApplicationRunner {
             int experienceYears = isDemo ? 5 : IndianData.intBetween(0, 14);
             String name = isDemo ? "Aarav Sharma" : IndianData.fullName();
 
-            User user = userRepository.save(User.builder()
+            // Phase B: dates of birth so ACTIVITY create/join isn't blocked for seeded demo
+            // accounts by the real age gate - all adults (22-45), one deliberately left at 17
+            // (candidate index 1) so the age-gate has something real to demonstrate rather than
+            // never being exercised in seed data. Demo account also gets phone-verified true
+            // (skips the OTP flow for anyone just exploring the seeded account).
+            boolean isMinorDemo = i == 1;
+            User.UserBuilder userBuilder = User.builder()
                     .email(isDemo ? DEMO_TALENT_EMAIL : ("candidate" + i + "@example.com"))
                     .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
                     .name(name)
                     .role(Role.TALENT)
-                    .build());
+                    .dateOfBirth(isMinorDemo
+                            ? java.time.LocalDate.now().minusYears(17)
+                            : java.time.LocalDate.now().minusYears(IndianData.intBetween(22, 45)));
+            if (isDemo) {
+                userBuilder.phoneNumber("+91 90000 00001").phoneVerified(true).verificationLevel(com.vikisol.arena.auth.entity.VerificationLevel.PHONE);
+            }
+            User user = userRepository.save(userBuilder.build());
 
             List<CandidateSkill> skills = IndianData.pickN(IndianData.SKILLS_BY_INDUSTRY.get(industry), IndianData.intBetween(3, 6)).stream()
                     .map(s -> new CandidateSkill(s, IndianData.RANDOM.nextDouble() < 0.5))
@@ -273,6 +285,21 @@ public class DataSeeder implements ApplicationRunner {
                     .autonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED, AutonomyLevel.AUTOPILOT)))
                     .bio(experienceYears + "+ years in " + industry.wireValue().toLowerCase() + ", based in " + IndianData.pick(IndianData.LOCATIONS) + ".")
                     .build();
+            // Phase B: the first 8 candidates get real PRECISE-consent coordinates scattered a
+            // few km around Hyderabad (matching the seeded ACTIVITY posts' own "Gachibowli"
+            // location below) so the Map/nearby-discovery screen has genuine seeded data to
+            // show, not an empty result on first click-through - same purpose as this class's
+            // other seed methods.
+            if (i < 8) {
+                double jitterLat = 17.3850 + (IndianData.RANDOM.nextDouble() - 0.5) * 0.12;
+                double jitterLng = 78.4867 + (IndianData.RANDOM.nextDouble() - 0.5) * 0.12;
+                String geohash = com.vikisol.arena.common.geo.GeohashUtil.encode(jitterLat, jitterLng);
+                double[] approx = com.vikisol.arena.common.geo.GeohashUtil.decode(geohash);
+                profile.setLocationConsent(com.vikisol.arena.profile.entity.LocationConsent.PRECISE);
+                profile.setGeohash(geohash);
+                profile.setApproxLat(approx[0]);
+                profile.setApproxLng(approx[1]);
+            }
             profile.setCareerHealth(scoringService.computeCareerHealth(profile));
             candidates.add(candidateProfileRepository.save(profile));
         }
@@ -442,13 +469,26 @@ public class DataSeeder implements ApplicationRunner {
         CandidateProfile demo = candidates.get(0);
         User demoUser = demo.getUser();
 
-        record PostSeed(PostIntentType intent, String body, String location, PostVisibility visibility, Integer capacity) {}
+        record PostSeed(PostIntentType intent, String body, String location, PostVisibility visibility, Integer capacity,
+                         double[] geo, Instant startsAt, String exactMeetingPoint) {}
+        // Real geo on the two ACTIVITY posts (Gachibowli/Ananthagiri Hills, both real Hyderabad-
+        // area places) - see DECISIONS.md's Map entry for why this is a plotted-radar
+        // visualization rather than street tiles; either way it needs genuine seeded
+        // coordinates to show anything on first click-through, same purpose as candidates'
+        // own seeded PRECISE-consent positions above.
         List<PostSeed> seeds = List.of(
-                new PostSeed(PostIntentType.ACTIVITY, "Badminton at 6pm today, Gachibowli - need 2 more for doubles", "Gachibowli", PostVisibility.PUBLIC, 4),
-                new PostSeed(PostIntentType.ASK, "Anyone used a good freelance invoicing tool for Indian clients? Tired of manual GST calculations.", null, PostVisibility.PUBLIC, null),
-                new PostSeed(PostIntentType.UPDATE, "Shipped a side project this weekend - a small habit tracker. First real users today!", null, null, null),
-                new PostSeed(PostIntentType.ACTIVITY, "Weekend trek to Ananthagiri Hills, Saturday early morning - open to 5 people, first-timers welcome", "Ananthagiri Hills", PostVisibility.APPROVAL, 6),
-                new PostSeed(PostIntentType.ASK, "Looking for a solid React Native mentor for a couple of hours a week - happy to pay for the time.", null, PostVisibility.APPROVAL, null)
+                new PostSeed(PostIntentType.ACTIVITY, "Badminton at 6pm today, Gachibowli - need 2 more for doubles", "Gachibowli",
+                        PostVisibility.PUBLIC, 4, new double[]{17.4400, 78.3489}, Instant.now().plus(Duration.ofHours(3)),
+                        "Smash Badminton Academy, Gachibowli - Court 2"),
+                new PostSeed(PostIntentType.ASK, "Anyone used a good freelance invoicing tool for Indian clients? Tired of manual GST calculations.", null,
+                        PostVisibility.PUBLIC, null, null, null, null),
+                new PostSeed(PostIntentType.UPDATE, "Shipped a side project this weekend - a small habit tracker. First real users today!", null,
+                        null, null, null, null, null),
+                new PostSeed(PostIntentType.ACTIVITY, "Weekend trek to Ananthagiri Hills, Saturday early morning - open to 5 people, first-timers welcome", "Ananthagiri Hills",
+                        PostVisibility.APPROVAL, 6, new double[]{17.2100, 78.2000}, Instant.now().plus(Duration.ofDays(4)),
+                        "Meeting point: Vikarabad bus stand, 5:30am sharp"),
+                new PostSeed(PostIntentType.ASK, "Looking for a solid React Native mentor for a couple of hours a week - happy to pay for the time.", null,
+                        PostVisibility.APPROVAL, null, null, null, null)
         );
 
         List<Post> savedPosts = new ArrayList<>();
@@ -457,7 +497,7 @@ public class DataSeeder implements ApplicationRunner {
             // First few authored by the demo talent account so its own Feed/Rooms views have
             // real "mine" data; the rest spread across other seeded candidates for a populated feed.
             CandidateProfile author = i < 2 ? demo : IndianData.pick(candidates.subList(1, candidates.size()));
-            Post post = postRepository.save(Post.builder()
+            Post.PostBuilder builder = Post.builder()
                     .authorUser(author.getUser())
                     .intentType(seed.intent())
                     .body(seed.body())
@@ -466,7 +506,14 @@ public class DataSeeder implements ApplicationRunner {
                     .visibility(seed.visibility() == null ? PostVisibility.PUBLIC : seed.visibility())
                     .capacity(seed.capacity())
                     .status(PostStatus.OPEN)
-                    .build());
+                    .startsAt(seed.startsAt())
+                    .exactMeetingPoint(seed.exactMeetingPoint());
+            if (seed.geo() != null) {
+                String geohash = com.vikisol.arena.common.geo.GeohashUtil.encode(seed.geo()[0], seed.geo()[1]);
+                double[] approx = com.vikisol.arena.common.geo.GeohashUtil.decode(geohash);
+                builder.geohash(geohash).approxLat(approx[0]).approxLng(approx[1]);
+            }
+            Post post = postRepository.save(builder.build());
             backdate("arena_posts", post.getId(), IndianData.intBetween(0, 3));
             savedPosts.add(post);
         }

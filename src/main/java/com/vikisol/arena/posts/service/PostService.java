@@ -1,10 +1,14 @@
 package com.vikisol.arena.posts.service;
 
 import com.vikisol.arena.auth.entity.User;
+import com.vikisol.arena.auth.entity.VerificationLevel;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.common.geo.GeohashUtil;
+import com.vikisol.arena.common.util.AgeUtil;
+import com.vikisol.arena.follows.service.BlockService;
 import com.vikisol.arena.notifications.service.NotificationService;
 import com.vikisol.arena.posts.dto.CreatePostRequest;
 import com.vikisol.arena.posts.dto.PostJoinRequestResponse;
@@ -42,10 +46,12 @@ public class PostService {
     private final FeedRankingService feedRankingService;
     private final RoomService roomService;
     private final NotificationService notificationService;
+    private final BlockService blockService;
 
     @Transactional(readOnly = true)
     public List<PostResponse> getFeed(UUID viewingUserId, int page, int size) {
         List<Post> window = feedRankingService.getFeedWindow(viewingUserId, page, size);
+        window = excludeBlocked(window, viewingUserId);
         var authorProfiles = batchAuthorProfiles(window);
         return window.stream()
                 .map(p -> mapper.toResponse(p, viewingUserId, myJoinStatus(p, viewingUserId), roomIdFor(p), authorProfiles))
@@ -66,12 +72,52 @@ public class PostService {
                 p -> mapper.toResponse(p, userId, myJoinStatus(p, userId), roomIdFor(p), authorProfiles));
     }
 
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md §3.2 nearby discovery. Same geohash-prefix-then-Haversine
+    // approach as FeedRankingService's own "fetch a bounded window, refine in Java" style - see
+    // DECISIONS.md for why there's no PostGIS radius query underneath this. Only ACTIVITY/ASK
+    // posts with a captured position are candidates; time window filters on startsAt (falls back
+    // to createdAt for posts with no explicit start, e.g. an ASK).
+    @Transactional(readOnly = true)
+    public List<PostResponse> getNearby(UUID viewingUserId, double centerLat, double centerLng, double radiusKm,
+                                         Integer withinHours, String intentTypeWire) {
+        PostIntentType intentFilter = (intentTypeWire == null || intentTypeWire.isBlank())
+                ? null : PostIntentType.valueOf(intentTypeWire.trim().toUpperCase());
+        Pageable window = PageRequest.of(0, 500, Sort.by(Sort.Direction.DESC, "createdAt"));
+        List<Post> candidates = postRepository.findByStatusOrderByCreatedAtDesc(PostStatus.OPEN, window).getContent();
+
+        Instant horizon = withinHours == null ? null : Instant.now().plusSeconds(withinHours * 3600L);
+        List<Post> nearby = candidates.stream()
+                .filter(Post::isJoinable)
+                .filter(p -> p.getApproxLat() != null && p.getApproxLng() != null)
+                .filter(p -> intentFilter == null || p.getIntentType() == intentFilter)
+                .filter(p -> horizon == null || (p.getStartsAt() != null && p.getStartsAt().isBefore(horizon)))
+                .filter(p -> GeohashUtil.distanceKm(centerLat, centerLng, p.getApproxLat(), p.getApproxLng()) <= radiusKm)
+                .sorted((a, b) -> Double.compare(
+                        GeohashUtil.distanceKm(centerLat, centerLng, a.getApproxLat(), a.getApproxLng()),
+                        GeohashUtil.distanceKm(centerLat, centerLng, b.getApproxLat(), b.getApproxLng())))
+                .toList();
+        nearby = excludeBlocked(nearby, viewingUserId);
+
+        var authorProfiles = batchAuthorProfiles(nearby);
+        return nearby.stream()
+                .map(p -> mapper.toResponse(p, viewingUserId, myJoinStatus(p, viewingUserId), roomIdFor(p), authorProfiles))
+                .toList();
+    }
+
     @Transactional
     public PostResponse create(UUID userId, CreatePostRequest request) {
         User author = requireUser(userId);
-        Post post = Post.builder()
+        PostIntentType intentType = PostIntentType.valueOf(request.intentType().trim().toUpperCase());
+
+        // §4 age-gating: ACTIVITY is the real-world-meetup intent type. ASK/UPDATE don't carry
+        // the same risk and aren't gated - see DECISIONS.md.
+        if (intentType == PostIntentType.ACTIVITY) {
+            requireAdult(author);
+        }
+
+        Post.PostBuilder builder = Post.builder()
                 .authorUser(author)
-                .intentType(PostIntentType.valueOf(request.intentType().trim().toUpperCase()))
+                .intentType(intentType)
                 .body(request.body())
                 .locationText(request.locationText())
                 .audience(request.audience() == null ? PostAudience.GLOBAL : PostAudience.valueOf(request.audience().trim().toUpperCase()))
@@ -82,9 +128,37 @@ public class PostService {
                 .endsAt(request.endsAt() == null ? null : Instant.parse(request.endsAt()))
                 .tags(request.tags())
                 .mediaUrls(request.mediaUrls())
-                .build();
-        post = postRepository.save(post);
+                .exactMeetingPoint(request.exactMeetingPoint())
+                .requiredVerificationLevel(request.requiredVerificationLevel() == null || request.requiredVerificationLevel().isBlank()
+                        ? null : VerificationLevel.valueOf(request.requiredVerificationLevel().trim().toUpperCase()));
+
+        // Geo capture is a per-post, explicit, in-the-moment action (the composer's own
+        // Geolocation prompt) - independent of the author's account-wide discovery consent.
+        // Same "encode immediately, never persist the raw point" guarantee as
+        // CandidateProfileService.updateLocationConsent.
+        if (request.lat() != null && request.lng() != null) {
+            String geohash = GeohashUtil.encode(request.lat(), request.lng());
+            double[] approx = GeohashUtil.decode(geohash);
+            builder.geohash(geohash).approxLat(approx[0]).approxLng(approx[1]);
+        }
+
+        Post post = postRepository.save(builder.build());
         return mapper.toResponse(post, userId, null, null);
+    }
+
+    @Transactional
+    public PostResponse cancel(UUID userId, UUID postId) {
+        Post post = requirePost(postId);
+        if (!post.getAuthorUser().getId().equals(userId)) {
+            throw new AccessDeniedException("Not your post");
+        }
+        if (post.getStatus() == PostStatus.CANCELLED || post.getStatus() == PostStatus.CLOSED) {
+            throw new BadRequestException("This post is already " + post.getStatus().wireValue());
+        }
+        post.setStatus(PostStatus.CANCELLED);
+        postRepository.save(post);
+        roomService.notifyRoomOfCancellation(post);
+        return mapper.toResponse(post, userId, null, roomIdFor(post));
     }
 
     @Transactional
@@ -102,8 +176,18 @@ public class PostService {
         if (post.getStatus() != PostStatus.OPEN) {
             throw new BadRequestException("This post is no longer open");
         }
+        if (blockService.isBlockedEitherDirection(userId, post.getAuthorUser().getId())) {
+            throw new BadRequestException("You can't join this post");
+        }
 
         User user = requireUser(userId);
+        if (post.getIntentType() == PostIntentType.ACTIVITY) {
+            requireAdult(user);
+        }
+        if (post.getRequiredVerificationLevel() != null && !user.getVerificationLevel().atLeast(post.getRequiredVerificationLevel())) {
+            throw new BadRequestException("This post requires " + post.getRequiredVerificationLevel().wireValue() + " verification to join - check Settings");
+        }
+
         boolean autoApprove = post.getVisibility() == PostVisibility.PUBLIC;
         PostJoinRequest joinRequest = postJoinRequestRepository.save(PostJoinRequest.builder()
                 .post(post).user(user)
@@ -165,6 +249,20 @@ public class PostService {
         postRepository.save(post);
 
         notificationService.notifyPostJoinApproved(joinRequest);
+    }
+
+    private void requireAdult(User user) {
+        if (user.getDateOfBirth() == null) {
+            throw new BadRequestException("Add your date of birth in Settings before creating or joining an activity");
+        }
+        if (!AgeUtil.isAdult(user.getDateOfBirth())) {
+            throw new BadRequestException("You must be " + AgeUtil.MINIMUM_AGE + " or older to create or join an activity");
+        }
+    }
+
+    private List<Post> excludeBlocked(List<Post> posts, UUID viewingUserId) {
+        if (viewingUserId == null || posts.isEmpty()) return posts;
+        return posts.stream().filter(p -> !blockService.isBlockedEitherDirection(viewingUserId, p.getAuthorUser().getId())).toList();
     }
 
     private String myJoinStatus(Post post, UUID viewingUserId) {

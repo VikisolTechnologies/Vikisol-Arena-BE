@@ -33,4 +33,10 @@ public class RoomMember extends BaseEntity {
     private RoomMemberRole role = RoomMemberRole.MEMBER;
 
     private Instant lastReadAt;
+
+    // §4 "mute everywhere" - stays in the room (still a member, still sees history), just
+    // stops surfacing an unread badge for it. Independent of lastReadAt.
+    @Column(nullable = false, columnDefinition = "boolean not null default false")
+    @Builder.Default
+    private boolean muted = false;
 }

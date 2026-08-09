@@ -1,5 +1,6 @@
 package com.vikisol.arena.posts.service;
 
+import com.vikisol.arena.common.geo.GeohashUtil;
 import com.vikisol.arena.posts.dto.PostJoinRequestResponse;
 import com.vikisol.arena.posts.dto.PostResponse;
 import com.vikisol.arena.posts.entity.Post;
@@ -40,6 +41,22 @@ public class PostMapper {
             authorEmoji = authorProfile.getAvatarEmoji();
         }
         boolean mine = viewingUserId != null && post.getAuthorUser().getId().equals(viewingUserId);
+
+        // §4: "exact meeting point revealed only inside the room, only to approved joiners" -
+        // mine-or-approved is exactly that gate, using information already resolved by the
+        // caller (PostService) rather than this mapper needing its own room-membership query.
+        boolean canSeeExactMeetingPoint = mine || "approved".equals(myJoinStatus);
+
+        // A second, independent jitter on top of the already-coarse stored approxLat/approxLng -
+        // see GeohashUtil.jitter's own doc comment and DECISIONS.md. Only computed when a
+        // position actually exists; never derived from anything more precise than what's stored.
+        Double displayLat = null, displayLng = null;
+        if (post.getApproxLat() != null && post.getApproxLng() != null) {
+            double[] jittered = GeohashUtil.jitter(post.getApproxLat(), post.getApproxLng(), 150);
+            displayLat = jittered[0];
+            displayLng = jittered[1];
+        }
+
         return new PostResponse(
                 post.getId().toString(), post.getAuthorUser().getId().toString(), authorName, authorEmoji,
                 post.getIntentType().wireValue(), post.getBody(), post.getLocationText(),
@@ -48,7 +65,10 @@ public class PostMapper {
                 post.getStartsAt() == null ? null : post.getStartsAt().toString(),
                 post.getEndsAt() == null ? null : post.getEndsAt().toString(),
                 post.getTags(), post.getMediaUrls(), post.isJoinable(),
-                mine ? Boolean.TRUE : null, myJoinStatus, roomId, post.getCreatedAt().toString()
+                mine ? Boolean.TRUE : null, myJoinStatus, roomId, post.getCreatedAt().toString(),
+                displayLat, displayLng,
+                canSeeExactMeetingPoint ? post.getExactMeetingPoint() : null,
+                post.getRequiredVerificationLevel() == null ? null : post.getRequiredVerificationLevel().wireValue()
         );
     }
 

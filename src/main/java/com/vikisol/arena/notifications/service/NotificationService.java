@@ -100,6 +100,14 @@ public class NotificationService {
         notify(following, NotificationType.SYSTEM, "New follower", follower.getName() + " started following you.");
     }
 
+    public void notifyPostCancelled(User recipient, Post post) {
+        notify(recipient, NotificationType.SYSTEM, "Activity cancelled", "\"" + preview(post.getBody()) + "\" was cancelled by its host.");
+    }
+
+    public void notifyActivityStartingSoon(User recipient, Post post) {
+        notify(recipient, NotificationType.SYSTEM, "Starting soon", "\"" + preview(post.getBody()) + "\" starts within the hour.");
+    }
+
     private String preview(String body) {
         return body.length() > 60 ? body.substring(0, 60) + "…" : body;
     }

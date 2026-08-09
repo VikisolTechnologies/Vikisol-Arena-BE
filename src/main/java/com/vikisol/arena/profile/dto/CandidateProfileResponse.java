@@ -20,6 +20,10 @@ public record CandidateProfileResponse(
         String autonomy,
         String bio,
         String cvUrl,
-        String cvFileName
+        String cvFileName,
+        String locationConsent,
+        String homeCity,
+        Double approxLat,
+        Double approxLng
 ) {
 }

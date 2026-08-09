@@ -49,6 +49,18 @@ public class RoomController {
         return ResponseEntity.ok(ApiResponse.ok(roomService.sendMessage(principal.getId(), id, request.content())));
     }
 
+    @PutMapping("/{id}/mute")
+    public ResponseEntity<ApiResponse<Void>> mute(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        roomService.setMuted(principal.getId(), id, true);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    @PutMapping("/{id}/unmute")
+    public ResponseEntity<ApiResponse<Void>> unmute(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        roomService.setMuted(principal.getId(), id, false);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
     @PutMapping("/{id}/read")
     public ResponseEntity<ApiResponse<Void>> markRead(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
         roomService.markRead(principal.getId(), id);
