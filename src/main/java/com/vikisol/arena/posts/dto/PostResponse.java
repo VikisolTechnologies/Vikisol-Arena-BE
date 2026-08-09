@@ -8,6 +8,9 @@ public record PostResponse(
         String authorUserId,
         String authorName,
         String authorEmoji,
+        // Post-spec reconciliation addition - set only for intentType=company, lets the
+        // frontend link the post's author straight to /companies/{id}.
+        String authorCompanyId,
         String intentType,
         String body,
         String locationText,
@@ -36,6 +39,12 @@ public record PostResponse(
         // Phase C additions.
         long commentCount,
         long reactionCount,
-        Boolean myReacted
+        Boolean myReacted,
+        // §4 safety-audit additions - trust signals for whoever's about to meet this post's
+        // author in person. authorJoinCount = how many other posts they've been APPROVED into
+        // (a real participation track record); authorAccountAgeDays = how long they've had an
+        // account (a fresh same-day account is a real risk signal).
+        long authorJoinCount,
+        long authorAccountAgeDays
 ) {
 }

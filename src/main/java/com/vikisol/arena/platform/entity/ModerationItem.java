@@ -3,6 +3,7 @@ package com.vikisol.arena.platform.entity;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.common.entity.BaseEntity;
 import com.vikisol.arena.jobs.entity.JobPosting;
+import com.vikisol.arena.posts.entity.Post;
 import com.vikisol.arena.rooms.entity.Room;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -47,6 +48,15 @@ public class ModerationItem extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "room_id")
     private Room room;
+
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md §4: "Report, block, and mute everywhere (post, room,
+    // profile, message)" - a Room only ever exists for ACTIVITY/ASK posts with an approved
+    // joiner, so ROOM-type reports alone left every UPDATE post and every not-yet-joined
+    // ACTIVITY/ASK post completely unreportable. POST is the direct fix, additive alongside
+    // JOB_POSTING/ROOM per the same generalize-additively precedent (see DECISIONS.md).
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "post_id")
+    private Post post;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "reporter_user_id")

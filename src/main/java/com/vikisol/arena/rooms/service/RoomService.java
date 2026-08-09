@@ -3,9 +3,12 @@ package com.vikisol.arena.rooms.service;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.notifications.service.NotificationService;
 import com.vikisol.arena.platform.service.ModerationService;
 import com.vikisol.arena.posts.entity.Post;
+import com.vikisol.arena.posts.entity.PostStatus;
+import com.vikisol.arena.posts.repository.PostRepository;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import com.vikisol.arena.rooms.dto.RoomMemberResponse;
 import com.vikisol.arena.rooms.dto.RoomMessageResponse;
@@ -47,6 +50,7 @@ public class RoomService {
     private final CandidateProfileRepository candidateProfileRepository;
     private final ModerationService moderationService;
     private final NotificationService notificationService;
+    private final PostRepository postRepository;
 
     @Transactional
     public Room getOrCreateForPost(Post post) {
@@ -64,6 +68,44 @@ public class RoomService {
         if (roomMemberRepository.existsByRoomIdAndUserId(room.getId(), user.getId())) return;
         roomMemberRepository.save(RoomMember.builder()
                 .room(room).user(user).role(RoomMemberRole.MEMBER).build());
+    }
+
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md §3.4/§4: "Author is admin: ... remove"; "creator can
+    // remove anyone" - previously entirely missing (safety-audit fix). Only the room's own
+    // ADMIN (the post's author - getOrCreateForPost always seats them as ADMIN) can remove
+    // someone, and only a MEMBER, never another ADMIN/themself (leaving your own post's room
+    // isn't this endpoint's job). Reopens the post if removing a member drops it back under
+    // capacity - the exact mirror of onJoinApproved's own spotsFilled/FULL bookkeeping in
+    // PostService, kept here rather than routed through PostService for the same circular-
+    // bean-dependency reason ModerationService.takedown() already documents.
+    @Transactional
+    public void removeMember(UUID actorUserId, UUID roomId, UUID targetUserId) {
+        Room room = requireRoom(roomId);
+        RoomMember actor = roomMemberRepository.findByRoomIdAndUserId(roomId, actorUserId)
+                .orElseThrow(() -> new AccessDeniedException("Not a member of this room"));
+        if (actor.getRole() != RoomMemberRole.ADMIN) {
+            throw new AccessDeniedException("Only the room admin can remove members");
+        }
+        if (actorUserId.equals(targetUserId)) {
+            throw new BadRequestException("Use leave, not remove, for yourself");
+        }
+        RoomMember target = roomMemberRepository.findByRoomIdAndUserId(roomId, targetUserId)
+                .orElseThrow(() -> new ResourceNotFoundException("That person isn't in this room"));
+        if (target.getRole() == RoomMemberRole.ADMIN) {
+            throw new BadRequestException("Can't remove another admin");
+        }
+        roomMemberRepository.delete(target);
+
+        Post post = room.getPost();
+        if (post.getSpotsFilled() > 0) {
+            post.setSpotsFilled(post.getSpotsFilled() - 1);
+        }
+        if (post.getStatus() == PostStatus.FULL) {
+            post.setStatus(PostStatus.OPEN);
+        }
+        postRepository.save(post);
+
+        notificationService.notifyRemovedFromRoom(target.getUser(), post);
     }
 
     @Transactional(readOnly = true)

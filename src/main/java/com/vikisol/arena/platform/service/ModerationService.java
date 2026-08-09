@@ -28,13 +28,16 @@ import java.util.List;
 import java.util.UUID;
 
 /**
- * PA4 (moderation queue). Two sources: autoFlag() (banned-phrase scan at job-posting-creation
- * time) and fileRoomReport() (a real user report on a Room, ARENA-V2-PRODUCT-ARCHITECTURE.md
- * §4 - called from RoomService.report()). Depends on PostRepository directly (not PostService)
+ * PA4 (moderation queue). Four sources: autoFlag(JobPosting)/autoFlag(Post) (banned-phrase scan
+ * at creation time), fileRoomReport()/filePostReport() (real user reports,
+ * ARENA-V2-PRODUCT-ARCHITECTURE.md §4 - called from RoomService.report() and
+ * PostController.report() respectively). Depends on PostRepository directly (not PostService)
  * deliberately - PostService already depends on RoomService for room creation, so going through
  * PostService here (RoomService -> ModerationService -> PostService -> RoomService) would be a
- * circular bean dependency. Flipping a Post's status directly for the one case this needs
- * (ROOM-type takedown) is a small enough duplication to avoid that entirely.
+ * circular bean dependency. Flipping a Post's status directly for the takedown cases that need
+ * it (ROOM/POST-type) is a small enough duplication to avoid that entirely. PostService itself
+ * depends the other way (PostService -> ModerationService, to call autoFlag(Post) on create) -
+ * that direction is safe since ModerationService never depends back on PostService.
  */
 @Service
 @RequiredArgsConstructor
@@ -64,6 +67,25 @@ public class ModerationService {
                 .build());
     }
 
+    // §4 safety-audit fix: "Rate limits + spam/abuse detection on posting and joining; auto-flag
+    // phrases" was built for JobPosting only - the activity layer's own posts (where a scam/
+    // abuse phrase is arguably higher-stakes, since it can lead to an in-person meetup) had no
+    // auto-flag at all. Same phrase list, same PENDING-queue behavior, called from
+    // PostService.create() for every intent type (not just ACTIVITY - an ASK or UPDATE can
+    // carry the exact same scam phrases).
+    @Transactional
+    public void autoFlag(Post post) {
+        String haystack = post.getBody().toLowerCase();
+        List<String> matched = FLAGGED_PHRASES.stream().filter(haystack::contains).toList();
+        if (matched.isEmpty()) return;
+        moderationItemRepository.save(ModerationItem.builder()
+                .contentType(ModerationContentType.POST)
+                .post(post)
+                .reason("Auto-flagged terms: " + String.join(", ", matched))
+                .status(ModerationStatus.PENDING)
+                .build());
+    }
+
     // ARENA-V2-PRODUCT-ARCHITECTURE.md §4 "wired into the platform-admin moderation queue" -
     // called from RoomService.report(). Takes the Room/reporter as already-resolved objects
     // (RoomService already has them in hand) rather than this service re-querying by id.
@@ -72,6 +94,23 @@ public class ModerationService {
         moderationItemRepository.save(ModerationItem.builder()
                 .contentType(ModerationContentType.ROOM)
                 .room(room)
+                .reporter(reporter)
+                .reason(reason)
+                .status(ModerationStatus.PENDING)
+                .build());
+    }
+
+    // §4's "report ... everywhere (post, room, ...)" - the direct post-level counterpart to
+    // fileRoomReport, covering every post regardless of whether it ever grew a Room (UPDATE
+    // posts never do; ACTIVITY/ASK posts don't until someone's approved to join).
+    @Transactional
+    public void filePostReport(UUID reporterUserId, UUID postId, String reason) {
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new ResourceNotFoundException("Post not found: " + postId));
+        User reporter = userRepository.getReferenceById(reporterUserId);
+        moderationItemRepository.save(ModerationItem.builder()
+                .contentType(ModerationContentType.POST)
+                .post(post)
                 .reporter(reporter)
                 .reason(reason)
                 .status(ModerationStatus.PENDING)
@@ -97,9 +136,9 @@ public class ModerationService {
             auditService.record(item.getJobPosting().getEnterprise().getId(), actorUserId,
                     AuditActions.MODERATION_DISMISSED, item.getJobPosting().getTitle());
         }
-        // ROOM-type items have no tenant (candidate-to-candidate, not enterprise-scoped) - no
-        // audit call, same "nothing to audit" treatment ConversationService.sendMessage already
-        // gives a candidate-sent message with no resolvable tenant.
+        // ROOM/POST-type items have no tenant (candidate-to-candidate, not enterprise-scoped) -
+        // no audit call, same "nothing to audit" treatment ConversationService.sendMessage
+        // already gives a candidate-sent message with no resolvable tenant.
     }
 
     @Transactional
@@ -110,21 +149,29 @@ public class ModerationService {
         item.setResolvedAt(Instant.now());
         moderationItemRepository.save(item);
 
-        if (item.getContentType() == ModerationContentType.JOB_POSTING) {
-            JobPosting posting = item.getJobPosting();
-            posting.setStatus(PostingStatus.CLOSED);
-            jobPostingRepository.save(posting);
-            auditService.record(posting.getEnterprise().getId(), actorUserId, AuditActions.MODERATION_TAKEDOWN, posting.getTitle());
-        } else {
-            // Cancels the underlying Post directly (not via PostService - see this class's own
-            // header comment on why, to avoid a circular bean dependency). Doesn't notify room
-            // members the way an author-initiated cancel does (RoomService.
-            // notifyRoomOfCancellation) - a deliberate, smaller scope for this rarer admin path;
-            // the room's history and membership stay intact, it just stops accepting new joins.
-            Room room = item.getRoom();
-            Post post = room.getPost();
-            post.setStatus(PostStatus.CANCELLED);
-            postRepository.save(post);
+        switch (item.getContentType()) {
+            case JOB_POSTING -> {
+                JobPosting posting = item.getJobPosting();
+                posting.setStatus(PostingStatus.CLOSED);
+                jobPostingRepository.save(posting);
+                auditService.record(posting.getEnterprise().getId(), actorUserId, AuditActions.MODERATION_TAKEDOWN, posting.getTitle());
+            }
+            case ROOM -> {
+                // Cancels the underlying Post directly (not via PostService - see this class's
+                // own header comment on why, to avoid a circular bean dependency). Doesn't notify
+                // room members the way an author-initiated cancel does (RoomService.
+                // notifyRoomOfCancellation) - a deliberate, smaller scope for this rarer admin
+                // path; the room's history and membership stay intact, it just stops accepting
+                // new joins.
+                Post post = item.getRoom().getPost();
+                post.setStatus(PostStatus.CANCELLED);
+                postRepository.save(post);
+            }
+            case POST -> {
+                Post post = item.getPost();
+                post.setStatus(PostStatus.CANCELLED);
+                postRepository.save(post);
+            }
         }
     }
 
@@ -134,16 +181,26 @@ public class ModerationService {
     }
 
     private ModerationItemResponse toResponse(ModerationItem item) {
-        if (item.getContentType() == ModerationContentType.ROOM) {
-            Room room = item.getRoom();
-            String reporterName = item.getReporter() == null ? null : item.getReporter().getName();
-            return new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
-                    null, room.getPost().getBody(), null, room.getId().toString(), reporterName,
-                    item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString());
-        }
-        JobPosting p = item.getJobPosting();
-        return new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
-                p.getId().toString(), p.getTitle(), p.getEnterprise().getCompanyName(), null, null,
-                item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString());
+        String reporterName = item.getReporter() == null ? null : item.getReporter().getName();
+        return switch (item.getContentType()) {
+            case ROOM -> {
+                Room room = item.getRoom();
+                yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
+                        null, room.getPost().getBody(), null, room.getId().toString(), reporterName,
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null);
+            }
+            case POST -> {
+                Post post = item.getPost();
+                yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
+                        null, post.getBody(), null, null, reporterName,
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), post.getId().toString());
+            }
+            case JOB_POSTING -> {
+                JobPosting p = item.getJobPosting();
+                yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
+                        p.getId().toString(), p.getTitle(), p.getEnterprise().getCompanyName(), null, null,
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null);
+            }
+        };
     }
 }

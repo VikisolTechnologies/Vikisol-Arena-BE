@@ -43,6 +43,14 @@ public class RoomController {
         return ResponseEntity.ok(ApiResponse.ok(roomService.getMembers(principal.getId(), id)));
     }
 
+    // §4 safety-audit fix: "creator can remove anyone."
+    @DeleteMapping("/{id}/members/{userId}")
+    public ResponseEntity<ApiResponse<Void>> removeMember(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID userId) {
+        roomService.removeMember(principal.getId(), id, userId);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
     @PostMapping("/{id}/messages")
     public ResponseEntity<ApiResponse<RoomMessageResponse>> sendMessage(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody SendRoomMessageRequest request) {

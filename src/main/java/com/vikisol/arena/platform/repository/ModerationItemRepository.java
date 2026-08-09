@@ -25,6 +25,13 @@ public interface ModerationItemRepository extends JpaRepository<ModerationItem, 
     List<PostReportCountProjection> countByRoomPostIdInAndContentType(
             @Param("postIds") List<UUID> postIds, @Param("type") ModerationContentType type);
 
+    // Direct-post-report counterpart (safety-audit addition - posts are now reportable without
+    // ever having grown a Room) - callers combine this with countByRoomPostIdInAndContentType
+    // above so a post's quality score reflects reports filed either way.
+    @Query("select m.post.id as postId, count(m) as cnt from ModerationItem m " +
+            "where m.contentType = com.vikisol.arena.platform.entity.ModerationContentType.POST and m.post.id in :postIds group by m.post.id")
+    List<PostReportCountProjection> countByPostIdIn(@Param("postIds") List<UUID> postIds);
+
     interface PostReportCountProjection {
         UUID getPostId();
         long getCnt();

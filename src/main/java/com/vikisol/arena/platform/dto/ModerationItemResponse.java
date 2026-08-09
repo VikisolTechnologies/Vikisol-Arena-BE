@@ -10,6 +10,9 @@ public record ModerationItemResponse(
         String reporterName,
         String reason,
         String status,
-        String createdAt
+        String createdAt,
+        // Phase C safety-audit addition - populated only for contentType=POST, so the admin
+        // queue and any deep link can point straight at /feed/{postId}.
+        String postId
 ) {
 }

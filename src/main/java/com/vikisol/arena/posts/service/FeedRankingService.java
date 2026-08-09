@@ -30,15 +30,23 @@ import java.util.stream.Collectors;
 
 /**
  * ARENA-V2-PRODUCT-ARCHITECTURE.md §7.3: "recency decay x affinity(follows) x proximity x
- * relevance x urgency x quality." Phase B added the proximity term (see {@code getFeedWindow}'s
- * own note - it's still a no-op hook here since proximity actually lives in
- * {@code PostService.getNearby}'s own dedicated radius search, not blended into the general
- * feed's score; the map/nearby screen and the feed are deliberately two different views over the
- * same posts). Phase C adds relevance (embedding cosine similarity) and quality (inverse of
- * live report count) - see DECISIONS.md for both. No single SQL ORDER BY expresses a composite
- * score like this cleanly, so this mirrors ScoringService's own style: fetch a bounded window,
- * score in Java, sort, paginate - same "fetch then compute" shape as match-percentage/
- * career-health, not a new pattern.
+ * relevance x urgency x quality." All six terms named in the spec now have a real
+ * implementation (urgency added in the post-spec reconciliation pass - see DECISIONS.md).
+ * Proximity is still a no-op HERE deliberately, not because it's unimplemented: it's served by
+ * {@code PostService.getNearby}'s own dedicated radius search (the Map screen), a genuinely
+ * different ranked view over the same posts, not blended into this general feed score.
+ * <p>
+ * The spec writes the formula as a product ("recency decay x affinity x ... x quality"); this
+ * implementation sums the terms instead (quality as a subtracted penalty). A literal product
+ * zeroes a post's ENTIRE score the instant any one factor is zero - every non-local post
+ * (proximity, always 0 in this general feed) or every post with no signed-in viewer (relevance/
+ * affinity, both 0) would score exactly 0 and never appear at all, which can't be the intent of
+ * a feed meant to show posts to logged-out-feeling-anonymous or non-local viewers too. Kept
+ * additive - a deliberate, documented reading of the spec's intent, not a silent deviation.
+ * <p>
+ * No single SQL ORDER BY expresses a composite score like this cleanly, so this mirrors
+ * ScoringService's own style: fetch a bounded window, score in Java, sort, paginate - same
+ * "fetch then compute" shape as match-percentage/career-health, not a new pattern.
  */
 @Service
 @RequiredArgsConstructor
@@ -52,6 +60,8 @@ public class FeedRankingService {
     private static final double RECENCY_HALF_LIFE_HOURS = 18.0;
     private static final double RELEVANCE_WEIGHT = 40.0;
     private static final double QUALITY_PENALTY_PER_REPORT = 15.0;
+    private static final double URGENCY_WEIGHT = 20.0;
+    private static final double URGENCY_TIME_HORIZON_HOURS = 48.0;
     private static final int TRENDING_WINDOW_HOURS = 48;
 
     private final PostRepository postRepository;
@@ -127,8 +137,30 @@ public class FeedRankingService {
         double proximityScore = 0.0;
         double relevanceScore = interestVector == null ? 0.0
                 : RELEVANCE_WEIGHT * EmbeddingUtil.cosineSimilarity(interestVector, EmbeddingUtil.decode(post.getEmbedding()));
+        double urgencyScore = URGENCY_WEIGHT * urgency(post);
         double qualityPenalty = reportCounts.getOrDefault(post.getId(), 0L) * QUALITY_PENALTY_PER_REPORT;
-        return recencyScore + followBonus + proximityScore + relevanceScore - qualityPenalty;
+        return recencyScore + followBonus + proximityScore + relevanceScore + urgencyScore - qualityPenalty;
+    }
+
+    // §7.3 "urgency" (activity starting soon, spots left) - previously entirely missing, added
+    // in the post-spec reconciliation pass. Two independent signals, whichever is stronger wins:
+    // how soon an ACTIVITY/ASK with a real startsAt begins (0 once it's more than 48h out, or
+    // already started/has no startsAt at all), and how close to full a capacity-limited post is
+    // (spotsFilled/capacity - "almost full, join now" is its own kind of urgency even with no
+    // start time set).
+    private double urgency(Post post) {
+        double timeUrgency = 0.0;
+        if (post.getStartsAt() != null) {
+            double hoursUntilStart = Duration.between(Instant.now(), post.getStartsAt()).toMinutes() / 60.0;
+            if (hoursUntilStart > 0 && hoursUntilStart <= URGENCY_TIME_HORIZON_HOURS) {
+                timeUrgency = 1.0 - (hoursUntilStart / URGENCY_TIME_HORIZON_HOURS);
+            }
+        }
+        double capacityUrgency = 0.0;
+        if (post.getCapacity() != null && post.getCapacity() > 0) {
+            capacityUrgency = Math.min(1.0, (double) post.getSpotsFilled() / post.getCapacity());
+        }
+        return Math.max(timeUrgency, capacityUrgency);
     }
 
     // §7.3 "relevance" - embeds the viewer's own skills + bio + a handful of their most recent
@@ -149,12 +181,18 @@ public class FeedRankingService {
         return embeddingProvider.embed(text.toString());
     }
 
+    // Merges both report paths a post can accumulate - a direct report (ModerationContentType.
+    // POST, filed even before any Room exists) and a report on its Room (ACTIVITY/ASK posts
+    // that already have an approved joiner) - so quality reflects either kind, not just one.
     private Map<UUID, Long> batchReportCounts(List<Post> posts) {
         List<UUID> postIds = posts.stream().map(Post::getId).toList();
         if (postIds.isEmpty()) return Map.of();
-        return moderationItemRepository.countByRoomPostIdInAndContentType(postIds, ModerationContentType.ROOM).stream()
-                .collect(Collectors.toMap(ModerationItemRepository.PostReportCountProjection::getPostId,
-                        ModerationItemRepository.PostReportCountProjection::getCnt));
+        Map<UUID, Long> counts = new java.util.HashMap<>();
+        moderationItemRepository.countByRoomPostIdInAndContentType(postIds, ModerationContentType.ROOM)
+                .forEach(p -> counts.merge(p.getPostId(), p.getCnt(), Long::sum));
+        moderationItemRepository.countByPostIdIn(postIds)
+                .forEach(p -> counts.merge(p.getPostId(), p.getCnt(), Long::sum));
+        return counts;
     }
 
     private Map<UUID, Long> countMap(List<PostCommentRepository.PostCountProjection> projections) {

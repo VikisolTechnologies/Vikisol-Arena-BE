@@ -104,6 +104,12 @@ public class NotificationService {
         notify(recipient, NotificationType.SYSTEM, "Activity cancelled", "\"" + preview(post.getBody()) + "\" was cancelled by its host.");
     }
 
+    // §4 safety-audit fix: "creator can remove anyone" - the removed person needs to know why
+    // they lost access, not just silently find the room gone.
+    public void notifyRemovedFromRoom(User recipient, Post post) {
+        notify(recipient, NotificationType.SYSTEM, "Removed from room", "You were removed from \"" + preview(post.getBody()) + "\" by its host.");
+    }
+
     public void notifyActivityStartingSoon(User recipient, Post post) {
         notify(recipient, NotificationType.SYSTEM, "Starting soon", "\"" + preview(post.getBody()) + "\" starts within the hour.");
     }

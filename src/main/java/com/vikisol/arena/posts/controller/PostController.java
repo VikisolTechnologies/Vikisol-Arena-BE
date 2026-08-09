@@ -7,9 +7,11 @@ import com.vikisol.arena.posts.dto.CreatePostRequest;
 import com.vikisol.arena.posts.dto.PostCommentResponse;
 import com.vikisol.arena.posts.dto.PostJoinRequestResponse;
 import com.vikisol.arena.posts.dto.PostResponse;
+import com.vikisol.arena.posts.dto.ReportPostRequest;
 import com.vikisol.arena.posts.service.PostCommentService;
 import com.vikisol.arena.posts.service.PostReactionService;
 import com.vikisol.arena.posts.service.PostService;
+import com.vikisol.arena.platform.service.ModerationService;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +34,7 @@ public class PostController {
     private final PostService postService;
     private final PostCommentService postCommentService;
     private final PostReactionService postReactionService;
+    private final ModerationService moderationService;
 
     @GetMapping("/feed")
     public ResponseEntity<ApiResponse<List<PostResponse>>> getFeed(
@@ -146,5 +149,15 @@ public class PostController {
     public ResponseEntity<ApiResponse<Void>> unreact(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
         postReactionService.unreact(principal.getId(), id);
         return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    // §4 safety-audit fix: "report ... everywhere" - posts specifically were previously only
+    // reportable via a Room, which meant UPDATE posts and not-yet-joined ACTIVITY/ASK posts
+    // had no report path at all. See SAFETY-STATUS.md.
+    @PostMapping("/{id}/report")
+    public ResponseEntity<ApiResponse<Void>> report(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody ReportPostRequest request) {
+        moderationService.filePostReport(principal.getId(), id, request.reason());
+        return ResponseEntity.ok(ApiResponse.ok("Report submitted", null));
     }
 }

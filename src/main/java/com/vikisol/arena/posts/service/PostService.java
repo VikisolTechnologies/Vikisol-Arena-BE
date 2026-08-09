@@ -10,9 +10,13 @@ import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.common.geo.GeohashUtil;
 import com.vikisol.arena.common.util.AgeUtil;
+import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
+import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
 import com.vikisol.arena.follows.repository.FollowRepository;
 import com.vikisol.arena.follows.service.BlockService;
 import com.vikisol.arena.notifications.service.NotificationService;
+import com.vikisol.arena.platform.service.ModerationService;
+import com.vikisol.arena.posts.dto.CreateCompanyPostRequest;
 import com.vikisol.arena.posts.dto.CreatePostRequest;
 import com.vikisol.arena.posts.dto.PostJoinRequestResponse;
 import com.vikisol.arena.posts.dto.PostResponse;
@@ -53,6 +57,8 @@ public class PostService {
     private final NotificationService notificationService;
     private final BlockService blockService;
     private final EmbeddingProvider embeddingProvider;
+    private final ModerationService moderationService;
+    private final EnterpriseProfileService enterpriseProfileService;
 
     @Transactional(readOnly = true)
     public List<PostResponse> getFeed(UUID viewingUserId, int page, int size) {
@@ -109,12 +115,14 @@ public class PostService {
     private List<PostResponse> toResponseList(List<Post> posts, UUID viewingUserId) {
         var authorProfiles = batchAuthorProfiles(posts);
         List<UUID> postIds = posts.stream().map(Post::getId).toList();
+        List<UUID> authorIds = posts.stream().map(p -> p.getAuthorUser().getId()).toList();
         var commentCounts = mapper.batchCommentCounts(postIds);
         var reactionCounts = mapper.batchReactionCounts(postIds);
         var myReactedIds = mapper.batchMyReactedIds(postIds, viewingUserId);
+        var authorJoinCounts = mapper.batchAuthorJoinCounts(authorIds);
         return posts.stream()
                 .map(p -> mapper.toResponse(p, viewingUserId, myJoinStatus(p, viewingUserId), roomIdFor(p),
-                        authorProfiles, commentCounts, reactionCounts, myReactedIds))
+                        authorProfiles, commentCounts, reactionCounts, myReactedIds, authorJoinCounts))
                 .toList();
     }
 
@@ -192,7 +200,57 @@ public class PostService {
         builder.embedding(EmbeddingUtil.encode(embeddingProvider.embed(embeddingInput)));
 
         Post post = postRepository.save(builder.build());
+        // §4 safety-audit fix: banned-phrase auto-flag was JobPosting-only before this - every
+        // intent type gets scanned, not just ACTIVITY, since an ASK/UPDATE can carry the exact
+        // same scam phrasing.
+        moderationService.autoFlag(post);
         return mapper.toResponse(post, userId, null, null);
+    }
+
+    // ARENA-V2-PRODUCT-ARCHITECTURE.md §3.5/§6 "Company posts appear in the feed" - a company
+    // page's own news/hiring/culture post, callable by RECRUITER/COMPANY_ADMIN only (see
+    // CompanyPostController). Deliberately GLOBAL/PUBLIC/OPEN and never joinable - same simple
+    // shape as an UPDATE post, just attributed to the tenant instead of the acting person.
+    @Transactional
+    public PostResponse createCompanyPost(UUID userId, CreateCompanyPostRequest request) {
+        User author = requireUser(userId);
+        EnterpriseProfile company = enterpriseProfileService.getEntityForUser(userId);
+
+        Post post = Post.builder()
+                .authorUser(author)
+                .authorCompany(company)
+                .intentType(PostIntentType.COMPANY)
+                .body(request.body())
+                .audience(PostAudience.GLOBAL)
+                .visibility(PostVisibility.PUBLIC)
+                .status(PostStatus.OPEN)
+                .tags(request.tags())
+                .build();
+        post.setEmbedding(EmbeddingUtil.encode(embeddingProvider.embed(request.body() + " " + String.join(" ", request.tags()))));
+        post = postRepository.save(post);
+        moderationService.autoFlag(post);
+        return mapper.toResponse(post, userId, null, null);
+    }
+
+    // Company page's own post history (mirrors getMyPosts for a candidate) - RECRUITER/
+    // COMPANY_ADMIN manage their tenant's posts from here, same pageable shape as everything
+    // else in this service.
+    @Transactional(readOnly = true)
+    public PagedResponse<PostResponse> getCompanyPosts(UUID userId, Pageable pageable) {
+        EnterpriseProfile company = enterpriseProfileService.getEntityForUser(userId);
+        var page = postRepository.findByAuthorCompanyIdOrderByCreatedAtDesc(company.getId(), pageable);
+        return PagedResponse.of(page, p -> mapper.toResponse(p, userId, null, null));
+    }
+
+    @Transactional
+    public void deleteCompanyPost(UUID userId, UUID postId) {
+        EnterpriseProfile company = enterpriseProfileService.getEntityForUser(userId);
+        Post post = requirePost(postId);
+        if (post.getAuthorCompany() == null || !post.getAuthorCompany().getId().equals(company.getId())) {
+            throw new AccessDeniedException("Not your company's post");
+        }
+        post.setStatus(PostStatus.CANCELLED);
+        postRepository.save(post);
     }
 
     @Transactional

@@ -17,11 +17,16 @@ import java.util.UUID;
 public interface PostRepository extends JpaRepository<Post, UUID> {
     // Bounded recent-post window for FeedRankingService to score in Java - see its own comment
     // for why there's no single ORDER BY that expresses a follows+recency composite score.
-    @EntityGraph(attributePaths = "authorUser")
+    // authorCompany included since COMPANY posts now appear in this same feed window.
+    @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
     Page<Post> findByStatusOrderByCreatedAtDesc(PostStatus status, Pageable pageable);
 
     @EntityGraph(attributePaths = "authorUser")
     Page<Post> findByAuthorUserIdOrderByCreatedAtDesc(UUID authorUserId, Pageable pageable);
+
+    // Company page's own post history (post-spec reconciliation - §3.5/§6 company posting).
+    @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
+    Page<Post> findByAuthorCompanyIdOrderByCreatedAtDesc(UUID authorCompanyId, Pageable pageable);
 
     // PostLifecycleScheduler's reminder job: OPEN activities starting within the window that
     // haven't been reminded yet.

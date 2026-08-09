@@ -3,20 +3,17 @@ package com.vikisol.arena.posts.entity;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.entity.VerificationLevel;
 import com.vikisol.arena.common.entity.BaseEntity;
+import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import jakarta.persistence.*;
 import lombok.*;
 
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.UUID;
 
-// ARENA-V2-PRODUCT-ARCHITECTURE.md §6's generic post primitive, Phase A scope. authorCompanyId
-// is a reserved raw column (no JPA relation) for Phase C company pages - never populated this
-// phase, same "schema now, UI never yet" treatment as locationText getting no map/geo picker
-// until Phase B. Only ACTIVITY/ASK posts ever get PostJoinRequest rows or a Room; UPDATE posts
-// are deliberately the simplest type (post it, it shows in the feed, nothing else) since
-// comments/reactions are explicitly Phase C in the source doc's own phase list.
+// ARENA-V2-PRODUCT-ARCHITECTURE.md §6's generic post primitive, Phase A scope. Only ACTIVITY/ASK
+// posts ever get PostJoinRequest rows or a Room; UPDATE/COMPANY posts are the simplest type
+// (post it, it shows in the feed, comments/reactions apply generically to every post type).
 @Entity
 @Table(name = "arena_posts")
 @Data
@@ -26,13 +23,22 @@ import java.util.UUID;
 @EqualsAndHashCode(callSuper = true)
 public class Post extends BaseEntity {
 
+    // Always set - the acting account (candidate for ACTIVITY/ASK/UPDATE, the posting recruiter/
+    // company_admin for COMPANY) so every post has one unambiguous owner for audit/permission
+    // checks, even when authorCompany is also set and takes over for display purposes.
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "author_user_id", nullable = false)
     private User authorUser;
 
-    // Reserved for Phase C company pages - no FK, never populated in Phase A.
-    @Column(name = "author_company_id")
-    private UUID authorCompanyId;
+    // Was a reserved raw UUID column with no JPA relation through Phase A/B ("company pages
+    // don't exist yet"). Promoted to a real relation in the post-spec reconciliation pass -
+    // §3.5/§6 explicitly want "Company posts appear in the feed," which needs this to actually
+    // resolve to a company's name/emoji for display (see PostMapper). Column name unchanged
+    // (author_company_id), so no migration was needed for the column itself - see
+    // DECISIONS.md.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "author_company_id")
+    private EnterpriseProfile authorCompany;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
