@@ -80,6 +80,10 @@ app:
     # true/None for staging/production over HTTPS on a different Railway subdomain.
     cookie-secure: ${JWT_COOKIE_SECURE:false}
     cookie-same-site: ${JWT_COOKIE_SAME_SITE:Lax}
+    # ARENA-MASTER-ARCHITECTURE.md PART 11 - blank in local dev (host-only cookie is fine when
+    # both apps are on http://localhost); ".vikisol.in" in staging/prod so arena-web's own
+    # server can read the session cookie api-arena.vikisol.in sets. See SessionCookieHelper.
+    cookie-domain: ${JWT_COOKIE_DOMAIN:}
 
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3001}

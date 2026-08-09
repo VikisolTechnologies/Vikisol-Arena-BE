@@ -16,6 +16,7 @@ import com.vikisol.arena.enterprise.service.TeamService;
 import com.vikisol.arena.security.jwt.JwtTokenProvider;
 import com.vikisol.arena.security.jwt.RefreshCookieHelper;
 import com.vikisol.arena.security.jwt.RefreshTokenService;
+import com.vikisol.arena.security.jwt.SessionCookieHelper;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -39,6 +40,7 @@ public class AuthController {
     private final JwtTokenProvider jwtTokenProvider;
     private final RefreshTokenService refreshTokenService;
     private final RefreshCookieHelper refreshCookieHelper;
+    private final SessionCookieHelper sessionCookieHelper;
 
     @PostMapping("/signup")
     public ResponseEntity<ApiResponse<SessionResponse>> signUp(@Valid @RequestBody SignUpRequest request, HttpServletResponse response) {
@@ -66,6 +68,7 @@ public class AuthController {
         }
         AuthService.RefreshResult result = authService.refreshAccessToken(refreshToken);
         refreshCookieHelper.set(response, result.refreshToken());
+        sessionCookieHelper.set(response, result.accessToken());
         return ResponseEntity.ok(ApiResponse.ok(new RefreshTokenResponse(result.accessToken())));
     }
 
@@ -77,6 +80,7 @@ public class AuthController {
         String accessToken = extractBearerToken(request);
         authService.signOut(refreshToken, accessToken);
         refreshCookieHelper.clear(response);
+        sessionCookieHelper.clear(response);
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
@@ -121,6 +125,7 @@ public class AuthController {
         String accessToken = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
         String refreshToken = refreshTokenService.issue(user.getId());
         refreshCookieHelper.set(response, refreshToken);
+        sessionCookieHelper.set(response, accessToken);
         String candidateId = null; // invited roles are never TALENT
         return ResponseEntity.ok(ApiResponse.ok("Account created",
                 SessionResponse.of(user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), accessToken)));
@@ -130,6 +135,7 @@ public class AuthController {
         return switch (outcome) {
             case AuthService.SignInOutcome.Success success -> {
                 refreshCookieHelper.set(response, success.refreshToken());
+                sessionCookieHelper.set(response, success.session().token());
                 yield ResponseEntity.ok(ApiResponse.ok(success.session()));
             }
             case AuthService.SignInOutcome.MfaRequired mfaRequired ->

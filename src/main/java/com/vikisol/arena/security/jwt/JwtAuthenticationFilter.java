@@ -16,10 +16,13 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 
-// Stateless Bearer-token auth (Authorization: Bearer <token>) rather than HRLMS-BE's HttpOnly
-// cookie approach - a deliberate simplification for a fresh SPA-backed API with no existing
-// cookie/CSRF infrastructure. Noted as a decision in the README. The refresh token IS a cookie
-// (see RefreshCookieHelper) but never reaches this filter - /auth/refresh reads it directly.
+// Bearer-token auth (Authorization: Bearer <token>) remains the primary path for the SPA's
+// own client-side fetches. ARENA-MASTER-ARCHITECTURE.md PART 11 adds a second path: the
+// HttpOnly `arena_session` cookie (see SessionCookieHelper), read only when no Authorization
+// header is present - this lets arena-web's Next.js server (middleware, server components)
+// forward the cookie straight through on server-to-server calls without needing to first
+// unwrap it into a header itself. The refresh token is a separate, narrower-scoped cookie
+// (see RefreshCookieHelper) that never reaches this filter - /auth/refresh reads it directly.
 @Component
 @RequiredArgsConstructor
 public class JwtAuthenticationFilter extends OncePerRequestFilter {
@@ -27,6 +30,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final JwtTokenProvider jwtTokenProvider;
     private final CustomUserDetailsService userDetailsService;
     private final TokenDenylistService tokenDenylistService;
+    private final SessionCookieHelper sessionCookieHelper;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -54,6 +58,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (StringUtils.hasText(bearer) && bearer.startsWith("Bearer ")) {
             return bearer.substring(7);
         }
-        return null;
+        return sessionCookieHelper.read(request);
     }
 }
