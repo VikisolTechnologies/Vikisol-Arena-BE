@@ -104,6 +104,7 @@ public class FeedAggregationService {
                             r.visibility(), r.capacity(), r.spotsFilled(), r.startsAt(), r.endsAt(), r.joinable(),
                             r.mine(), r.myJoinStatus(), r.roomId(), r.approxLat(), r.approxLng(),
                             r.commentCount(), r.reactionCount(), r.myReacted(),
+                            r.authorJoinCount(), r.authorAccountAgeDays(),
                             null, null, null, null,
                             null, null, null, null
                     );
@@ -131,6 +132,7 @@ public class FeedAggregationService {
                     job.getStatus().name().toLowerCase(), job.getCreatedAt().toString(),
                     null, null, null, null, null, null, null, null, null, null, null,
                     null, null, null,
+                    null, null,
                     job.getEmploymentType().name().toLowerCase(), job.isRemote(), job.getSalaryMin(), job.getSalaryMax(),
                     null, null, null, null
             );
@@ -159,6 +161,7 @@ public class FeedAggregationService {
                     project.getStatus().name().toLowerCase(), project.getCreatedAt().toString(),
                     null, null, null, null, project.getEndsAt().toString(), null, null, null, null, null, null,
                     null, null, null,
+                    null, null,
                     null, null, null, null,
                     project.getBudgetMin(), project.getBudgetMax(), project.getDurationWeeks(),
                     bidCounts.getOrDefault(project.getId(), 0L)

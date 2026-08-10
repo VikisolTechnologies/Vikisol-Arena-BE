@@ -45,6 +45,12 @@ public record FeedItemResponse(
         Long commentCount,
         Long reactionCount,
         Boolean myReacted,
+        // §4 safety-audit trust signals (PostResponse's own fields) - launch-blocking for the
+        // activity/stranger-meetup layer per PRODUCT_BIBLE.md, so this stays in the FEED card
+        // itself, not just the post-detail page. Null for job/project (not applicable - those
+        // aren't in-person-meetup risk types).
+        Long authorJoinCount,
+        Long authorAccountAgeDays,
 
         // JOB-only fields.
         String employmentType,
