@@ -12,6 +12,7 @@ public record PostResponse(
         // frontend link the post's author straight to /companies/{id}.
         String authorCompanyId,
         String intentType,
+        String title,
         String body,
         String locationText,
         String audience,

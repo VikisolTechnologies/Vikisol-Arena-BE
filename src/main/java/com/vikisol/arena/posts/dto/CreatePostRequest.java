@@ -8,6 +8,7 @@ import java.util.List;
 
 public record CreatePostRequest(
         @NotBlank(message = "is required") String intentType,
+        String title,
         @NotBlank(message = "is required") String body,
         String locationText,
         String audience,

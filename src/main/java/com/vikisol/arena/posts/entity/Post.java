@@ -44,6 +44,12 @@ public class Post extends BaseEntity {
     @Column(nullable = false)
     private PostIntentType intentType;
 
+    // ARENA-MASTER-ARCHITECTURE.md PART 7.5/7.6 - every post type now has an optional title
+    // (composer's "title" field, PostCard's H2). Null is a valid, common case (ASK/UPDATE posts
+    // are frequently title-less, body-only, same as before this field existed) - never
+    // backfilled/required for existing rows.
+    private String title;
+
     @Column(nullable = false, columnDefinition = "TEXT")
     private String body;
 

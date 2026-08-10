@@ -48,6 +48,13 @@ public class Project extends BaseEntity {
     @Builder.Default
     private ProjectStatus status = ProjectStatus.OPEN;
 
+    // See ProjectKind's own comment - additive, defaults every existing row to PROJECT (its
+    // pre-v3 behavior) via the migration's column default.
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, columnDefinition = "varchar(255) not null default 'PROJECT'")
+    @Builder.Default
+    private ProjectKind kind = ProjectKind.PROJECT;
+
     @Column(nullable = false)
     private Instant endsAt;
 

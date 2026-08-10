@@ -30,6 +30,14 @@ public class User extends BaseEntity {
     @Column(nullable = false, unique = true)
     private String email;
 
+    // ARENA-MASTER-ARCHITECTURE.md PART 6/7.12 - stable public-profile slug (`/people/{handle}`).
+    // Generated once at signup (see HandleGenerator/AuthService.signUp), user-editable later from
+    // Settings > Account. Nullable at the column level only so existing pre-v3 rows (backfilled
+    // in V8's migration) and Postgres's multi-NULL-friendly unique index don't fight each other -
+    // every row has a real value in practice from the moment V8 runs.
+    @Column(unique = true)
+    private String handle;
+
     @Column(nullable = false)
     private String passwordHash;
 

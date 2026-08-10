@@ -16,6 +16,8 @@ import java.util.UUID;
 public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByEmailIgnoreCase(String email);
     boolean existsByEmailIgnoreCase(String email);
+    boolean existsByHandle(String handle);
+    Optional<User> findByHandle(String handle);
     long countByCreatedAtAfter(Instant since);
 
     // PA5 (platform analytics): user-count-by-role breakdown as a SQL GROUP BY instead of

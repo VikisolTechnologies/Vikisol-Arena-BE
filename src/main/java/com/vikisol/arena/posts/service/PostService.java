@@ -23,6 +23,7 @@ import com.vikisol.arena.posts.dto.PostResponse;
 import com.vikisol.arena.posts.entity.*;
 import com.vikisol.arena.posts.repository.PostJoinRequestRepository;
 import com.vikisol.arena.posts.repository.PostRepository;
+import com.vikisol.arena.posts.repository.PostSaveRepository;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import com.vikisol.arena.rooms.entity.Room;
@@ -59,12 +60,34 @@ public class PostService {
     private final EmbeddingProvider embeddingProvider;
     private final ModerationService moderationService;
     private final EnterpriseProfileService enterpriseProfileService;
+    private final PostSaveRepository postSaveRepository;
 
     @Transactional(readOnly = true)
     public List<PostResponse> getFeed(UUID viewingUserId, int page, int size) {
         List<Post> window = feedRankingService.getFeedWindow(viewingUserId, page, size);
         window = excludeBlocked(window, viewingUserId);
         return toResponseList(window, viewingUserId);
+    }
+
+    // A fully-mapped PostResponse paired with its FeedRankingService score - used by
+    // FeedAggregationService to interleave posts with JobPosting/Project on one merged, ranked
+    // stream (see DECISIONS.md's Step 3 entry).
+    public record ScoredPostResponse(PostResponse response, double score) {
+    }
+
+    // Unpaged, scored+sorted feed posts, fully mapped (comment/reaction counts, join status,
+    // room id - everything getFeed's own responses have). Deliberately bypasses getFeed's own
+    // paging since the caller needs to merge-then-page across all three sources together, not
+    // page each independently and then try to interleave already-paged pages.
+    @Transactional(readOnly = true)
+    public List<ScoredPostResponse> getScoredFeed(UUID viewingUserId) {
+        List<FeedRankingService.ScoredPost> scored = feedRankingService.scoredWindow(viewingUserId);
+        List<Post> posts = excludeBlocked(scored.stream().map(FeedRankingService.ScoredPost::post).toList(), viewingUserId);
+        Map<UUID, Double> scoreByPostId = scored.stream()
+                .collect(Collectors.toMap(sp -> sp.post().getId(), FeedRankingService.ScoredPost::score, (a, b) -> a));
+        return toResponseList(posts, viewingUserId).stream()
+                .map(r -> new ScoredPostResponse(r, scoreByPostId.getOrDefault(UUID.fromString(r.id()), 0.0)))
+                .toList();
     }
 
     // §"trends" - trending posts ranked by recent engagement velocity, reused as a feed sort
@@ -168,6 +191,7 @@ public class PostService {
         Post.PostBuilder builder = Post.builder()
                 .authorUser(author)
                 .intentType(intentType)
+                .title(request.title())
                 .body(request.body())
                 .locationText(request.locationText())
                 .audience(request.audience() == null ? PostAudience.GLOBAL : PostAudience.valueOf(request.audience().trim().toUpperCase()))
@@ -381,6 +405,30 @@ public class PostService {
     private String roomIdFor(Post post) {
         if (!post.isJoinable()) return null;
         return roomService.findRoomIdForPost(post.getId()).orElse(null);
+    }
+
+    // PART 6 "SAVE POST|DELETE /posts/{id}/save GET /posts/saved" (PostCard overflow menu's
+    // Save action). Idempotent both ways - saving an already-saved post or unsaving a
+    // never-saved one is a no-op, not an error, matching FollowService's own idempotent style.
+    @Transactional
+    public void save(UUID userId, UUID postId) {
+        if (postSaveRepository.existsByPostIdAndUserId(postId, userId)) return;
+        Post post = requirePost(postId);
+        User user = requireUser(userId);
+        postSaveRepository.save(PostSave.builder().post(post).user(user).build());
+    }
+
+    @Transactional
+    public void unsave(UUID userId, UUID postId) {
+        postSaveRepository.findByPostIdAndUserId(postId, userId).ifPresent(postSaveRepository::delete);
+    }
+
+    @Transactional(readOnly = true)
+    public PagedResponse<PostResponse> getSaved(UUID userId, Pageable pageable) {
+        var page = postSaveRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
+        List<Post> posts = page.getContent().stream().map(PostSave::getPost).toList();
+        return new PagedResponse<>(toResponseList(posts, userId), page.getNumber(), page.getSize(),
+                page.getTotalElements(), page.getTotalPages(), page.isLast());
     }
 
     private Map<UUID, CandidateProfile> batchAuthorProfiles(List<Post> posts) {

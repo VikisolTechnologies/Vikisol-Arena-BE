@@ -7,6 +7,7 @@ import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.BadRequestException;
+import com.vikisol.arena.common.util.HandleGenerator;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.entity.Membership;
 import com.vikisol.arena.enterprise.entity.MembershipStatus;
@@ -75,6 +76,7 @@ public class AuthService {
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .name(request.name())
                 .role(role)
+                .handle(HandleGenerator.generate(request.name(), userRepository::existsByHandle))
                 .build();
         user = userRepository.save(user);
 

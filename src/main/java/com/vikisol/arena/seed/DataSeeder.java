@@ -8,6 +8,7 @@ import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
+import com.vikisol.arena.common.util.HandleGenerator;
 import com.vikisol.arena.enterprise.entity.CompanySize;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.entity.Membership;
@@ -171,6 +172,7 @@ public class DataSeeder implements ApplicationRunner {
                     .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
                     .name(seed.name() + " Talent Team")
                     .role(Role.COMPANY_ADMIN)
+                    .handle(HandleGenerator.generate(seed.name() + " Talent Team", userRepository::existsByHandle))
                     .build());
 
             EnterpriseProfile profile = enterpriseProfileRepository.save(EnterpriseProfile.builder()
@@ -211,7 +213,8 @@ public class DataSeeder implements ApplicationRunner {
         if (userRepository.findByEmailIgnoreCase(DEMO_RECRUITER_EMAIL).isEmpty()) {
             User recruiter = userRepository.save(User.builder()
                     .email(DEMO_RECRUITER_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
-                    .name("Priyanka Rao").role(Role.RECRUITER).build());
+                    .name("Priyanka Rao").role(Role.RECRUITER)
+                    .handle(HandleGenerator.generate("Priyanka Rao", userRepository::existsByHandle)).build());
             membershipRepository.save(Membership.builder()
                     .user(recruiter).tenant(tenant).status(MembershipStatus.ACTIVE)
                     .invitedBy(admin).joinedAt(recruiter.getCreatedAt()).build());
@@ -220,7 +223,8 @@ public class DataSeeder implements ApplicationRunner {
         if (userRepository.findByEmailIgnoreCase(DEMO_HIRING_MANAGER_EMAIL).isEmpty()) {
             User hiringManager = userRepository.save(User.builder()
                     .email(DEMO_HIRING_MANAGER_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
-                    .name("Karthik Iyer").role(Role.HIRING_MANAGER).build());
+                    .name("Karthik Iyer").role(Role.HIRING_MANAGER)
+                    .handle(HandleGenerator.generate("Karthik Iyer", userRepository::existsByHandle)).build());
             membershipRepository.save(Membership.builder()
                     .user(hiringManager).tenant(tenant).status(MembershipStatus.ACTIVE)
                     .invitedBy(admin).joinedAt(hiringManager.getCreatedAt()).build());
@@ -233,7 +237,8 @@ public class DataSeeder implements ApplicationRunner {
         if (userRepository.findByEmailIgnoreCase(PLATFORM_ADMIN_EMAIL).isPresent()) return;
         userRepository.save(User.builder()
                 .email(PLATFORM_ADMIN_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
-                .name("Vikisol Platform Admin").role(Role.PLATFORM_ADMIN).build());
+                .name("Vikisol Platform Admin").role(Role.PLATFORM_ADMIN)
+                .handle(HandleGenerator.generate("Vikisol Platform Admin", userRepository::existsByHandle)).build());
     }
 
     private List<CandidateProfile> seedCandidates() {
@@ -255,6 +260,7 @@ public class DataSeeder implements ApplicationRunner {
                     .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
                     .name(name)
                     .role(Role.TALENT)
+                    .handle(HandleGenerator.generate(name, userRepository::existsByHandle))
                     .dateOfBirth(isMinorDemo
                             ? java.time.LocalDate.now().minusYears(17)
                             : java.time.LocalDate.now().minusYears(IndianData.intBetween(22, 45)));

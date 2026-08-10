@@ -3,6 +3,7 @@ package com.vikisol.arena.seed;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
+import com.vikisol.arena.common.util.HandleGenerator;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.entity.Membership;
 import com.vikisol.arena.enterprise.entity.MembershipStatus;
@@ -95,7 +96,8 @@ public class RoleMigration implements ApplicationRunner {
             if (userRepository.findByEmailIgnoreCase(DataSeeder.DEMO_RECRUITER_EMAIL).isEmpty()) {
                 User recruiter = userRepository.save(User.builder()
                         .email(DataSeeder.DEMO_RECRUITER_EMAIL).passwordHash(passwordEncoder.encode(DataSeeder.DEMO_PASSWORD))
-                        .name("Priyanka Rao").role(Role.RECRUITER).build());
+                        .name("Priyanka Rao").role(Role.RECRUITER)
+                        .handle(HandleGenerator.generate("Priyanka Rao", userRepository::existsByHandle)).build());
                 membershipRepository.save(Membership.builder()
                         .user(recruiter).tenant(tenant).status(MembershipStatus.ACTIVE)
                         .invitedBy(admin).joinedAt(recruiter.getCreatedAt()).build());
@@ -105,7 +107,8 @@ public class RoleMigration implements ApplicationRunner {
             if (userRepository.findByEmailIgnoreCase(DataSeeder.DEMO_HIRING_MANAGER_EMAIL).isEmpty()) {
                 User hiringManager = userRepository.save(User.builder()
                         .email(DataSeeder.DEMO_HIRING_MANAGER_EMAIL).passwordHash(passwordEncoder.encode(DataSeeder.DEMO_PASSWORD))
-                        .name("Karthik Iyer").role(Role.HIRING_MANAGER).build());
+                        .name("Karthik Iyer").role(Role.HIRING_MANAGER)
+                        .handle(HandleGenerator.generate("Karthik Iyer", userRepository::existsByHandle)).build());
                 membershipRepository.save(Membership.builder()
                         .user(hiringManager).tenant(tenant).status(MembershipStatus.ACTIVE)
                         .invitedBy(admin).joinedAt(hiringManager.getCreatedAt()).build());
@@ -116,7 +119,8 @@ public class RoleMigration implements ApplicationRunner {
         if (userRepository.findByEmailIgnoreCase(DataSeeder.PLATFORM_ADMIN_EMAIL).isEmpty()) {
             userRepository.save(User.builder()
                     .email(DataSeeder.PLATFORM_ADMIN_EMAIL).passwordHash(passwordEncoder.encode(DataSeeder.DEMO_PASSWORD))
-                    .name("Vikisol Platform Admin").role(Role.PLATFORM_ADMIN).build());
+                    .name("Vikisol Platform Admin").role(Role.PLATFORM_ADMIN)
+                    .handle(HandleGenerator.generate("Vikisol Platform Admin", userRepository::existsByHandle)).build());
             log.info("RoleMigration: seeded platform admin {}", DataSeeder.PLATFORM_ADMIN_EMAIL);
         }
     }

@@ -84,6 +84,30 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.getMyPosts(principal.getId(), pageable)));
     }
 
+    // PART 6 SAVE - kept under /posts (where every other post-interaction endpoint already
+    // lives) rather than the spec's literal /me/saved, same "documented small path deviation"
+    // precedent as this codebase's other spec reconciliations (see DECISIONS.md).
+    @GetMapping("/saved")
+    public ResponseEntity<ApiResponse<PagedResponse<PostResponse>>> getSaved(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return ResponseEntity.ok(ApiResponse.ok(postService.getSaved(principal.getId(), pageable)));
+    }
+
+    @PostMapping("/{id}/save")
+    public ResponseEntity<ApiResponse<Void>> save(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        postService.save(principal.getId(), id);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    @DeleteMapping("/{id}/save")
+    public ResponseEntity<ApiResponse<Void>> unsave(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        postService.unsave(principal.getId(), id);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
     @PostMapping
     public ResponseEntity<ApiResponse<PostResponse>> create(
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody CreatePostRequest request) {

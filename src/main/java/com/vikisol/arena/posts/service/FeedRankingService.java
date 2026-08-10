@@ -72,8 +72,14 @@ public class FeedRankingService {
     private final PostCommentRepository postCommentRepository;
     private final PostReactionRepository postReactionRepository;
 
+    // A Post paired with its computed feed score - exposed (not just used internally) so
+    // FeedAggregationService (PART 6/7.5's unified /feed) can merge posts with JobPosting/
+    // Project on one ranked stream instead of blending two different sorted-and-paged lists.
+    public record ScoredPost(Post post, double score) {
+    }
+
     @Transactional(readOnly = true)
-    public List<Post> getFeedWindow(UUID viewingUserId, int page, int size) {
+    public List<ScoredPost> scoredWindow(UUID viewingUserId) {
         Pageable window = PageRequest.of(0, FEED_WINDOW_SIZE, Sort.by(Sort.Direction.DESC, "createdAt"));
         List<Post> candidates = postRepository.findByStatusOrderByCreatedAtDesc(PostStatus.OPEN, window).getContent();
 
@@ -82,10 +88,15 @@ public class FeedRankingService {
         float[] interestVector = interestVectorFor(viewingUserId);
         Map<UUID, Long> reportCounts = batchReportCounts(candidates);
 
-        List<Post> scored = candidates.stream()
-                .sorted(Comparator.comparingDouble((Post p) -> score(p, following, interestVector, reportCounts)).reversed())
+        return candidates.stream()
+                .map(p -> new ScoredPost(p, score(p, following, interestVector, reportCounts)))
+                .sorted(Comparator.comparingDouble(ScoredPost::score).reversed())
                 .toList();
+    }
 
+    @Transactional(readOnly = true)
+    public List<Post> getFeedWindow(UUID viewingUserId, int page, int size) {
+        List<Post> scored = scoredWindow(viewingUserId).stream().map(ScoredPost::post).toList();
         return page(scored, page, size);
     }
 

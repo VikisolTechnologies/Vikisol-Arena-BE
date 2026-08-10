@@ -127,7 +127,7 @@ public class PostMapper {
 
         return new PostResponse(
                 post.getId().toString(), post.getAuthorUser().getId().toString(), authorName, authorEmoji, authorCompanyId,
-                post.getIntentType().wireValue(), post.getBody(), post.getLocationText(),
+                post.getIntentType().wireValue(), post.getTitle(), post.getBody(), post.getLocationText(),
                 post.getAudience().wireValue(), post.getVisibility().wireValue(),
                 post.getCapacity(), post.getSpotsFilled(), post.getStatus().wireValue(),
                 post.getStartsAt() == null ? null : post.getStartsAt().toString(),

@@ -6,6 +6,7 @@ import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.BadRequestException;
+import com.vikisol.arena.common.util.HandleGenerator;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.dto.admin.ChangeRoleRequest;
 import com.vikisol.arena.enterprise.dto.admin.InvitationPreviewResponse;
@@ -148,7 +149,9 @@ public class TeamService {
 
         User user = userRepository.save(User.builder()
                 .email(invitation.getEmail()).passwordHash(passwordEncoder.encode(password))
-                .name(name).role(invitation.getRole()).build());
+                .name(name).role(invitation.getRole())
+                .handle(HandleGenerator.generate(name, userRepository::existsByHandle))
+                .build());
         membershipRepository.save(Membership.builder()
                 .user(user).tenant(invitation.getTenant()).status(MembershipStatus.ACTIVE)
                 .invitedBy(invitation.getInvitedBy()).joinedAt(Instant.now())
