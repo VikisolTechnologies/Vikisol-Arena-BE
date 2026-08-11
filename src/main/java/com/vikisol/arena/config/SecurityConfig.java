@@ -76,6 +76,18 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/files/**").permitAll()
+                        // ARENA-INVENTORY-FIXES.md FIX 1 - shared profile/company/discover links
+                        // are the product's growth loop, so these three read-only surfaces must
+                        // work logged-out. "/profile/me" is listed BEFORE the "/profile/*"
+                        // wildcard deliberately: authorizeHttpRequests uses the first matching
+                        // rule, and Ant's "*" doesn't cross "/" but WOULD still match the single
+                        // "me" segment, so the specific rule has to come first or the wildcard
+                        // would wrongly expose the caller's own full profile anonymously.
+                        .requestMatchers(HttpMethod.GET, "/profile/me").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/profile/*").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/companies/*", "/companies/*/jobs").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/jobs").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/posts/by-user/*").permitAll()
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())

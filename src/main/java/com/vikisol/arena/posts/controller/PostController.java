@@ -52,12 +52,17 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.getTrending(principal.getId(), page, size)));
     }
 
+    // ARENA-INVENTORY-FIXES.md FIX 1 - the public profile page's "Activity" section needs this
+    // logged-out; overrides the class-level hasRole('TALENT'). postService.getUserPosts already
+    // treats a null viewingUserId as "anonymous" (no self/follower-only posts leak through).
+    @PreAuthorize("permitAll()")
     @GetMapping("/by-user/{userId}")
     public ResponseEntity<ApiResponse<PagedResponse<PostResponse>>> getUserPosts(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID userId,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        return ResponseEntity.ok(ApiResponse.ok(postService.getUserPosts(userId, principal.getId(), pageable)));
+        UUID viewerId = principal == null ? null : principal.getId();
+        return ResponseEntity.ok(ApiResponse.ok(postService.getUserPosts(userId, viewerId, pageable)));
     }
 
     @GetMapping("/nearby")

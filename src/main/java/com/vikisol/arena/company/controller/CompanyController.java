@@ -33,11 +33,17 @@ public class CompanyController {
         return ResponseEntity.ok(ApiResponse.ok(companyService.listCompanies(query, principal.getId(), pageable)));
     }
 
+    // ARENA-INVENTORY-FIXES.md FIX 1 - a shared company link is the growth loop, so this must
+    // render logged-out too; overrides the class-level hasRole('TALENT'). companyService's
+    // toResponse() already treats a null viewingUserId as "anonymous" (viewerFollows: null).
+    @PreAuthorize("permitAll()")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<CompanyResponse>> get(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(companyService.getCompany(id, principal.getId())));
+        UUID viewerId = principal == null ? null : principal.getId();
+        return ResponseEntity.ok(ApiResponse.ok(companyService.getCompany(id, viewerId)));
     }
 
+    @PreAuthorize("permitAll()")
     @GetMapping("/{id}/jobs")
     public ResponseEntity<ApiResponse<PagedResponse<JobResponse>>> getJobs(
             @PathVariable UUID id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {

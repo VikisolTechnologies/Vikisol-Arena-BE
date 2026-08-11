@@ -41,10 +41,16 @@ public class ProfileController {
 
     // Phase C profile revamp - the public/other-user view. {id} is a user id (matches how
     // Follow/Post already key on user ids everywhere else in this API), not a profile id.
+    // ARENA-INVENTORY-FIXES.md FIX 1 - overrides the class-level hasRole('TALENT') so a
+    // logged-out visitor (or a non-talent role, e.g. a recruiter) can view it; principal is
+    // therefore nullable here and profileService.getPublicProfile already treats a null
+    // viewingUserId as "anonymous" (no viewerFollows, no self-check).
+    @PreAuthorize("permitAll()")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<PublicCandidateProfileResponse>> getPublicProfile(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(profileService.getPublicProfile(id, principal.getId())));
+        UUID viewerId = principal == null ? null : principal.getId();
+        return ResponseEntity.ok(ApiResponse.ok(profileService.getPublicProfile(id, viewerId)));
     }
 
     @PutMapping("/me/details")
