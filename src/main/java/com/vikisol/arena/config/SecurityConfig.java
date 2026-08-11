@@ -76,6 +76,7 @@ public class SecurityConfig {
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/files/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/__deploy_marker_test__").permitAll()
                         // ARENA-INVENTORY-FIXES.md FIX 1 - shared profile/company/discover links
                         // are the product's growth loop, so these three read-only surfaces must
                         // work logged-out. "/profile/me" is listed BEFORE the "/profile/*"
