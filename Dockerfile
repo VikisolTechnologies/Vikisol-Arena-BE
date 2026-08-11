@@ -16,11 +16,18 @@ RUN mvn -B clean package -DskipTests
 FROM eclipse-temurin:21-jre-alpine AS runtime
 WORKDIR /app
 
+# ARENA-STABILIZE.md Phase 0.2 - build stamp so a stale deploy is visible in 5 seconds
+# (VersionController reads this file). RAILWAY_GIT_COMMIT_SHA is auto-forwarded as a build arg
+# by Railway's Dockerfile builder for git-connected services; falls back to "local" outside
+# Railway.
+ARG RAILWAY_GIT_COMMIT_SHA=local
+
 # Non-root - least-privilege inside the container too, not just at the Postgres-role level
 # (see DECISIONS.md's RLS-deferral entry for the DB-role side of this same principle).
 RUN addgroup -S arena && adduser -S arena -G arena
 COPY --from=build /build/target/*.jar app.jar
-RUN chown arena:arena app.jar
+RUN { echo "commit=${RAILWAY_GIT_COMMIT_SHA}"; echo "builtAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)"; } > build-info.properties && \
+    chown arena:arena app.jar build-info.properties
 USER arena
 
 # Railway injects PORT; application.yml already reads it (server.port: ${PORT:8081}).

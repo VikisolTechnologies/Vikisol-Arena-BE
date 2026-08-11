@@ -74,6 +74,7 @@ public class SecurityConfig {
                                 "/auth/signout", "/auth/2fa/verify", "/auth/invitations/accept").permitAll()
                         .requestMatchers(HttpMethod.GET, "/auth/invitations/*").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/version").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/files/**").permitAll()
                         // ARENA-INVENTORY-FIXES.md FIX 1 - shared profile/company/discover links
