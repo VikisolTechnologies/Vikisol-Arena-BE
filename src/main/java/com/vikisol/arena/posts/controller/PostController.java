@@ -75,9 +75,15 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.getNearby(principal.getId(), lat, lng, radiusKm, withinHours, intentType)));
     }
 
+    // ARENA-STABILIZE.md Phase 2, G9 - shared post links (the app's growth loop, same reasoning
+    // as ARENA-INVENTORY-FIXES.md FIX 1) need to work logged-out. postService.getPost's whole
+    // call chain is already null-viewer-tolerant (see PostMapper) - overrides the class-level
+    // hasRole('TALENT').
+    @PreAuthorize("permitAll()")
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<PostResponse>> getPost(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.getPost(id, principal.getId())));
+        UUID viewerId = principal == null ? null : principal.getId();
+        return ResponseEntity.ok(ApiResponse.ok(postService.getPost(id, viewerId)));
     }
 
     @GetMapping("/mine")
@@ -150,6 +156,9 @@ public class PostController {
     }
 
     // ARENA-V2-PRODUCT-ARCHITECTURE.md Phase C - comments/reactions.
+    // ARENA-STABILIZE.md Phase 2, G9 - a logged-out visitor to a shared post link should see
+    // its comment thread too, same as the post itself.
+    @PreAuthorize("permitAll()")
     @GetMapping("/{id}/comments")
     public ResponseEntity<ApiResponse<List<PostCommentResponse>>> getComments(@PathVariable UUID id) {
         return ResponseEntity.ok(ApiResponse.ok(postCommentService.getComments(id)));

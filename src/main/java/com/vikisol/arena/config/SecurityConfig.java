@@ -89,6 +89,15 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/companies/*", "/companies/*/jobs").permitAll()
                         .requestMatchers(HttpMethod.GET, "/jobs").permitAll()
                         .requestMatchers(HttpMethod.GET, "/posts/by-user/*").permitAll()
+                        // ARENA-STABILIZE.md Phase 2, G9 - shared post links must work
+                        // logged-out too. Same "specific-before-wildcard" ordering as above:
+                        // "/posts/*" (single Ant segment) would also match the literal
+                        // "/posts/feed", "/posts/mine", "/posts/saved", "/posts/nearby",
+                        // "/posts/trending" GET endpoints - list those explicitly first so the
+                        // wildcard below only ever reaches an actual post id.
+                        .requestMatchers(HttpMethod.GET, "/posts/feed", "/posts/mine", "/posts/saved",
+                                "/posts/nearby", "/posts/trending").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/posts/*", "/posts/*/comments").permitAll()
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())
