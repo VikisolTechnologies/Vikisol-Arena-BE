@@ -76,7 +76,8 @@ public class SecurityConfig {
                                 // visitor can reach them. change-password/change-email stay off
                                 // this list on purpose (they fall to .anyRequest().authenticated()).
                                 "/auth/google", "/auth/phone/signin/request-otp", "/auth/phone/signin/verify-otp",
-                                "/auth/phone/signup/request-otp", "/auth/phone/signup/verify-otp").permitAll()
+                                "/auth/phone/signup/request-otp", "/auth/phone/signup/verify-otp",
+                                "/auth/forgot-password", "/auth/reset-password").permitAll()
                         .requestMatchers(HttpMethod.GET, "/auth/invitations/*").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/version").permitAll()

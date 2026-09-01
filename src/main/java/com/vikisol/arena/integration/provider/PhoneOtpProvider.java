@@ -16,4 +16,14 @@ public interface PhoneOtpProvider {
     boolean isConfigured();
 
     void sendOtp(String phoneNumber, String code);
+
+    // WebOTP API (https://web.dev/web-otp/) lets Chrome on Android auto-read this exact SMS and
+    // fill the code in without the user copy-pasting anything - but ONLY if the message's last
+    // line is exactly "@<domain> #<code>" (no scheme, no path) and the frontend calls
+    // navigator.credentials.get({otp:{transport:['sms']}}) - see PhoneAuthForm.tsx. A real SMS
+    // provider (Twilio or similar) should build its message body via this method rather than
+    // re-deriving the WebOTP format itself - one place to get the domain-bound suffix right.
+    default String buildOtpMessage(String code) {
+        return "Your Vikisol Arena verification code is " + code + ".\n@arena.vikisol.in #" + code;
+    }
 }

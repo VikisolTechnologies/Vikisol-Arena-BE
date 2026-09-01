@@ -3,11 +3,13 @@ package com.vikisol.arena.auth.controller;
 import com.vikisol.arena.auth.dto.AcceptInvitationRequest;
 import com.vikisol.arena.auth.dto.ChangeEmailRequest;
 import com.vikisol.arena.auth.dto.ChangePasswordRequest;
+import com.vikisol.arena.auth.dto.ForgotPasswordRequest;
 import com.vikisol.arena.auth.dto.GoogleSignInRequest;
 import com.vikisol.arena.auth.dto.MfaVerifyRequest;
 import com.vikisol.arena.auth.dto.PhoneOtpRequest;
 import com.vikisol.arena.auth.dto.PhoneSigninVerifyRequest;
 import com.vikisol.arena.auth.dto.PhoneSignupVerifyRequest;
+import com.vikisol.arena.auth.dto.ResetPasswordRequest;
 import com.vikisol.arena.auth.dto.SessionResponse;
 import com.vikisol.arena.auth.dto.SignInRequest;
 import com.vikisol.arena.auth.dto.SignUpRequest;
@@ -113,6 +115,22 @@ public class AuthController {
         SessionResponse session = authService.changeEmail(principal.getId(), request.newEmail(), request.currentPassword());
         sessionCookieHelper.set(response, session.token());
         return ResponseEntity.ok(ApiResponse.ok("Email updated", session));
+    }
+
+    // --- Forgot password - public, see SecurityConfig ---
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<ApiResponse<Void>> forgotPassword(@Valid @RequestBody ForgotPasswordRequest request) {
+        authService.forgotPassword(request.email());
+        // Deliberately identical response whether or not the email exists (see AuthService.
+        // forgotPassword's own comment) - the client always shows "check your email."
+        return ResponseEntity.ok(ApiResponse.ok("If that email has an account, a reset link is on its way", null));
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<ApiResponse<Void>> resetPassword(@Valid @RequestBody ResetPasswordRequest request) {
+        authService.resetPassword(request.email(), request.token(), request.newPassword());
+        return ResponseEntity.ok(ApiResponse.ok("Password reset - sign in with your new password", null));
     }
 
     // --- Phone sign-in (existing, already phone-verified accounts) - public, see SecurityConfig

@@ -27,6 +27,7 @@ import com.vikisol.arena.security.service.TotpService;
 import com.vikisol.arena.seed.SeedDataFactory;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
@@ -34,10 +35,12 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.Base64;
 import java.util.Set;
 import java.util.UUID;
 
@@ -71,8 +74,12 @@ public class AuthService {
     private final PhoneOtpProvider phoneOtpProvider;
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
 
+    @Value("${app.frontend.url:http://localhost:3000}")
+    private String frontendUrl;
+
     private static final int OTP_LENGTH = 6;
     private static final long OTP_TTL_MINUTES = 10;
+    private static final long PASSWORD_RESET_TTL_MINUTES = 60;
     private static final SecureRandom RANDOM = new SecureRandom();
 
     @Transactional
@@ -219,6 +226,62 @@ public class AuthService {
         user.setEmail(normalized);
         userRepository.save(user);
         return issueSession(user).session();
+    }
+
+    // --- Forgot password ---
+
+    /** Always succeeds from the caller's point of view regardless of whether the email exists -
+     * standard practice to avoid leaking which emails have accounts (user enumeration). */
+    @Transactional
+    public void forgotPassword(String email) {
+        User user = userRepository.findByEmailIgnoreCase(email).orElse(null);
+        if (user == null || user.getDeletedAt() != null) {
+            return;
+        }
+        String rawToken = generateResetToken();
+        user.setPasswordResetTokenHash(passwordEncoder.encode(rawToken));
+        user.setPasswordResetExpiresAt(Instant.now().plus(PASSWORD_RESET_TTL_MINUTES, ChronoUnit.MINUTES));
+        userRepository.save(user);
+
+        String resetLink = frontendUrl + "/reset-password?email=" + java.net.URLEncoder.encode(user.getEmail(), StandardCharsets.UTF_8)
+                + "&token=" + rawToken;
+        // Best-effort, same "a notification failure must never fail the calling flow" contract as
+        // signUp's welcome email - a Resend outage shouldn't make forgotPassword() itself error.
+        try {
+            emailProvider.sendEmail(EmailMessage.to(user.getEmail(),
+                    "Reset your Vikisol Arena password",
+                    "<p>Hi " + user.getName() + ",</p><p>Someone (hopefully you) asked to reset your Vikisol Arena "
+                            + "password. This link expires in " + PASSWORD_RESET_TTL_MINUTES + " minutes:</p>"
+                            + "<p><a href=\"" + resetLink + "\">" + resetLink + "</a></p>"
+                            + "<p>If this wasn't you, you can safely ignore this email - your password hasn't changed.</p>"
+                            + "<p>- The Vikisol Arena team</p>"));
+        } catch (Exception e) {
+            log.warn("Password reset email failed for {}: {}", user.getEmail(), e.getMessage());
+        }
+    }
+
+    @Transactional
+    public void resetPassword(String email, String token, String newPassword) {
+        User user = userRepository.findByEmailIgnoreCase(email).orElse(null);
+        if (user == null || user.getPasswordResetTokenHash() == null || user.getPasswordResetExpiresAt() == null
+                || user.getPasswordResetExpiresAt().isBefore(Instant.now())
+                || !passwordEncoder.matches(token, user.getPasswordResetTokenHash())) {
+            // Deliberately the same generic message whether the email doesn't exist, the token
+            // never existed, or it's just expired/wrong - specifics here would help an attacker
+            // narrow down which case they're in.
+            throw new BadRequestException("This reset link is invalid or has expired - request a new one");
+        }
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        user.setPasswordSet(true);
+        user.setPasswordResetTokenHash(null);
+        user.setPasswordResetExpiresAt(null);
+        userRepository.save(user);
+    }
+
+    private String generateResetToken() {
+        byte[] bytes = new byte[32];
+        RANDOM.nextBytes(bytes);
+        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
     }
 
     // --- Phone sign-in (existing, already-verified accounts only) ---

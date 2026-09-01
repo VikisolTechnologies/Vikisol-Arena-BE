@@ -118,4 +118,10 @@ public class User extends BaseEntity {
     @Column(nullable = false, columnDefinition = "boolean not null default true")
     @Builder.Default
     private boolean passwordSet = true;
+
+    // V10: forgot-password. Hashed (never plaintext) reset token + its expiry - same discipline
+    // as pendingOtpHash/pendingOtpExpiresAt, and independent of them (a password-reset request and
+    // a pending phone-verification OTP are legitimately unrelated and shouldn't clobber each other).
+    private String passwordResetTokenHash;
+    private Instant passwordResetExpiresAt;
 }

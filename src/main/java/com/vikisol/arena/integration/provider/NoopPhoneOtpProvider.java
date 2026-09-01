@@ -23,6 +23,6 @@ public class NoopPhoneOtpProvider implements PhoneOtpProvider {
 
     @Override
     public void sendOtp(String phoneNumber, String code) {
-        log.info("[otp:noop] would send code {} to {}", code, phoneNumber);
+        log.info("[otp:noop] would send to {}:\n{}", phoneNumber, buildOtpMessage(code));
     }
 }

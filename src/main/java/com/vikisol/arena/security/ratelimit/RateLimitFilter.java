@@ -98,7 +98,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         String path = request.getRequestURI();
         if (path.contains("/auth/signin") || path.contains("/auth/signup") || path.contains("/auth/refresh")
                 || path.contains("/auth/2fa/") || path.contains("/auth/google") || path.contains("/auth/phone/")
-                || path.contains("/auth/change-")) {
+                || path.contains("/auth/change-") || path.contains("/auth/forgot-password") || path.contains("/auth/reset-password")) {
             // Same tight bucket as signin/signup - phone OTP request/verify and Google sign-in
             // are exactly as abuse-prone (SMS-bombing a number, brute-forcing a 6-digit code),
             // and change-password/change-email are sensitive-enough account actions to belong
