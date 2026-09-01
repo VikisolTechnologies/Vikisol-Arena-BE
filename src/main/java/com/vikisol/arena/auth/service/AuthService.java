@@ -305,6 +305,14 @@ public class AuthService {
 
     @Transactional
     public SignInOutcome signInWithGoogle(String idToken) {
+        // Checked here, not left to GoogleIdTokenVerifier.verify()'s own IllegalStateException -
+        // that exception has no dedicated GlobalExceptionHandler mapping, so it would fall
+        // through to the generic RuntimeException handler and leak its message (which names the
+        // env var) straight into a 400 response. Same error-contract class of bug fixed in
+        // PostService's embedOrNull - a config-state detail should never reach the client.
+        if (!googleIdTokenVerifier.isConfigured()) {
+            throw new BadRequestException("Google sign-in isn't available right now");
+        }
         GoogleIdTokenVerifier.Verified verified = googleIdTokenVerifier.verify(idToken);
         if (verified == null) {
             throw new BadCredentialsException("Could not verify this Google sign-in - please try again");
