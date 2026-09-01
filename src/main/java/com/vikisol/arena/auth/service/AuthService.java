@@ -142,14 +142,24 @@ public class AuthService {
     public SignInOutcome signIn(SignInRequest request) {
         User user = userRepository.findByEmailIgnoreCase(request.email()).orElse(null);
 
-        if (user != null && user.getLockedUntil() != null && user.getLockedUntil().isAfter(Instant.now())) {
+        // Syam's explicit call (2026-09-02): reveal "no account" so the frontend can offer to
+        // start signup instead of a dead-end generic error - same choice already made for phone
+        // sign-in (requestPhoneSigninOtp's identical message), just never carried over to email.
+        // A deliberate reversal of the enumeration-safe posture below (wrong password vs. deleted
+        // account both still say the same generic thing) - only "never existed at all" gets the
+        // friendlier message.
+        if (user == null) {
+            throw new BadRequestException("No account found with this email");
+        }
+
+        if (user.getLockedUntil() != null && user.getLockedUntil().isAfter(Instant.now())) {
             long minutesLeft = Math.max(1, Duration.between(Instant.now(), user.getLockedUntil()).toMinutes());
             throw new BadRequestException("Too many failed attempts. Try again in " + minutesLeft + " minute(s).");
         }
         // DPDP right-to-erasure (ProfileController's DELETE /me) - a deleted account can never
         // sign in again, checked before authenticate() so this doesn't also count as/trigger a
         // failed-attempt lockout increment for what is really "this account no longer exists."
-        if (user != null && user.getDeletedAt() != null) {
+        if (user.getDeletedAt() != null) {
             throw new BadCredentialsException("Invalid email or password");
         }
 
@@ -157,11 +167,9 @@ public class AuthService {
             authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(request.email().toLowerCase(), request.password()));
         } catch (BadCredentialsException ex) {
-            if (user != null) recordFailedAttempt(user);
+            recordFailedAttempt(user);
             throw new BadCredentialsException("Invalid email or password");
         }
-        // user is guaranteed non-null past this point - authenticationManager would have thrown
-        // BadCredentialsException (caught above) for an unknown email.
         if (user.getFailedLoginAttempts() > 0 || user.getLockedUntil() != null) {
             user.setFailedLoginAttempts(0);
             user.setLockedUntil(null);
