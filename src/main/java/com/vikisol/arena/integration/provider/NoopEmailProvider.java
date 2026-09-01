@@ -24,6 +24,9 @@ public class NoopEmailProvider implements EmailProvider {
 
     @Override
     public void sendEmail(EmailMessage message) {
-        log.info("[email:noop] would send \"{}\" to {}", message.subject(), message.to());
+        // Full body logged (not just subject/recipient) so flows like password-reset are
+        // actually testable end-to-end without a real vendor - same reasoning
+        // NoopPhoneOtpProvider already logs its full message, not just "sent a code."
+        log.info("[email:noop] would send \"{}\" to {}:\n{}", message.subject(), message.to(), message.htmlBody());
     }
 }
