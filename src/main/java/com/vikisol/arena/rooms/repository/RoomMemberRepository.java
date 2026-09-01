@@ -18,4 +18,8 @@ public interface RoomMemberRepository extends JpaRepository<RoomMember, UUID> {
     Optional<RoomMember> findByRoomIdAndUserId(UUID roomId, UUID userId);
 
     boolean existsByRoomIdAndUserId(UUID roomId, UUID userId);
+
+    // P3 audit fix: RoomService.toResponse(Room,...) used to load every member row just to call
+    // .size() on the list, per room, in getMyRooms - a straight COUNT query instead.
+    long countByRoomId(UUID roomId);
 }

@@ -42,4 +42,22 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     @Query("select p from Post p where p.status in :statuses and " +
             "((p.endsAt is not null and p.endsAt < :now) or (p.endsAt is null and p.startsAt is not null and p.startsAt < :staleHorizon))")
     List<Post> findExpirable(@Param("statuses") List<PostStatus> statuses, @Param("now") Instant now, @Param("staleHorizon") Instant staleHorizon);
+
+    // P3 audit fix: PostMapper.toResponse read post.getTags()/getMediaUrls() directly, one lazy
+    // load each per post per page (2 extra queries per row) - right next to the exact code
+    // (PostService.toResponseList) that already correctly batches comment/reaction counts and
+    // author-join-counts, tags/media just never got the same treatment. Two flat (postId, value)
+    // projections instead, grouped into a Map<UUID, List<String>> once per page (see
+    // PostService.batchTags/batchMediaUrls) - same "IN-query instead of N lazy loads" shape as
+    // CandidateProfileRepository.findByIdInFetchingSkills.
+    @Query("select p.id as postId, t as value from Post p join p.tags t where p.id in :postIds")
+    List<PostElementProjection> findTagsByPostIdIn(@Param("postIds") List<UUID> postIds);
+
+    @Query("select p.id as postId, m as value from Post p join p.mediaUrls m where p.id in :postIds")
+    List<PostElementProjection> findMediaUrlsByPostIdIn(@Param("postIds") List<UUID> postIds);
+
+    interface PostElementProjection {
+        UUID getPostId();
+        String getValue();
+    }
 }

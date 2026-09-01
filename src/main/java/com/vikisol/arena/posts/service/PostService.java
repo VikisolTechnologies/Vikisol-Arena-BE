@@ -145,9 +145,12 @@ public class PostService {
         var reactionCounts = mapper.batchReactionCounts(postIds);
         var myReactedIds = mapper.batchMyReactedIds(postIds, viewingUserId);
         var authorJoinCounts = mapper.batchAuthorJoinCounts(authorIds);
+        var tagsByPostId = mapper.batchTags(postIds);
+        var mediaUrlsByPostId = mapper.batchMediaUrls(postIds);
         return posts.stream()
                 .map(p -> mapper.toResponse(p, viewingUserId, myJoinStatus(p, viewingUserId), roomIdFor(p),
-                        authorProfiles, commentCounts, reactionCounts, myReactedIds, authorJoinCounts))
+                        authorProfiles, commentCounts, reactionCounts, myReactedIds, authorJoinCounts,
+                        tagsByPostId, mediaUrlsByPostId))
                 .toList();
     }
 

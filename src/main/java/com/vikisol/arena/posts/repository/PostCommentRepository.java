@@ -10,8 +10,14 @@ import java.util.List;
 import java.util.UUID;
 
 public interface PostCommentRepository extends JpaRepository<PostComment, UUID> {
+    // P3 audit fix: PostCommentService.getComments had no limit at all - a viral post's comment
+    // section would return every comment ever posted, and load one CandidateProfile per comment
+    // on top of that (see batchAuthorProfiles). Capped at the 200 most recent (service reverses
+    // to ascending for display) - the same pragmatic "recent window instead of unbounded" trade
+    // as RoomMessageRepository/ThreadMessageRepository, sized up a little since a comment thread
+    // is read in full more often than a chat's full history is.
     @EntityGraph(attributePaths = "authorUser")
-    List<PostComment> findByPostIdOrderByCreatedAtAsc(UUID postId);
+    List<PostComment> findTop200ByPostIdOrderByCreatedAtDesc(UUID postId);
 
     long countByPostId(UUID postId);
 

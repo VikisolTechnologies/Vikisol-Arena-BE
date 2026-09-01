@@ -8,6 +8,7 @@ import com.vikisol.arena.posts.entity.PostJoinRequest;
 import com.vikisol.arena.posts.repository.PostCommentRepository;
 import com.vikisol.arena.posts.repository.PostJoinRequestRepository;
 import com.vikisol.arena.posts.repository.PostReactionRepository;
+import com.vikisol.arena.posts.repository.PostRepository;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
@@ -29,6 +30,7 @@ public class PostMapper {
     private final PostCommentRepository postCommentRepository;
     private final PostReactionRepository postReactionRepository;
     private final PostJoinRequestRepository postJoinRequestRepository;
+    private final PostRepository postRepository;
 
     // Single-post convenience overload (a few extra queries) - list/feed call sites should use
     // the batched overload below instead, same split as ProjectMapper's toResponse(Bid) vs
@@ -40,27 +42,30 @@ public class PostMapper {
         Boolean myReacted = viewingUserId == null ? null : postReactionRepository.existsByPostIdAndUserId(post.getId(), viewingUserId);
         long authorJoinCount = postJoinRequestRepository.countApprovedByUserIdIn(List.of(post.getAuthorUser().getId())).stream()
                 .mapToLong(PostJoinRequestRepository.UserJoinCountProjection::getCnt).sum();
-        return toResponse(post, viewingUserId, myJoinStatus, roomId, profile.orElse(null), commentCount, reactionCount, myReacted, authorJoinCount);
+        return toResponse(post, viewingUserId, myJoinStatus, roomId, profile.orElse(null), commentCount, reactionCount, myReacted, authorJoinCount,
+                post.getTags(), post.getMediaUrls());
     }
 
     public PostResponse toResponse(Post post, UUID viewingUserId, String myJoinStatus, String roomId,
                                     Map<UUID, CandidateProfile> authorProfiles) {
-        return toResponse(post, viewingUserId, myJoinStatus, roomId, authorProfiles, Map.of(), Map.of(), Set.of(), Map.of());
+        return toResponse(post, viewingUserId, myJoinStatus, roomId, authorProfiles, Map.of(), Map.of(), Set.of(), Map.of(), Map.of(), Map.of());
     }
 
     // Fully batched overload - one count query and one reaction-membership query for the entire
     // page/window, instead of two extra queries per post. Feed/trending/nearby call sites use
-    // this; batchCommentCounts/batchReactionCounts/batchAuthorJoinCounts build the maps once per
-    // list.
+    // this; batchCommentCounts/batchReactionCounts/batchAuthorJoinCounts/batchTags/
+    // batchMediaUrls build the maps once per list.
     public PostResponse toResponse(Post post, UUID viewingUserId, String myJoinStatus, String roomId,
                                     Map<UUID, CandidateProfile> authorProfiles,
                                     Map<UUID, Long> commentCounts, Map<UUID, Long> reactionCounts, Set<UUID> myReactedIds,
-                                    Map<UUID, Long> authorJoinCounts) {
+                                    Map<UUID, Long> authorJoinCounts,
+                                    Map<UUID, List<String>> tagsByPostId, Map<UUID, List<String>> mediaUrlsByPostId) {
         UUID authorId = post.getAuthorUser().getId();
         return toResponse(post, viewingUserId, myJoinStatus, roomId, authorProfiles.get(authorId),
                 commentCounts.getOrDefault(post.getId(), 0L), reactionCounts.getOrDefault(post.getId(), 0L),
                 viewingUserId == null ? null : myReactedIds.contains(post.getId()),
-                authorJoinCounts.getOrDefault(authorId, 0L));
+                authorJoinCounts.getOrDefault(authorId, 0L),
+                tagsByPostId.getOrDefault(post.getId(), List.of()), mediaUrlsByPostId.getOrDefault(post.getId(), List.of()));
     }
 
     public Map<UUID, Long> batchCommentCounts(List<UUID> postIds) {
@@ -89,8 +94,26 @@ public class PostMapper {
                         PostJoinRequestRepository.UserJoinCountProjection::getCnt));
     }
 
+    // P3 audit fix: toResponse used to read post.getTags()/getMediaUrls() directly - one lazy
+    // load per post per page, for each of the two collections. IN-queries instead, grouped by
+    // post id once per page/window - same shape as the count batches above.
+    public Map<UUID, List<String>> batchTags(List<UUID> postIds) {
+        if (postIds.isEmpty()) return Map.of();
+        return postRepository.findTagsByPostIdIn(postIds).stream()
+                .collect(Collectors.groupingBy(PostRepository.PostElementProjection::getPostId,
+                        Collectors.mapping(PostRepository.PostElementProjection::getValue, Collectors.toList())));
+    }
+
+    public Map<UUID, List<String>> batchMediaUrls(List<UUID> postIds) {
+        if (postIds.isEmpty()) return Map.of();
+        return postRepository.findMediaUrlsByPostIdIn(postIds).stream()
+                .collect(Collectors.groupingBy(PostRepository.PostElementProjection::getPostId,
+                        Collectors.mapping(PostRepository.PostElementProjection::getValue, Collectors.toList())));
+    }
+
     private PostResponse toResponse(Post post, UUID viewingUserId, String myJoinStatus, String roomId, CandidateProfile authorProfile,
-                                     long commentCount, long reactionCount, Boolean myReacted, long authorJoinCount) {
+                                     long commentCount, long reactionCount, Boolean myReacted, long authorJoinCount,
+                                     List<String> tags, List<String> mediaUrls) {
         String authorName = post.getAuthorUser().getName();
         String authorEmoji = "🧑🏽";
         if (authorProfile != null) {
@@ -132,7 +155,7 @@ public class PostMapper {
                 post.getCapacity(), post.getSpotsFilled(), post.getStatus().wireValue(),
                 post.getStartsAt() == null ? null : post.getStartsAt().toString(),
                 post.getEndsAt() == null ? null : post.getEndsAt().toString(),
-                post.getTags(), post.getMediaUrls(), post.isJoinable(),
+                tags, mediaUrls, post.isJoinable(),
                 mine ? Boolean.TRUE : null, myJoinStatus, roomId, post.getCreatedAt().toString(),
                 displayLat, displayLng,
                 canSeeExactMeetingPoint ? post.getExactMeetingPoint() : null,

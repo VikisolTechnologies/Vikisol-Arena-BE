@@ -10,14 +10,18 @@ import com.vikisol.arena.posts.entity.Post;
 import com.vikisol.arena.posts.entity.PostComment;
 import com.vikisol.arena.posts.repository.PostCommentRepository;
 import com.vikisol.arena.posts.repository.PostRepository;
+import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -32,7 +36,17 @@ public class PostCommentService {
     @Transactional(readOnly = true)
     public List<PostCommentResponse> getComments(UUID postId) {
         requirePost(postId);
-        return postCommentRepository.findByPostIdOrderByCreatedAtAsc(postId).stream().map(this::toResponse).toList();
+        List<PostComment> comments = postCommentRepository.findTop200ByPostIdOrderByCreatedAtDesc(postId);
+        Collections.reverse(comments); // most-recent-first from the query -> ascending for display
+        Map<UUID, CandidateProfile> profiles = batchAuthorProfiles(comments);
+        return comments.stream().map(c -> toResponse(c, profiles)).toList();
+    }
+
+    private Map<UUID, CandidateProfile> batchAuthorProfiles(List<PostComment> comments) {
+        List<UUID> authorIds = comments.stream().map(c -> c.getAuthorUser().getId()).distinct().toList();
+        if (authorIds.isEmpty()) return Map.of();
+        return candidateProfileRepository.findByUserIdIn(authorIds).stream()
+                .collect(Collectors.toMap(p -> p.getUser().getId(), p -> p));
     }
 
     @Transactional
@@ -43,7 +57,7 @@ public class PostCommentService {
         }
         User author = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("Account not found"));
         PostComment comment = postCommentRepository.save(PostComment.builder().post(post).authorUser(author).content(content).build());
-        return toResponse(comment);
+        return toResponse(comment, batchAuthorProfiles(List.of(comment)));
     }
 
     @Transactional
@@ -61,13 +75,13 @@ public class PostCommentService {
         postCommentRepository.delete(comment);
     }
 
-    private PostCommentResponse toResponse(PostComment comment) {
+    private PostCommentResponse toResponse(PostComment comment, Map<UUID, CandidateProfile> profiles) {
         String name = comment.getAuthorUser().getName();
         String emoji = "🧑🏽";
-        var profile = candidateProfileRepository.findByUserId(comment.getAuthorUser().getId());
-        if (profile.isPresent()) {
-            name = profile.get().getName();
-            emoji = profile.get().getAvatarEmoji();
+        CandidateProfile profile = profiles.get(comment.getAuthorUser().getId());
+        if (profile != null) {
+            name = profile.getName();
+            emoji = profile.getAvatarEmoji();
         }
         return new PostCommentResponse(comment.getId().toString(), comment.getPost().getId().toString(),
                 comment.getAuthorUser().getId().toString(), name, emoji, comment.getContent(), comment.getCreatedAt().toString());

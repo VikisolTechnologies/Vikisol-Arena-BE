@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 
@@ -47,8 +48,9 @@ public class ConversationService {
     public List<ThreadMessageResponse> getMessages(UUID userId, UUID conversationId) {
         Conversation conversation = requireConversation(conversationId);
         assertParticipant(userId, conversation);
-        return threadMessageRepository.findByConversationIdOrderByCreatedAtAsc(conversationId).stream()
-                .map(m -> toResponse(m, userId)).toList();
+        List<ThreadMessage> messages = threadMessageRepository.findTop100ByConversationIdOrderByCreatedAtDesc(conversationId);
+        Collections.reverse(messages); // most-recent-first from the query -> ascending for display
+        return messages.stream().map(m -> toResponse(m, userId)).toList();
     }
 
     @Transactional

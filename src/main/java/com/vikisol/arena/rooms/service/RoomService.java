@@ -27,10 +27,15 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import com.vikisol.arena.profile.entity.CandidateProfile;
+
 import java.time.Instant;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * REST polling, not WebSocket - zero WS/STOMP infrastructure exists anywhere in this codebase
@@ -124,15 +129,26 @@ public class RoomService {
     public List<RoomMessageResponse> getMessages(UUID userId, UUID roomId) {
         Room room = requireRoom(roomId);
         assertRoomMember(userId, room);
-        return roomMessageRepository.findByRoomIdOrderByCreatedAtAsc(roomId).stream()
-                .map(m -> toResponse(m, userId)).toList();
+        List<RoomMessage> messages = roomMessageRepository.findTop100ByRoomIdOrderByCreatedAtDesc(roomId);
+        Collections.reverse(messages); // most-recent-first from the query -> ascending for display
+        Map<UUID, CandidateProfile> profiles = batchSenderProfiles(messages.stream().map(m -> m.getSender().getId()));
+        return messages.stream().map(m -> toResponse(m, userId, profiles)).toList();
     }
 
     @Transactional(readOnly = true)
     public List<RoomMemberResponse> getMembers(UUID userId, UUID roomId) {
         Room room = requireRoom(roomId);
         assertRoomMember(userId, room);
-        return roomMemberRepository.findByRoomId(roomId).stream().map(this::toResponse).toList();
+        List<RoomMember> members = roomMemberRepository.findByRoomId(roomId);
+        Map<UUID, CandidateProfile> profiles = batchSenderProfiles(members.stream().map(m -> m.getUser().getId()));
+        return members.stream().map(m -> toResponse(m, profiles)).toList();
+    }
+
+    private Map<UUID, CandidateProfile> batchSenderProfiles(java.util.stream.Stream<UUID> userIds) {
+        List<UUID> ids = userIds.distinct().toList();
+        if (ids.isEmpty()) return Map.of();
+        return candidateProfileRepository.findByUserIdIn(ids).stream()
+                .collect(Collectors.toMap(p -> p.getUser().getId(), p -> p));
     }
 
     @Transactional
@@ -152,7 +168,9 @@ public class RoomService {
         senderMembership.setLastReadAt(message.getCreatedAt());
         roomMemberRepository.save(senderMembership);
 
-        return toResponse(message, userId);
+        // Single message, not a list - no batching win to be had, just look its one sender up.
+        Map<UUID, CandidateProfile> profile = batchSenderProfiles(java.util.stream.Stream.of(userId));
+        return toResponse(message, userId, profile);
     }
 
     @Transactional
@@ -206,13 +224,15 @@ public class RoomService {
     }
 
     private RoomResponse toResponse(Room room, RoomMember membership) {
-        List<RoomMessage> messages = roomMessageRepository.findByRoomIdOrderByCreatedAtAsc(room.getId());
-        RoomMessage last = messages.isEmpty() ? null : messages.get(messages.size() - 1);
+        // P3 audit fix: used to load the room's entire message history (findByRoomIdOrderBy...)
+        // just to read the last element, and every member row just to count them - both once per
+        // room in getMyRooms' loop. A single-row query and a COUNT query instead.
+        RoomMessage last = roomMessageRepository.findTopByRoomIdOrderByCreatedAtDesc(room.getId()).orElse(null);
         // Muted rooms never surface an unread badge, even with genuinely new messages - see
         // RoomMember.muted's own doc comment.
         boolean unread = !membership.isMuted() && last != null
                 && (membership.getLastReadAt() == null || membership.getLastReadAt().isBefore(last.getCreatedAt()));
-        int memberCount = roomMemberRepository.findByRoomId(room.getId()).size();
+        int memberCount = (int) roomMemberRepository.countByRoomId(room.getId());
         Post post = room.getPost();
         return new RoomResponse(
                 room.getId().toString(), post.getId().toString(), post.getBody(), post.getIntentType().wireValue(),
@@ -225,26 +245,29 @@ public class RoomService {
         return content.length() > 80 ? content.substring(0, 80) + "…" : content;
     }
 
-    private RoomMessageResponse toResponse(RoomMessage m, UUID viewingUserId) {
+    // P3 audit fix: was one candidateProfileRepository.findByUserId(...) call per message/member
+    // - profiles is the batched IN-query result from batchSenderProfiles, looked up once for the
+    // whole list rather than per row.
+    private RoomMessageResponse toResponse(RoomMessage m, UUID viewingUserId, Map<UUID, CandidateProfile> profiles) {
         String senderName = m.getSender().getName();
         String senderEmoji = "🧑🏽";
-        var profile = candidateProfileRepository.findByUserId(m.getSender().getId());
-        if (profile.isPresent()) {
-            senderName = profile.get().getName();
-            senderEmoji = profile.get().getAvatarEmoji();
+        CandidateProfile profile = profiles.get(m.getSender().getId());
+        if (profile != null) {
+            senderName = profile.getName();
+            senderEmoji = profile.getAvatarEmoji();
         }
         return new RoomMessageResponse(m.getId().toString(), m.getRoom().getId().toString(),
                 m.getSender().getId().toString(), senderName, senderEmoji,
                 m.getSender().getId().equals(viewingUserId), m.getContent(), m.getCreatedAt().toString());
     }
 
-    private RoomMemberResponse toResponse(RoomMember member) {
+    private RoomMemberResponse toResponse(RoomMember member, Map<UUID, CandidateProfile> profiles) {
         String name = member.getUser().getName();
         String emoji = "🧑🏽";
-        var profile = candidateProfileRepository.findByUserId(member.getUser().getId());
-        if (profile.isPresent()) {
-            name = profile.get().getName();
-            emoji = profile.get().getAvatarEmoji();
+        CandidateProfile profile = profiles.get(member.getUser().getId());
+        if (profile != null) {
+            name = profile.getName();
+            emoji = profile.getAvatarEmoji();
         }
         return new RoomMemberResponse(member.getUser().getId().toString(), name, emoji, member.getRole().wireValue());
     }
