@@ -29,6 +29,7 @@ import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import com.vikisol.arena.rooms.entity.Room;
 import com.vikisol.arena.rooms.service.RoomService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -43,6 +44,7 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+@Slf4j
 @Service
 @RequiredArgsConstructor
 public class PostService {
@@ -221,7 +223,7 @@ public class PostService {
         // calls per request. Tags included since they're often the most topic-dense words on a
         // short post.
         String embeddingInput = request.body() + " " + String.join(" ", request.tags());
-        builder.embedding(EmbeddingUtil.encode(embeddingProvider.embed(embeddingInput)));
+        builder.embedding(EmbeddingUtil.encode(embedOrNull(embeddingInput)));
 
         Post post = postRepository.save(builder.build());
         // §4 safety-audit fix: banned-phrase auto-flag was JobPosting-only before this - every
@@ -250,7 +252,7 @@ public class PostService {
                 .status(PostStatus.OPEN)
                 .tags(request.tags())
                 .build();
-        post.setEmbedding(EmbeddingUtil.encode(embeddingProvider.embed(request.body() + " " + String.join(" ", request.tags()))));
+        post.setEmbedding(EmbeddingUtil.encode(embedOrNull(request.body() + " " + String.join(" ", request.tags()))));
         post = postRepository.save(post);
         moderationService.autoFlag(post);
         return mapper.toResponse(post, userId, null, null);
@@ -444,5 +446,23 @@ public class PostService {
 
     private User requireUser(UUID id) {
         return userRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Account not found"));
+    }
+
+    // P3 audit fix: embeddingProvider.embed() used to propagate straight into post creation -
+    // a transient OpenAI outage (the only provider that can actually throw here; the active
+    // default HashingEmbeddingProvider is pure local math and never fails) would surface as a
+    // raw upstream error message wrapped in a 400, via GlobalExceptionHandler's generic
+    // RuntimeException handler. Every other external dependency in this codebase (email, Teams,
+    // WhatsApp) is best-effort and never blocks the primary operation - this makes embedding
+    // follow the same contract. A post with a null embedding just falls out of similarity-based
+    // ranking until the next successful embed, which is a much smaller failure than blocking
+    // post creation entirely.
+    private float[] embedOrNull(String text) {
+        try {
+            return embeddingProvider.embed(text);
+        } catch (Exception e) {
+            log.warn("Embedding failed, post will save without one: {}", e.getMessage());
+            return null;
+        }
     }
 }

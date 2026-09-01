@@ -232,12 +232,14 @@ public class AuthService {
 
     @Transactional(readOnly = true)
     public SessionResponse currentSession(User user) {
-        String candidateId = null;
-        if (user.getRole() == Role.TALENT) {
-            candidateId = candidateProfileRepository.findByUserId(user.getId())
-                    .map(p -> p.getId().toString())
-                    .orElse(null);
-        }
+        // This is the account's own User.id, not the CandidateProfile PK - despite the field's
+        // name, every frontend call site (people/[id], feed/[id], RoomsInbox, CommentThread)
+        // reads it as "myUserId" to compare against author/sender ids that are themselves
+        // User.id (posts, comments, room messages). It used to hold the CandidateProfile PK,
+        // which silently broke every one of those self-identity checks - found auditing P3's
+        // CandidateProfile.id/User.id mismatch item (see PublicCandidateProfileResponse's
+        // matching fix in CandidateProfileService.getPublicProfile).
+        String candidateId = user.getRole() == Role.TALENT ? user.getId().toString() : null;
         return SessionResponse.of(user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), null);
     }
 
@@ -251,12 +253,8 @@ public class AuthService {
     }
 
     private SignInOutcome.Success issueSession(User user) {
-        String candidateId = null;
-        if (user.getRole() == Role.TALENT) {
-            candidateId = candidateProfileRepository.findByUserId(user.getId())
-                    .map(p -> p.getId().toString())
-                    .orElse(null);
-        }
+        // See currentSession()'s comment - this is the User.id, not the CandidateProfile PK.
+        String candidateId = user.getRole() == Role.TALENT ? user.getId().toString() : null;
         String accessToken = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
         String refreshToken = refreshTokenService.issue(user.getId());
         SessionResponse session = SessionResponse.of(user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), accessToken);

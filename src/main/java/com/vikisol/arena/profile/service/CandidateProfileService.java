@@ -216,7 +216,7 @@ public class CandidateProfileService {
         FollowCountsResponse counts = followService.getCounts(targetUserId, viewingUserId);
         String homeCity = profile.getLocationConsent() == LocationConsent.OFF ? null : profile.getHomeCity();
         return new PublicCandidateProfileResponse(
-                profile.getId().toString(), profile.getName(), profile.getAvatarEmoji(), profile.getTitle(),
+                targetUserId.toString(), profile.getName(), profile.getAvatarEmoji(), profile.getTitle(),
                 profile.getIndustry().wireValue(), profile.getLocation(), profile.isRemote(),
                 profile.getSkills().stream().map(s -> new SkillDto(s.getName(), s.isVerified())).toList(),
                 profile.getExperienceYears(), profile.getOpenTo().stream().map(o -> o.wireValue()).toList(),
