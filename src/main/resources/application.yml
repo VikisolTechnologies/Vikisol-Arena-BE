@@ -132,6 +132,16 @@ teams:
   client-secret: ${TEAMS_CLIENT_SECRET:}
   organizer-email: ${TEAMS_ORGANIZER_EMAIL:}
 
+# Msg91PhoneOtpProvider - real SMS-OTP delivery for phone sign-in/signup, dormant unless
+# MSG91_AUTH_KEY/MSG91_TEMPLATE_ID are set (see that class's own comment on the DLT-template
+# requirement - template-id must point at an approved template with a variable literally named
+# whatever msg91.otp-variable-name is, "OTP" by default).
+msg91:
+  auth-key: ${MSG91_AUTH_KEY:}
+  template-id: ${MSG91_TEMPLATE_ID:}
+  sender-id: ${MSG91_SENDER_ID:}
+  otp-variable-name: ${MSG91_OTP_VARIABLE_NAME:OTP}
+
 # ARENA-V2-PRODUCT-ARCHITECTURE.md §7.3 (Phase C) embedding-based feed ranking. Blank by default,
 # which keeps HashingEmbeddingProvider (a real, local, zero-dependency embedding, not a stub -
 # see its own class comment) active - same dormant-until-configured convention as resend/whatsapp/

@@ -2,9 +2,12 @@ package com.vikisol.arena.integration.config;
 
 import com.vikisol.arena.integration.provider.EmailProvider;
 import com.vikisol.arena.integration.provider.MeetingLinkProvider;
+import com.vikisol.arena.integration.provider.Msg91PhoneOtpProvider;
 import com.vikisol.arena.integration.provider.NoopEmailProvider;
 import com.vikisol.arena.integration.provider.NoopMeetingLinkProvider;
+import com.vikisol.arena.integration.provider.NoopPhoneOtpProvider;
 import com.vikisol.arena.integration.provider.NoopWhatsAppProvider;
+import com.vikisol.arena.integration.provider.PhoneOtpProvider;
 import com.vikisol.arena.integration.provider.ResendEmailProvider;
 import com.vikisol.arena.integration.provider.TeamsMeetingLinkProvider;
 import com.vikisol.arena.integration.provider.WhatsAppBusinessProvider;
@@ -57,6 +60,18 @@ public class IntegrationProviderConfig {
     @Value("${teams.organizer-email:}")
     private String teamsOrganizerEmail;
 
+    @Value("${msg91.auth-key:}")
+    private String msg91AuthKey;
+
+    @Value("${msg91.template-id:}")
+    private String msg91TemplateId;
+
+    @Value("${msg91.sender-id:}")
+    private String msg91SenderId;
+
+    @Value("${msg91.otp-variable-name:OTP}")
+    private String msg91OtpVariableName;
+
     @Bean
     @Primary
     public EmailProvider emailProvider(NoopEmailProvider noopEmailProvider) {
@@ -76,5 +91,12 @@ public class IntegrationProviderConfig {
     public MeetingLinkProvider meetingLinkProvider(NoopMeetingLinkProvider noopMeetingLinkProvider) {
         TeamsMeetingLinkProvider real = new TeamsMeetingLinkProvider(teamsTenantId, teamsClientId, teamsClientSecret, teamsOrganizerEmail);
         return real.isConfigured() ? real : noopMeetingLinkProvider;
+    }
+
+    @Bean
+    @Primary
+    public PhoneOtpProvider phoneOtpProvider(NoopPhoneOtpProvider noopPhoneOtpProvider) {
+        Msg91PhoneOtpProvider real = new Msg91PhoneOtpProvider(msg91AuthKey, msg91TemplateId, msg91SenderId, msg91OtpVariableName);
+        return real.isConfigured() ? real : noopPhoneOtpProvider;
     }
 }
