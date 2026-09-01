@@ -97,7 +97,12 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private Bucket bucketFor(HttpServletRequest request) {
         String path = request.getRequestURI();
         if (path.contains("/auth/signin") || path.contains("/auth/signup") || path.contains("/auth/refresh")
-                || path.contains("/auth/2fa/")) {
+                || path.contains("/auth/2fa/") || path.contains("/auth/google") || path.contains("/auth/phone/")
+                || path.contains("/auth/change-")) {
+            // Same tight bucket as signin/signup - phone OTP request/verify and Google sign-in
+            // are exactly as abuse-prone (SMS-bombing a number, brute-forcing a 6-digit code),
+            // and change-password/change-email are sensitive-enough account actions to belong
+            // here too rather than the generic default bucket.
             return new Bucket("auth", authPerMinute);
         }
         if (path.endsWith("/cv") && "POST".equalsIgnoreCase(request.getMethod())) {

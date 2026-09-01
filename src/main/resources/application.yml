@@ -140,6 +140,15 @@ openai:
   api-key: ${OPENAI_API_KEY:}
   embedding-model: ${OPENAI_EMBEDDING_MODEL:text-embedding-3-small}
 
+# Google sign-in (AuthService.signInWithGoogle / GoogleIdTokenVerifier). Blank by default, which
+# keeps POST /auth/google returning a clear "not configured" error instead of silently accepting
+# unverifiable tokens - same dormant-until-configured convention as resend/whatsapp/teams above.
+# Only the Client ID is needed (public, safe in the frontend too) - verification goes through
+# Google's own tokeninfo endpoint, not a server-side authorization-code exchange, so no client
+# secret exists to leak.
+google:
+  client-id: ${GOOGLE_CLIENT_ID:}
+
 # Dormant unless SENTRY_DSN is set - blank dsn disables the Sentry Spring Boot starter entirely
 # (its auto-config no-ops with an empty DSN), matching the Noop-provider pattern used above.
 sentry:

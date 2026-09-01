@@ -20,6 +20,11 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     Optional<User> findByHandle(String handle);
     long countByCreatedAtAfter(Instant since);
 
+    // V9 phone/Google sign-in - phoneNumber/googleId are unique-when-present (see
+    // V9__auth_expansion.sql), so at most one row can ever match.
+    Optional<User> findByPhoneNumber(String phoneNumber);
+    Optional<User> findByGoogleId(String googleId);
+
     // PA5 (platform analytics): user-count-by-role breakdown as a SQL GROUP BY instead of
     // PlatformAnalyticsService loading every user row into memory and counting in Java.
     @Query("select u.role as role, count(u) as count from User u group by u.role")

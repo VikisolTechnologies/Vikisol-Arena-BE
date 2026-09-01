@@ -71,7 +71,12 @@ public class SecurityConfig {
                         // NPE-ing instead of 401ing (see DECISIONS.md). Enumerate only the
                         // genuinely-public auth endpoints explicitly instead.
                         .requestMatchers(HttpMethod.POST, "/auth/signup", "/auth/signin", "/auth/refresh",
-                                "/auth/signout", "/auth/2fa/verify", "/auth/invitations/accept").permitAll()
+                                "/auth/signout", "/auth/2fa/verify", "/auth/invitations/accept",
+                                // Google/phone sign-in/signup - the whole point is a signed-out
+                                // visitor can reach them. change-password/change-email stay off
+                                // this list on purpose (they fall to .anyRequest().authenticated()).
+                                "/auth/google", "/auth/phone/signin/request-otp", "/auth/phone/signin/verify-otp",
+                                "/auth/phone/signup/request-otp", "/auth/phone/signup/verify-otp").permitAll()
                         .requestMatchers(HttpMethod.GET, "/auth/invitations/*").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/version").permitAll()

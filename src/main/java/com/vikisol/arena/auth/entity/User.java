@@ -79,8 +79,10 @@ public class User extends BaseEntity {
     // ACTIVITY-post create/join gate requires this to be set and >= 18 years ago.
     private LocalDate dateOfBirth;
 
-    // Phone verification (VerificationService). Number is captured at OTP-request time;
-    // phoneVerified only flips true after a correct OTP confirm.
+    // Phone verification (VerificationService) AND, since V9, phone-based sign-in/signup
+    // (AuthService.requestPhoneSigninOtp/requestPhoneSignupOtp) - unique once it's a real sign-in
+    // credential, not just a self-attested trust-tier field (see V9__auth_expansion.sql).
+    @Column(unique = true)
     private String phoneNumber;
 
     @Column(nullable = false, columnDefinition = "boolean not null default false")
@@ -89,6 +91,11 @@ public class User extends BaseEntity {
 
     // Hashed (never plaintext) pending OTP + its expiry - both null once confirmed or expired.
     // Single pending code at a time by design (a new request overwrites any unconfirmed one).
+    // Shared between VerificationService's "verify my phone" flow and AuthService's phone
+    // sign-in/signup flow - the two are mutually exclusive in practice (a signed-out visitor
+    // signing in via phone vs. an already-signed-in user verifying their number) and both
+    // legitimately want "one pending code at a time," so reusing the same fields is correct,
+    // not a collision risk.
     private String pendingOtpHash;
     private Instant pendingOtpExpiresAt;
 
@@ -96,4 +103,19 @@ public class User extends BaseEntity {
     @Column(nullable = false, columnDefinition = "varchar(255) not null default 'BASIC'")
     @Builder.Default
     private VerificationLevel verificationLevel = VerificationLevel.BASIC;
+
+    // V9: Google sign-in's actual identity anchor (the "sub" claim - stable, unlike email which
+    // could theoretically change on Google's side). Null for every account that never used
+    // Google sign-in.
+    @Column(unique = true)
+    private String googleId;
+
+    // V9: true for a normal email+password signup (the only path that ever existed before this).
+    // False for a Google/phone-only signup, whose passwordHash column still holds *a* value (NOT
+    // NULL) but a cryptographically random one nobody - including the account owner - actually
+    // knows. changePassword() only demands the current password when this is true; a passwordless
+    // account can set its first real one directly (see AuthService).
+    @Column(nullable = false, columnDefinition = "boolean not null default true")
+    @Builder.Default
+    private boolean passwordSet = true;
 }

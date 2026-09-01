@@ -5,6 +5,7 @@ import com.vikisol.arena.auth.dto.SignInRequest;
 import com.vikisol.arena.auth.dto.SignUpRequest;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
+import com.vikisol.arena.auth.entity.VerificationLevel;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.util.HandleGenerator;
@@ -16,6 +17,7 @@ import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
 import com.vikisol.arena.enterprise.repository.MembershipRepository;
 import com.vikisol.arena.integration.provider.EmailMessage;
 import com.vikisol.arena.integration.provider.EmailProvider;
+import com.vikisol.arena.integration.provider.PhoneOtpProvider;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import com.vikisol.arena.security.jwt.JwtTokenProvider;
@@ -32,8 +34,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.Set;
 import java.util.UUID;
 
@@ -64,6 +68,12 @@ public class AuthService {
     private final AuthenticationManager authenticationManager;
     private final SeedDataFactory seedDataFactory;
     private final EmailProvider emailProvider;
+    private final PhoneOtpProvider phoneOtpProvider;
+    private final GoogleIdTokenVerifier googleIdTokenVerifier;
+
+    private static final int OTP_LENGTH = 6;
+    private static final long OTP_TTL_MINUTES = 10;
+    private static final SecureRandom RANDOM = new SecureRandom();
 
     @Transactional
     public SignInOutcome signUp(SignUpRequest request) {
@@ -174,6 +184,196 @@ public class AuthService {
             throw new BadCredentialsException("Incorrect verification code");
         }
         return issueSession(user);
+    }
+
+    // --- P3 follow-up: change password/email, phone sign-in/signup, Google sign-in ---
+
+    @Transactional
+    public void changePassword(UUID userId, String currentPassword, String newPassword) {
+        User user = requireUser(userId);
+        // passwordSet=false means this account never got a real user-chosen password (a Google
+        // or phone signup) - its passwordHash column holds a random value nobody knows, so there
+        // is no "current password" to check. Every other account must prove they know it first.
+        if (user.isPasswordSet()) {
+            if (currentPassword == null || !passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+                throw new BadRequestException("Current password is incorrect");
+            }
+        }
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        user.setPasswordSet(true);
+        userRepository.save(user);
+    }
+
+    /** Returns a fresh session - the JWT subject is the email, so the token the caller is
+     * currently using becomes stale (its subject no longer resolves) the instant this commits. */
+    @Transactional
+    public SessionResponse changeEmail(UUID userId, String newEmail, String currentPassword) {
+        User user = requireUser(userId);
+        if (user.isPasswordSet() && (currentPassword == null || !passwordEncoder.matches(currentPassword, user.getPasswordHash()))) {
+            throw new BadRequestException("Current password is incorrect");
+        }
+        String normalized = newEmail.toLowerCase();
+        if (!normalized.equals(user.getEmail()) && userRepository.existsByEmailIgnoreCase(normalized)) {
+            throw new BadRequestException("An account with this email already exists");
+        }
+        user.setEmail(normalized);
+        userRepository.save(user);
+        return issueSession(user).session();
+    }
+
+    // --- Phone sign-in (existing, already-verified accounts only) ---
+
+    @Transactional
+    public void requestPhoneSigninOtp(String phoneNumber) {
+        User user = userRepository.findByPhoneNumber(phoneNumber)
+                .filter(User::isPhoneVerified)
+                .orElseThrow(() -> new BadRequestException("No account found for this phone number"));
+        issueOtp(user, phoneNumber);
+    }
+
+    @Transactional
+    public SignInOutcome verifyPhoneSigninOtp(String phoneNumber, String code) {
+        User user = userRepository.findByPhoneNumber(phoneNumber)
+                .filter(User::isPhoneVerified)
+                .orElseThrow(() -> new BadRequestException("No account found for this phone number"));
+        // Same DPDP/tenant-suspension gates as password sign-in (AuthService.signIn) - phone
+        // sign-in is an alternate credential for the exact same account, not a separate path
+        // that should skip them.
+        if (user.getDeletedAt() != null) {
+            throw new BadCredentialsException("This account no longer exists");
+        }
+        consumeOtp(user, code);
+        userRepository.save(user);
+        if (user.getRole().hasTenant()) {
+            membershipRepository.findByUserId(user.getId()).ifPresent(m -> {
+                if (m.getTenant().getStatus() == TenantStatus.SUSPENDED) {
+                    throw new BadRequestException("This company's account has been suspended. Contact Vikisol support for help.");
+                }
+            });
+        }
+        if (user.isTotpEnabled() && MFA_ELIGIBLE_ROLES.contains(user.getRole())) {
+            return new SignInOutcome.MfaRequired(jwtTokenProvider.generateMfaPendingToken(user.getId()));
+        }
+        return issueSession(user);
+    }
+
+    // --- Phone signup (brand-new account, TALENT only - see PhoneSignupVerifyRequest's comment)
+    // ---
+
+    @Transactional
+    public void requestPhoneSignupOtp(String phoneNumber) {
+        User user = userRepository.findByPhoneNumber(phoneNumber).orElse(null);
+        if (user != null && user.isPhoneVerified()) {
+            throw new BadRequestException("This phone number is already registered - sign in instead");
+        }
+        if (user == null) {
+            // Pending, unverified shell account - handle/name are set once verifyPhoneSignupOtp
+            // knows the real name; a random, never-communicated password hash satisfies the
+            // NOT NULL passwordHash column without giving anyone a usable password (passwordSet
+            // stays false until changePassword sets a real one).
+            user = User.builder()
+                    .email(placeholderEmail())
+                    .passwordHash(passwordEncoder.encode(UUID.randomUUID().toString()))
+                    .passwordSet(false)
+                    .name("New user")
+                    .role(Role.TALENT)
+                    .phoneNumber(phoneNumber)
+                    .build();
+        }
+        issueOtp(user, phoneNumber);
+    }
+
+    @Transactional
+    public SignInOutcome verifyPhoneSignupOtp(String phoneNumber, String code, String name) {
+        User user = userRepository.findByPhoneNumber(phoneNumber)
+                .orElseThrow(() -> new BadRequestException("Request a code first"));
+        if (user.isPhoneVerified()) {
+            throw new BadRequestException("This phone number is already registered - sign in instead");
+        }
+        consumeOtp(user, code);
+        user.setName(name);
+        user.setHandle(HandleGenerator.generate(name, userRepository::existsByHandle));
+        if (!user.getVerificationLevel().atLeast(VerificationLevel.PHONE)) {
+            user.setVerificationLevel(VerificationLevel.PHONE);
+        }
+        userRepository.save(user);
+        candidateProfileRepository.save(seedDataFactory.blankCandidateProfile(user));
+        return issueSession(user);
+    }
+
+    // --- Google sign-in/signup ---
+
+    @Transactional
+    public SignInOutcome signInWithGoogle(String idToken) {
+        GoogleIdTokenVerifier.Verified verified = googleIdTokenVerifier.verify(idToken);
+        if (verified == null) {
+            throw new BadCredentialsException("Could not verify this Google sign-in - please try again");
+        }
+        User user = userRepository.findByGoogleId(verified.googleId()).orElse(null);
+        if (user == null) {
+            // Google's own email_verified=true (already checked in GoogleIdTokenVerifier) is a
+            // strong-enough signal to link into an existing password account with the same
+            // email, rather than erroring "email already in use" - standard, expected behavior
+            // for "Sign in with Google" across most consumer apps.
+            user = userRepository.findByEmailIgnoreCase(verified.email()).orElse(null);
+            if (user != null) {
+                user.setGoogleId(verified.googleId());
+            } else {
+                user = User.builder()
+                        .email(verified.email())
+                        .passwordHash(passwordEncoder.encode(UUID.randomUUID().toString()))
+                        .passwordSet(false)
+                        .name(verified.name())
+                        .role(Role.TALENT)
+                        .googleId(verified.googleId())
+                        .handle(HandleGenerator.generate(verified.name(), userRepository::existsByHandle))
+                        .build();
+                user = userRepository.save(user);
+                candidateProfileRepository.save(seedDataFactory.blankCandidateProfile(user));
+                return issueSession(user);
+            }
+        }
+        userRepository.save(user);
+        if (user.getDeletedAt() != null) {
+            throw new BadCredentialsException("This account no longer exists");
+        }
+        return issueSession(user);
+    }
+
+    private void issueOtp(User user, String phoneNumber) {
+        String code = generateOtpCode();
+        user.setPhoneNumber(phoneNumber);
+        user.setPendingOtpHash(passwordEncoder.encode(code));
+        user.setPendingOtpExpiresAt(Instant.now().plus(OTP_TTL_MINUTES, ChronoUnit.MINUTES));
+        userRepository.save(user);
+        phoneOtpProvider.sendOtp(phoneNumber, code);
+    }
+
+    private void consumeOtp(User user, String code) {
+        if (user.getPendingOtpHash() == null || user.getPendingOtpExpiresAt() == null) {
+            throw new BadRequestException("No verification code is pending - request a new one");
+        }
+        if (user.getPendingOtpExpiresAt().isBefore(Instant.now())) {
+            throw new BadRequestException("That code has expired - request a new one");
+        }
+        if (!passwordEncoder.matches(code, user.getPendingOtpHash())) {
+            throw new BadRequestException("That code doesn't match");
+        }
+        user.setPhoneVerified(true);
+        user.setPendingOtpHash(null);
+        user.setPendingOtpExpiresAt(null);
+    }
+
+    private String generateOtpCode() {
+        int max = (int) Math.pow(10, OTP_LENGTH);
+        return String.format("%0" + OTP_LENGTH + "d", RANDOM.nextInt(max));
+    }
+
+    private String placeholderEmail() {
+        // Never delivered anywhere - purely so the NOT NULL/unique email column stays satisfied
+        // for an account whose real identity anchor is its phone number, not an email address.
+        // The user can set a real email later (ChangeEmailRequest).
+        return "phone-" + UUID.randomUUID() + "@users.arena.vikisol.in";
     }
 
     /** Rotates the presented refresh token and mints a fresh access token. Throws

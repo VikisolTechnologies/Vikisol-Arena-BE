@@ -1,7 +1,13 @@
 package com.vikisol.arena.auth.controller;
 
 import com.vikisol.arena.auth.dto.AcceptInvitationRequest;
+import com.vikisol.arena.auth.dto.ChangeEmailRequest;
+import com.vikisol.arena.auth.dto.ChangePasswordRequest;
+import com.vikisol.arena.auth.dto.GoogleSignInRequest;
 import com.vikisol.arena.auth.dto.MfaVerifyRequest;
+import com.vikisol.arena.auth.dto.PhoneOtpRequest;
+import com.vikisol.arena.auth.dto.PhoneSigninVerifyRequest;
+import com.vikisol.arena.auth.dto.PhoneSignupVerifyRequest;
 import com.vikisol.arena.auth.dto.SessionResponse;
 import com.vikisol.arena.auth.dto.SignInRequest;
 import com.vikisol.arena.auth.dto.SignUpRequest;
@@ -89,6 +95,58 @@ public class AuthController {
         User user = userRepository.findById(principal.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found"));
         return ResponseEntity.ok(ApiResponse.ok(authService.currentSession(user)));
+    }
+
+    // --- Account settings (authenticated) ---
+
+    @PostMapping("/change-password")
+    public ResponseEntity<ApiResponse<Void>> changePassword(@AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody ChangePasswordRequest request) {
+        authService.changePassword(principal.getId(), request.currentPassword(), request.newPassword());
+        return ResponseEntity.ok(ApiResponse.ok("Password updated", null));
+    }
+
+    // Issues a fresh session (see AuthService.changeEmail's own comment on why) - the caller's
+    // current access token stops resolving the instant this commits, so the response must hand
+    // back one that still works.
+    @PostMapping("/change-email")
+    public ResponseEntity<ApiResponse<SessionResponse>> changeEmail(@AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody ChangeEmailRequest request, HttpServletResponse response) {
+        SessionResponse session = authService.changeEmail(principal.getId(), request.newEmail(), request.currentPassword());
+        sessionCookieHelper.set(response, session.token());
+        return ResponseEntity.ok(ApiResponse.ok("Email updated", session));
+    }
+
+    // --- Phone sign-in (existing, already phone-verified accounts) - public, see SecurityConfig
+    // ---
+
+    @PostMapping("/phone/signin/request-otp")
+    public ResponseEntity<ApiResponse<Void>> requestPhoneSigninOtp(@Valid @RequestBody PhoneOtpRequest request) {
+        authService.requestPhoneSigninOtp(request.phoneNumber());
+        return ResponseEntity.ok(ApiResponse.ok("Code sent", null));
+    }
+
+    @PostMapping("/phone/signin/verify-otp")
+    public ResponseEntity<ApiResponse<SessionResponse>> verifyPhoneSigninOtp(@Valid @RequestBody PhoneSigninVerifyRequest request, HttpServletResponse response) {
+        return respond(authService.verifyPhoneSigninOtp(request.phoneNumber(), request.code()), response);
+    }
+
+    // --- Phone signup (brand-new TALENT account) - public, see SecurityConfig ---
+
+    @PostMapping("/phone/signup/request-otp")
+    public ResponseEntity<ApiResponse<Void>> requestPhoneSignupOtp(@Valid @RequestBody PhoneOtpRequest request) {
+        authService.requestPhoneSignupOtp(request.phoneNumber());
+        return ResponseEntity.ok(ApiResponse.ok("Code sent", null));
+    }
+
+    @PostMapping("/phone/signup/verify-otp")
+    public ResponseEntity<ApiResponse<SessionResponse>> verifyPhoneSignupOtp(@Valid @RequestBody PhoneSignupVerifyRequest request, HttpServletResponse response) {
+        return respond(authService.verifyPhoneSignupOtp(request.phoneNumber(), request.code(), request.name()), response);
+    }
+
+    // --- Google sign-in/signup (find-or-create) - public, see SecurityConfig ---
+
+    @PostMapping("/google")
+    public ResponseEntity<ApiResponse<SessionResponse>> signInWithGoogle(@Valid @RequestBody GoogleSignInRequest request, HttpServletResponse response) {
+        return respond(authService.signInWithGoogle(request.idToken()), response);
     }
 
     // --- 2FA enrollment (authenticated - any signed-in user can set this up for their own
