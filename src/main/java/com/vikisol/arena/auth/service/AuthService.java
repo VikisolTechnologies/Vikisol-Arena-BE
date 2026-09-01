@@ -74,7 +74,10 @@ public class AuthService {
     private final PhoneOtpProvider phoneOtpProvider;
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
 
-    @Value("${app.frontend.url:http://localhost:3000}")
+    // application.yml's actual key is "app.frontend-url" (hyphenated) - a dotted
+    // "app.frontend.url" here silently resolves to the fallback rather than erroring, which is
+    // exactly what happened (see this fix's own commit message for how it was caught).
+    @Value("${app.frontend-url:http://localhost:3000}")
     private String frontendUrl;
 
     private static final int OTP_LENGTH = 6;

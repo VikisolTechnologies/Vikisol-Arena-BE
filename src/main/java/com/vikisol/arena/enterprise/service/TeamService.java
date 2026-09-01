@@ -53,7 +53,15 @@ public class TeamService {
     private final AuditService auditService;
     private final PasswordEncoder passwordEncoder;
 
-    @Value("${app.frontend.url:http://localhost:3000}")
+    // Real bug, found live-testing an unrelated flow (AuthService's forgot-password): this was
+    // "${app.frontend.url:...}" (dotted), but application.yml's actual key is the hyphenated
+    // "app.frontend-url" - the dotted version never matched, so this silently resolved to the
+    // localhost fallback on every deployment, FRONTEND_URL env var or not. Every invite email's
+    // link has been pointing at http://localhost:3000/invite/{token} in production the whole
+    // time - masked only by NoopEmailProvider being the active provider (nothing has actually
+    // been delivered to a real inbox yet to expose it). Would have broken the instant a real
+    // email provider got configured.
+    @Value("${app.frontend-url:http://localhost:3000}")
     private String frontendUrl;
 
     @Transactional(readOnly = true)
