@@ -15,4 +15,6 @@ public interface ProjectRepository extends JpaRepository<Project, UUID> {
 
     @EntityGraph(attributePaths = "postedByUser")
     Page<Project> findByPostedByUserId(UUID userId, Pageable pageable);
+
+    long countByStatus(ProjectStatus status);
 }

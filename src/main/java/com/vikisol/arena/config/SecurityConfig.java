@@ -81,6 +81,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/auth/invitations/*").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/version").permitAll()
+                        // Logged-out marketing homepage's real stats/featured-bid card
+                        // (LandingController) - deliberately read-only and pre-aggregated so it
+                        // can't be used to enumerate individual users/projects.
+                        .requestMatchers(HttpMethod.GET, "/public/**").permitAll()
                         .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/files/**").permitAll()
                         // ARENA-INVENTORY-FIXES.md FIX 1 - shared profile/company/discover links

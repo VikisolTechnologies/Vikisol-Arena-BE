@@ -55,4 +55,11 @@ public interface CandidateProfileRepository extends JpaRepository<CandidateProfi
     List<CandidateProfile> findByIdInFetchingOpenTo(@Param("ids") List<UUID> ids);
 
     List<CandidateProfile> findByIndustry(Industry industry);
+
+    // Backs the public landing page's real stats (LandingService) - same
+    // consent.searchableByEnterprises gate as search() above, so the count a logged-out visitor
+    // sees always matches what an enterprise's Talent Universe search could actually reach.
+    long countByConsent_SearchableByEnterprisesTrue();
+
+    long countByIndustryAndConsent_SearchableByEnterprisesTrue(Industry industry);
 }
