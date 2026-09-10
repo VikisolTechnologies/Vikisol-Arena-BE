@@ -24,6 +24,13 @@ public record CandidateProfileResponse(
         String locationConsent,
         String homeCity,
         Double approxLat,
-        Double approxLng
+        Double approxLng,
+        // True for every self/public view (CandidateProfileMapper.toResponse callers always have
+        // full access to what they're looking at). Only ever false when TalentSearchService's
+        // redactIfLocked() overrides it for an enterprise viewer who hasn't unlocked this
+        // candidate - lets the frontend read unlock state directly off the response instead of
+        // inferring it from whether cvUrl happens to be null (ambiguous: a candidate with no CV
+        // uploaded at all also has a null cvUrl, unlock status or not).
+        boolean fullAccess
 ) {
 }

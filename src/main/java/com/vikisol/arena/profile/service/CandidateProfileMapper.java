@@ -36,7 +36,8 @@ public class CandidateProfileMapper {
                 p.getLocationConsent().wireValue(),
                 p.getHomeCity(),
                 p.getApproxLat(),
-                p.getApproxLng()
+                p.getApproxLng(),
+                true
         );
     }
 }

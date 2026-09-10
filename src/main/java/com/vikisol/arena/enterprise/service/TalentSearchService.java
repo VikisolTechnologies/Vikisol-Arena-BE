@@ -113,7 +113,13 @@ public class TalentSearchService {
 
     @Transactional
     public void unlock(UUID enterpriseUserId, UUID candidateId) {
-        EnterpriseProfile enterprise = requireEnterprise(enterpriseUserId);
+        EnterpriseProfile enterpriseRef = requireEnterprise(enterpriseUserId);
+        // Re-fetched under a row lock (held for the rest of this transaction) before either
+        // check below - closes both the same-candidate double-click race and the cross-candidate
+        // credit-balance race, since a second concurrent unlock() for this tenant now blocks here
+        // until the first transaction commits, then sees its up-to-date state.
+        EnterpriseProfile enterprise = enterpriseProfileRepository.findByIdForUpdate(enterpriseRef.getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Enterprise profile not found"));
         if (unlockedCandidateRepository.existsByEnterpriseIdAndCandidateId(enterprise.getId(), candidateId)) {
             return; // already unlocked - idempotent
         }
@@ -185,7 +191,7 @@ public class TalentSearchService {
                 response.location(), response.remote(), response.skills(), response.experienceYears(), response.rateFloor(),
                 response.openTo(), response.careerHealth(), response.consent(), response.autonomy(), response.bio(),
                 fullAccess ? response.cvUrl() : null, fullAccess ? response.cvFileName() : null,
-                response.locationConsent(), null, null, null);
+                response.locationConsent(), null, null, null, fullAccess);
     }
 
     private EnterpriseProfile requireEnterprise(UUID userId) {
