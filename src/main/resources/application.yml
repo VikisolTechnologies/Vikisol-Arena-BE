@@ -85,6 +85,18 @@ app:
     # server can read the session cookie api-arena.vikisol.in sets. See SessionCookieHelper.
     cookie-domain: ${JWT_COOKIE_DOMAIN:}
 
+  agent:
+    # M5 (JennySol integration - see agent/client/AgentServiceTokenIssuer.java and the JennySol
+    # repository's docs/architecture/ADR-003): the shared secret Arena signs its service tokens
+    # with when a user's own request needs to act through JennySol. Must be set to the EXACT SAME
+    # value as JennySol's own SERVICE_TOKEN_SECRET_ARENA env var - a secret shared between the two
+    # services, not Arena-only configuration, and deliberately separate from app.jwt.secret above
+    # (a service token must never be confusable with, or verifiable as, an Arena session token).
+    # Blank by default - no real value is deployed anywhere yet; AgentServiceTokenIssuer.isConfigured()
+    # reports false until this is set, same "empty means not configured" pattern already used by
+    # IntegrationProviderConfig's other optional providers.
+    service-token-secret: ${SERVICE_TOKEN_SECRET_ARENA:}
+
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3001}
 
