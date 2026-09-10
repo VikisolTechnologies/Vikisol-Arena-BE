@@ -96,6 +96,11 @@ app:
     # reports false until this is set, same "empty means not configured" pattern already used by
     # IntegrationProviderConfig's other optional providers.
     service-token-secret: ${SERVICE_TOKEN_SECRET_ARENA:}
+    # M6 - JennySol's real agent gateway base URL (e.g. https://api.jennysol.vikisol.in), called
+    # by RealAgentServiceClient. Blank by default; AgentProviderConfig falls back to
+    # NoopAgentServiceClient until both this AND service-token-secret above are set to real
+    # values JennySol's own deployment shares - see RealAgentServiceClient's class doc.
+    jennysol-gateway-url: ${JENNYSOL_GATEWAY_URL:}
 
   cors:
     allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3001}
