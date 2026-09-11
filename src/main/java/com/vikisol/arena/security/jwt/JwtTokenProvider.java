@@ -4,9 +4,9 @@ import com.vikisol.arena.auth.entity.Role;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtBuilder;
 import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
-import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -17,23 +17,19 @@ import java.time.Instant;
 import java.util.Date;
 import java.util.UUID;
 
+// Constructor-injected (not @PostConstruct-initialized) so a test can construct one directly
+// with a known secret without a Spring context - same reason AgentServiceTokenIssuer/Verifier
+// are constructor-injected (see those classes' doc comments). This is what let this class's own
+// algorithm-confusion regression tests (JwtTokenProviderTest) exercise the real class instead of
+// mocking it.
 @Slf4j
 @Component
 public class JwtTokenProvider {
 
-    @Value("${app.jwt.secret}")
-    private String jwtSecret;
-
-    @Value("${app.jwt.expiration-ms}")
-    private long jwtExpirationMs;
-
-    @Value("${app.jwt.issuer}")
-    private String issuer;
-
-    @Value("${app.jwt.audience}")
-    private String audience;
-
-    private SecretKey key;
+    private final String issuer;
+    private final String audience;
+    private final long jwtExpirationMs;
+    private final SecretKey key;
 
     private static final String CLAIM_ROLE = "role";
     private static final String CLAIM_USER_ID = "uid";
@@ -42,10 +38,25 @@ public class JwtTokenProvider {
     // TOTP code is verified (see AuthService's 2FA flow). Never carries real session authority -
     // JwtAuthenticationFilter treats a token with this claim as unauthenticated.
     private static final String CLAIM_MFA_PENDING = "mfa_pending";
+    // Same algorithm-confusion class already found and fixed in AgentServiceTokenVerifier (M10,
+    // see that class's own comment): Jwts.parser().verifyWith(SecretKey) accepts ANY HMAC-SHA
+    // variant that validates against the key's bytes, not only the one the issuer actually used.
+    // Confirmed exploitable here too - the local-dev fallback secret alone is 76 bytes, long
+    // enough for jjwt's bare signWith(key) to auto-select HS512 instead of the intended HS256.
+    // Pin explicitly on both the signing side (signWith(key, Jwts.SIG.HS256)) and the verifying
+    // side (this constant, checked against the parsed token's actual header) - do not infer an
+    // acceptable algorithm solely from the token header.
+    private static final String EXPECTED_ALGORITHM = "HS256";
 
-    @PostConstruct
-    public void init() {
+    public JwtTokenProvider(
+            @Value("${app.jwt.secret}") String jwtSecret,
+            @Value("${app.jwt.expiration-ms}") long jwtExpirationMs,
+            @Value("${app.jwt.issuer}") String issuer,
+            @Value("${app.jwt.audience}") String audience) {
         this.key = Keys.hmacShaKeyFor(jwtSecret.getBytes(StandardCharsets.UTF_8));
+        this.jwtExpirationMs = jwtExpirationMs;
+        this.issuer = issuer;
+        this.audience = audience;
     }
 
     public String generateToken(UUID userId, String email, String name, Role role) {
@@ -53,7 +64,7 @@ public class JwtTokenProvider {
                 .claim(CLAIM_USER_ID, userId.toString())
                 .claim(CLAIM_NAME, name)
                 .claim(CLAIM_ROLE, role.name())
-                .signWith(key)
+                .signWith(key, Jwts.SIG.HS256)
                 .compact();
     }
 
@@ -63,7 +74,7 @@ public class JwtTokenProvider {
     public String generateMfaPendingToken(UUID userId) {
         return build(userId.toString(), 120_000L)
                 .claim(CLAIM_MFA_PENDING, true)
-                .signWith(key)
+                .signWith(key, Jwts.SIG.HS256)
                 .compact();
     }
 
@@ -105,13 +116,19 @@ public class JwtTokenProvider {
     }
 
     private Claims parseClaims(String token) {
-        return Jwts.parser()
+        Jws<Claims> jws = Jwts.parser()
                 .verifyWith(key)
                 .requireIssuer(issuer)
                 .requireAudience(audience)
                 .build()
-                .parseSignedClaims(token)
-                .getPayload();
+                .parseSignedClaims(token);
+
+        String actualAlgorithm = jws.getHeader().getAlgorithm();
+        if (!EXPECTED_ALGORITHM.equals(actualAlgorithm)) {
+            throw new JwtException("Unexpected signing algorithm: " + actualAlgorithm);
+        }
+
+        return jws.getPayload();
     }
 
     public boolean validateToken(String token) {
