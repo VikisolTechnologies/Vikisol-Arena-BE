@@ -27,4 +27,12 @@ public final class AuditActions {
     public static final String CONSENT_CHANGED = "consent.changed";
     public static final String DATA_EXPORTED = "data.exported";
     public static final String ACCOUNT_DELETED = "account.deleted";
+
+    // M9 (audit/observability, PROJECT-PROGRESS.md milestone model): recorded by
+    // AgentServiceTokenAuthenticationFilter for every request bearing a JennySol-forwarded
+    // round-trip service token, whether it goes on to authenticate or not — the one place Arena
+    // can distinguish "a human did this" (every other action in this file) from "an AI agent did
+    // this on a user's behalf," per ADR-003's own re-derive-authorization-independently principle.
+    public static final String AGENT_ACTION_AUTHORIZED = "agent.action.authorized";
+    public static final String AGENT_ACTION_DENIED = "agent.action.denied";
 }

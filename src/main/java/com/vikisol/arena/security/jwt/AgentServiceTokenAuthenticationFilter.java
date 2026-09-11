@@ -1,6 +1,8 @@
 package com.vikisol.arena.security.jwt;
 
 import com.vikisol.arena.agent.client.AgentServiceTokenVerifier;
+import com.vikisol.arena.audit.AuditActions;
+import com.vikisol.arena.audit.AuditService;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.servlet.FilterChain;
@@ -43,6 +45,7 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
 
     private final AgentServiceTokenVerifier verifier;
     private final UserRepository userRepository;
+    private final AuditService auditService;
 
     // The only mapping that exists as of M7 - grows one entry per write tool as they're added.
     // Deliberately explicit and small rather than a naming convention the request path has to
@@ -72,11 +75,29 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
                                 new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
                         authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                         SecurityContextHolder.getContext().setAuthentication(authentication);
+                        // M9: the one durable record that an AI agent (not the user directly)
+                        // performed this action — tenantId is null here because the token itself
+                        // doesn't carry a resource-specific tenant to attribute this to; the
+                        // business service call this authorizes (e.g. ApplicationService) is
+                        // where a real tenant-scoped audit entry, if any, belongs.
+                        auditService.record(null, claims.userId(), AuditActions.AGENT_ACTION_AUTHORIZED, endpointKey);
                     } else {
                         log.warn("Agent service token named a user id that no longer exists: {}", claims.userId());
                     }
                 } else {
                     log.warn("Agent service token presented for {} but its scope did not authorize it", endpointKey);
+                    // M9: recorded even though authentication never proceeds — claims.userId()
+                    // came from a signature-verified token, so it's a real (if unauthorized)
+                    // actor, and a denied agent action is exactly the kind of event this
+                    // milestone's own acceptance criteria names ("scope violations" and "tenant
+                    // mismatches"/probing). Covers both a real scope mismatch (requiredScope !=
+                    // null) and a validly-signed token presented against an endpoint this table
+                    // never mapped at all (requiredScope == null) — the latter is worth recording
+                    // too: a real round-trip credential being tried somewhere unexpected.
+                    // record()'s own try/catch (see AuditService) means an unresolvable user id
+                    // here fails silently into a log warning, never blocking the request.
+                    auditService.record(null, claims.userId(), AuditActions.AGENT_ACTION_DENIED, endpointKey,
+                            requiredScope == null ? "no scope mapping for this endpoint" : "missing required scope: " + requiredScope);
                 }
             }
         }

@@ -1,6 +1,8 @@
 package com.vikisol.arena.security.jwt;
 
 import com.vikisol.arena.agent.client.AgentServiceTokenVerifier;
+import com.vikisol.arena.audit.AuditActions;
+import com.vikisol.arena.audit.AuditService;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
@@ -18,6 +20,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.*;
 
 // M7 (approval-controlled write tools) - the security-critical scope-enforcement behavior: a
@@ -28,8 +32,9 @@ class AgentServiceTokenAuthenticationFilterTest {
 
     private final AgentServiceTokenVerifier verifier = mock(AgentServiceTokenVerifier.class);
     private final UserRepository userRepository = mock(UserRepository.class);
+    private final AuditService auditService = mock(AuditService.class);
     private final AgentServiceTokenAuthenticationFilter filter =
-            new AgentServiceTokenAuthenticationFilter(verifier, userRepository);
+            new AgentServiceTokenAuthenticationFilter(verifier, userRepository, auditService);
 
     private final HttpServletRequest request = mock(HttpServletRequest.class);
     private final HttpServletResponse response = mock(HttpServletResponse.class);
@@ -138,5 +143,50 @@ class AgentServiceTokenAuthenticationFilterTest {
         filter.doFilter(request, response, chain);
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+    }
+
+    // M9 (audit/observability): a successful agent-originated authorization is a real, durable
+    // AuditService entry — distinguishable from a human-originated action by its own action
+    // constant — not just an SLF4J log line nobody queries later.
+    @Test
+    void recordsAnAuditEventWhenAnAgentActionIsSuccessfullyAuthorized() throws Exception {
+        UUID userId = UUID.randomUUID();
+        when(request.getHeader("Authorization")).thenReturn("Bearer a-real-looking-token");
+        when(request.getMethod()).thenReturn("POST");
+        when(request.getServletPath()).thenReturn("/applications");
+        when(verifier.verify("a-real-looking-token"))
+                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.applyToJob")));
+        when(userRepository.findById(userId)).thenReturn(Optional.of(fakeUser(userId)));
+
+        filter.doFilter(request, response, chain);
+
+        verify(auditService).record(isNull(), eq(userId), eq(AuditActions.AGENT_ACTION_AUTHORIZED), eq("POST /applications"));
+    }
+
+    // M9: a scope violation (an otherwise-valid, signature-verified token presented against an
+    // endpoint its own scope doesn't cover) is exactly the kind of event this milestone's
+    // acceptance criteria names — recorded even though the request is never authenticated.
+    @Test
+    void recordsAnAuditEventWhenAnAgentActionIsDeniedForInsufficientScope() throws Exception {
+        UUID userId = UUID.randomUUID();
+        when(request.getHeader("Authorization")).thenReturn("Bearer a-real-looking-token");
+        when(request.getMethod()).thenReturn("POST");
+        when(request.getServletPath()).thenReturn("/applications");
+        when(verifier.verify("a-real-looking-token"))
+                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.searchJobs")));
+
+        filter.doFilter(request, response, chain);
+
+        verify(auditService).record(isNull(), eq(userId), eq(AuditActions.AGENT_ACTION_DENIED), eq("POST /applications"), any());
+        verify(userRepository, never()).findById(any());
+    }
+
+    @Test
+    void doesNotRecordAnyAuditEventWhenNoServiceTokenIsPresentAtAll() throws Exception {
+        when(request.getHeader("Authorization")).thenReturn(null);
+
+        filter.doFilter(request, response, chain);
+
+        verifyNoInteractions(auditService);
     }
 }
