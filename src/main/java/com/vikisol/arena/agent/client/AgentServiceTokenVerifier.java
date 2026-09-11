@@ -1,6 +1,7 @@
 package com.vikisol.arena.agent.client;
 
 import io.jsonwebtoken.Claims;
+import io.jsonwebtoken.Jws;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
@@ -30,6 +31,15 @@ public class AgentServiceTokenVerifier {
 
     private static final String EXPECTED_ISSUER = "arena";
     private static final String EXPECTED_AUDIENCE = "jennysol";
+    // M10 (security testing, PROJECT-PROGRESS.md milestone model): a real algorithm-confusion gap
+    // found by a dedicated adversarial test, not previously exercised anywhere in this codebase -
+    // Jwts.parser().verifyWith(SecretKey) accepts ANY HMAC-SHA variant whose signature validates
+    // against that key's bytes (HS256, HS384, and - for a long enough key - HS512), not only the
+    // exact algorithm the issuer actually used. A token forged with HS384 (using the real secret,
+    // no forgery of the secret itself needed) verified successfully before this fix. The verifier
+    // must pin to exactly one algorithm, the same way serviceToken.ts's own
+    // jwt.verify(token, secret, {algorithms: ["HS256"]}) already does on the JennySol side.
+    private static final String EXPECTED_ALGORITHM = "HS256";
 
     private final String secret;
 
@@ -56,14 +66,19 @@ public class AgentServiceTokenVerifier {
         }
         try {
             SecretKey key = Keys.hmacShaKeyFor(secret.getBytes(StandardCharsets.UTF_8));
-            Claims claims = Jwts.parser()
+            Jws<Claims> jws = Jwts.parser()
                     .verifyWith(key)
                     .requireIssuer(EXPECTED_ISSUER)
                     .requireAudience(EXPECTED_AUDIENCE)
                     .build()
-                    .parseSignedClaims(token)
-                    .getPayload();
+                    .parseSignedClaims(token);
 
+            String actualAlgorithm = jws.getHeader().getAlgorithm();
+            if (!EXPECTED_ALGORITHM.equals(actualAlgorithm)) {
+                throw new AgentServiceTokenInvalidException("Unexpected signing algorithm: " + actualAlgorithm);
+            }
+
+            Claims claims = jws.getPayload();
             UUID userId = UUID.fromString(claims.getSubject());
             String role = claims.get("role", String.class);
             @SuppressWarnings("unchecked")
