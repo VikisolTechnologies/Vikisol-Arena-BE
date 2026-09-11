@@ -1,5 +1,6 @@
 package com.vikisol.arena.config;
 
+import com.vikisol.arena.security.jwt.AgentServiceTokenAuthenticationFilter;
 import com.vikisol.arena.security.jwt.JwtAuthenticationEntryPoint;
 import com.vikisol.arena.security.jwt.JwtAuthenticationFilter;
 import com.vikisol.arena.security.ratelimit.RateLimitFilter;
@@ -31,6 +32,7 @@ public class SecurityConfig {
 
     private final JwtAuthenticationEntryPoint authenticationEntryPoint;
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
+    private final AgentServiceTokenAuthenticationFilter agentServiceTokenAuthenticationFilter;
     private final RateLimitFilter rateLimitFilter;
     private final CustomUserDetailsService userDetailsService;
 
@@ -111,6 +113,11 @@ public class SecurityConfig {
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())
+                // M7: runs before JwtAuthenticationFilter - a normal Arena session JWT simply
+                // fails verification here (different secret, see the filter's own class doc) and
+                // falls through untouched, so ordering relative to JwtAuthenticationFilter has no
+                // effect on normal requests.
+                .addFilterBefore(agentServiceTokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 // After JWT auth so an authenticated bucket can key by user id, not just IP -
                 // see RateLimitFilter's own comment.

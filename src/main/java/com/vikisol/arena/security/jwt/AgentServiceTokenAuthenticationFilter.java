@@ -1,0 +1,104 @@
+package com.vikisol.arena.security.jwt;
+
+import com.vikisol.arena.agent.client.AgentServiceTokenVerifier;
+import com.vikisol.arena.auth.repository.UserRepository;
+import com.vikisol.arena.security.service.UserPrincipal;
+import jakarta.servlet.FilterChain;
+import jakarta.servlet.ServletException;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.authentication.WebAuthenticationDetailsSource;
+import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
+import org.springframework.web.filter.OncePerRequestFilter;
+
+import java.io.IOException;
+import java.util.Map;
+
+/**
+ * M7 (approval-controlled write tools, PROJECT-PROGRESS.md milestone model): lets a JennySol
+ * write-tool call act as a specific, real Arena user by forwarding the exact service token Arena
+ * itself minted for that user's turn (see {@link com.vikisol.arena.agent.client.AgentServiceTokenIssuer}).
+ * Verifies it with {@link AgentServiceTokenVerifier} (a different secret/signature than
+ * {@link JwtAuthenticationFilter}'s own real session tokens - the two are never interchangeable),
+ * looks up the real {@link com.vikisol.arena.auth.entity.User} the token names, and - critically -
+ * independently re-checks that the token's own {@code scope} claim actually authorizes *this*
+ * specific request's path+method, per ADR-003's "Arena tools re-derive authorization
+ * independently": a token scoped only for {@code arena.searchJobs} must never authenticate a
+ * {@code POST /applications} call just because its signature is otherwise valid.
+ * <p>
+ * Runs before {@link JwtAuthenticationFilter} in the chain. A request bearing a normal Arena
+ * session JWT simply fails verification here (wrong secret) and falls through untouched;
+ * {@code JwtAuthenticationFilter} then authenticates it exactly as before. The two filters never
+ * both succeed for the same token, since the two token types use different secrets by design.
+ */
+@Slf4j
+@Component
+@RequiredArgsConstructor
+public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter {
+
+    private final AgentServiceTokenVerifier verifier;
+    private final UserRepository userRepository;
+
+    // The only mapping that exists as of M7 - grows one entry per write tool as they're added.
+    // Deliberately explicit and small rather than a naming convention the request path has to
+    // match automatically: a typo'd or unexpectedly-shaped Arena endpoint should fail closed
+    // (no entry found -> filter does nothing -> normal auth rules apply, most likely 401/403),
+    // never accidentally grant a service token more than this table says it should have.
+    private static final Map<String, String> ENDPOINT_TO_REQUIRED_SCOPE = Map.of(
+            "POST /applications", "arena.applyToJob"
+    );
+
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
+            throws ServletException, IOException {
+        String token = getTokenFromRequest(request);
+
+        if (StringUtils.hasText(token) && verifier.isConfigured()) {
+            AgentServiceTokenVerifier.VerifiedClaims claims = tryVerify(token);
+
+            if (claims != null) {
+                String endpointKey = request.getMethod() + " " + request.getServletPath();
+                String requiredScope = ENDPOINT_TO_REQUIRED_SCOPE.get(endpointKey);
+                if (requiredScope != null && claims.scope().contains(requiredScope)) {
+                    var user = userRepository.findById(claims.userId());
+                    if (user.isPresent()) {
+                        UserPrincipal principal = new UserPrincipal(user.get());
+                        UsernamePasswordAuthenticationToken authentication =
+                                new UsernamePasswordAuthenticationToken(principal, null, principal.getAuthorities());
+                        authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                        SecurityContextHolder.getContext().setAuthentication(authentication);
+                    } else {
+                        log.warn("Agent service token named a user id that no longer exists: {}", claims.userId());
+                    }
+                } else {
+                    log.warn("Agent service token presented for {} but its scope did not authorize it", endpointKey);
+                }
+            }
+        }
+
+        filterChain.doFilter(request, response);
+    }
+
+    private String getTokenFromRequest(HttpServletRequest request) {
+        String bearer = request.getHeader("Authorization");
+        if (StringUtils.hasText(bearer) && bearer.startsWith("Bearer ")) {
+            return bearer.substring(7);
+        }
+        return null;
+    }
+
+    // Not a service token (or an invalid one) - returns null so the caller falls through
+    // silently, letting JwtAuthenticationFilter get a normal chance at this same bearer value.
+    private AgentServiceTokenVerifier.VerifiedClaims tryVerify(String token) {
+        try {
+            return verifier.verify(token);
+        } catch (AgentServiceTokenVerifier.AgentServiceTokenInvalidException e) {
+            return null;
+        }
+    }
+}
