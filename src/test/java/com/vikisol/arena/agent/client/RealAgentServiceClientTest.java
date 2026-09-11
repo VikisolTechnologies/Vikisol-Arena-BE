@@ -58,4 +58,20 @@ class RealAgentServiceClientTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("isAvailable()");
     }
+
+    // M7 (approval-controlled write tools): a TALENT user's minted token must carry
+    // arena.applyToJob so the write tool is actually offered to them through the real trigger
+    // path - a real gap this test would have caught (the tool existed and was fully tested on
+    // JennySol's side, but this client only ever granted arena.searchJobs until this fix).
+    @Test
+    void grantsApplyToJobScopeOnlyToTalentAccounts() {
+        assertThat(RealAgentServiceClient.scopeFor("TALENT")).containsExactly("arena.searchJobs", "arena.applyToJob");
+    }
+
+    @Test
+    void doesNotGrantApplyToJobScopeToNonTalentAccounts() {
+        assertThat(RealAgentServiceClient.scopeFor("COMPANY_ADMIN")).containsExactly("arena.searchJobs");
+        assertThat(RealAgentServiceClient.scopeFor("RECRUITER")).containsExactly("arena.searchJobs");
+        assertThat(RealAgentServiceClient.scopeFor("PLATFORM_ADMIN")).containsExactly("arena.searchJobs");
+    }
 }

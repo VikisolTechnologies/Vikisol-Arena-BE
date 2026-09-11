@@ -39,11 +39,21 @@ import java.util.List;
 @Slf4j
 public class RealAgentServiceClient implements AgentServiceClient {
 
-    // The one Arena tool that actually exists on JennySol's side as of M6 - see arena.ts's
-    // getTools(). Every user gets the same fixed scope for now since Arena has no per-user
-    // granular tool-permission model yet; narrowing this per-role/per-permission is real future
-    // work once more than one tool exists to actually need it.
-    private static final List<String> DEFAULT_SCOPE = List.of("arena.searchJobs");
+    // Every authenticated user gets the read tool. arena.applyToJob (M7) is additionally granted
+    // only to TALENT accounts - matching ApplicationController's own
+    // @PreAuthorize("hasRole('TALENT')") on POST /applications, so a recruiter/company_admin
+    // token is never even offered a tool their real Arena role could never use, on top of (not
+    // instead of) the independent server-side scope re-check ToolRegistry/the round-trip
+    // AgentServiceTokenAuthenticationFilter both still perform.
+    private static final List<String> READ_ONLY_SCOPE = List.of("arena.searchJobs");
+    private static final List<String> TALENT_SCOPE = List.of("arena.searchJobs", "arena.applyToJob");
+
+    // Package-private (not private) so RealAgentServiceClientTest can assert on it directly -
+    // this class makes no live HTTP calls in its own test suite (see that file's own class doc),
+    // so scope selection needs a seam that doesn't require standing up a fake gateway.
+    static List<String> scopeFor(String role) {
+        return "TALENT".equals(role) ? TALENT_SCOPE : READ_ONLY_SCOPE;
+    }
 
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -67,7 +77,7 @@ public class RealAgentServiceClient implements AgentServiceClient {
             throw new IllegalStateException("RealAgentServiceClient is not configured - isAvailable() must be checked first");
         }
 
-        String token = tokenIssuer.issue(context.userId().toString(), context.role(), null, DEFAULT_SCOPE);
+        String token = tokenIssuer.issue(context.userId().toString(), context.role(), null, scopeFor(context.role()));
 
         try {
             String requestBody = OBJECT_MAPPER.writeValueAsString(new ChatRequestBody(message));
