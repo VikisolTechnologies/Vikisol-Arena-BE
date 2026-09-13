@@ -55,6 +55,24 @@ public class NotificationController {
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
+    // ARENA-FIX-EVERYTHING.md Phase 1 finding - there was no way to remove a notification at
+    // all, so a stale one (e.g. about a post that's since been deleted or cancelled - Notification
+    // carries no FK back to the post it's about, so nothing does this automatically) sits forever.
+    // Author-only, same shape as markRead above; a hard delete rather than a read/dismissed flag
+    // since a notification has no ongoing value once the user is done with it, unlike a post's
+    // moderation/room history.
+    @DeleteMapping("/{id}")
+    @Transactional
+    public ResponseEntity<ApiResponse<Void>> delete(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        Notification n = notificationRepository.findById(id)
+                .orElseThrow(() -> new com.vikisol.arena.common.exception.ResourceNotFoundException("Notification not found"));
+        if (!n.getUser().getId().equals(principal.getId())) {
+            throw new AccessDeniedException("Not your notification");
+        }
+        notificationRepository.delete(n);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
     private NotificationResponse toResponse(Notification n) {
         return new NotificationResponse(n.getId().toString(), n.getType().wireValue(), n.getTitle(), n.getBody(),
                 n.getCreatedAt().toString(), n.isRead());
