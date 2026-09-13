@@ -45,15 +45,18 @@ public class PlatformUserService {
     // hard-deleting, for exactly that reason. This reuses that exact same, already-audited logic
     // via its eraseAccountAsAdmin entry point, just admin-triggered against a target user instead
     // of self-triggered - no new deletion mechanism, no new risk surface.
+    // Deliberately idempotent rather than refusing an already-erased account: eraseAccountAsAdmin
+    // only ever re-applies the same anonymization (name/bio/skills/etc. to their already-erased
+    // values, tokens re-revoked harmlessly) - safe to repeat, and needs to stay that way so a
+    // later anonymization fix (e.g. a field eraseAccountAsAdmin didn't yet clear) can be re-run
+    // against an already-erased account instead of being permanently stuck on whatever it wrote
+    // the first time.
     @Transactional
     public void eraseAccount(UUID actorUserId, UUID targetUserId) {
         User target = userRepository.findById(targetUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + targetUserId));
         if (target.getRole() != Role.TALENT) {
             throw new BadRequestException("Only talent accounts can be erased this way - " + target.getRole().wireValue() + " accounts aren't supported.");
-        }
-        if (target.getDeletedAt() != null) {
-            throw new BadRequestException("This account is already erased.");
         }
         String targetDescription = target.getName() + " (" + target.getEmail() + ")";
         candidateProfileService.eraseAccountAsAdmin(targetUserId);
