@@ -27,6 +27,10 @@ public final class AuditActions {
     public static final String CONSENT_CHANGED = "consent.changed";
     public static final String DATA_EXPORTED = "data.exported";
     public static final String ACCOUNT_DELETED = "account.deleted";
+    // ARENA-FIX-EVERYTHING.md Phase 1 - distinct from ACCOUNT_DELETED (self-service) so the
+    // audit trail can tell "a user erased themselves" apart from "a platform_admin erased this
+    // account on someone else's behalf" - the actor is the admin here, not the erased account.
+    public static final String ACCOUNT_ERASED_BY_ADMIN = "account.erased_by_admin";
 
     // M9 (audit/observability, PROJECT-PROGRESS.md milestone model): recorded by
     // AgentServiceTokenAuthenticationFilter for every request bearing a JennySol-forwarded

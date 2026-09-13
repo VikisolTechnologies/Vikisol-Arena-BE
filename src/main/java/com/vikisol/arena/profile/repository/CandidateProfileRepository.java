@@ -29,9 +29,15 @@ public interface CandidateProfileRepository extends JpaRepository<CandidateProfi
     // Hibernate paginate in memory (loads the full unbounded result set, then slices it in Java) -
     // worse than the per-row lazy loads this is meant to fix. See the IN-batched fetches below,
     // called once per page after this query returns, for the actual N+1 fix.
+    // ARENA-FIX-EVERYTHING.md Phase 1 fix - this query never excluded an anonymized/erased
+    // account (User.deletedAt set - see CandidateProfileService.deleteMyAccount). Without this,
+    // exercising the DPDP right-to-erasure flow didn't actually remove a candidate from
+    // enterprise search results, just renamed them to "Deleted user" and left them fully
+    // visible and clickable - the opposite of what "erasure" is supposed to mean here.
     @Query("""
             select c from CandidateProfile c
             where c.consent.searchableByEnterprises = true
+              and c.user.deletedAt is null
               and (:industry is null or c.industry = :industry)
               and (:remoteOnly = false or c.remote = true)
               and (:text = '' or

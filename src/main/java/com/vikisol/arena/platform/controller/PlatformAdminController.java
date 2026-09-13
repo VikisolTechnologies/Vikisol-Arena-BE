@@ -79,6 +79,14 @@ public class PlatformAdminController {
         return ResponseEntity.ok(ApiResponse.ok(userService.search(query, role, PageRequest.of(page, size))));
     }
 
+    // See PlatformUserService.eraseAccount's own comment for why this reuses the existing
+    // DPDP right-to-erasure path rather than a new hard-delete mechanism.
+    @DeleteMapping("/users/{id}")
+    public ResponseEntity<ApiResponse<Void>> eraseUser(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        userService.eraseAccount(principal.getId(), id);
+        return ResponseEntity.ok(ApiResponse.ok("Account erased", null));
+    }
+
     @GetMapping("/moderation")
     public ResponseEntity<ApiResponse<PagedResponse<ModerationItemResponse>>> moderationQueue(
             @RequestParam(required = false) String status,
