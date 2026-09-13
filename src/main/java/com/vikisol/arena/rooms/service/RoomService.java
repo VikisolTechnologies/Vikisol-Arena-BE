@@ -5,6 +5,7 @@ import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.notifications.service.NotificationService;
+import com.vikisol.arena.platform.repository.ModerationItemRepository;
 import com.vikisol.arena.platform.service.ModerationService;
 import com.vikisol.arena.posts.entity.Post;
 import com.vikisol.arena.posts.entity.PostStatus;
@@ -54,6 +55,7 @@ public class RoomService {
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
     private final ModerationService moderationService;
+    private final ModerationItemRepository moderationItemRepository;
     private final NotificationService notificationService;
     private final PostRepository postRepository;
 
@@ -215,6 +217,23 @@ public class RoomService {
                 }
             }
         });
+    }
+
+    // PostService.delete() - a post can only be hard-deleted (not just cancelled) if its room,
+    // when one exists, has nothing worth preserving: no messages yet, and no moderation history.
+    // A room that real people are actually talking in is never destroyed this way - the author
+    // is pointed at cancel() instead (leaves the room and its history intact, same as
+    // notifyRoomOfCancellation above), which is exactly the distinction this method exists to
+    // enforce. Returns true when the post is now clear to delete (room removed, or never existed).
+    @Transactional
+    public boolean deleteRoomForPostIfEmpty(UUID postId) {
+        Room room = roomRepository.findByPostId(postId).orElse(null);
+        if (room == null) return true;
+        if (roomMessageRepository.findTopByRoomIdOrderByCreatedAtDesc(room.getId()).isPresent()) return false;
+        if (moderationItemRepository.existsByRoomId(room.getId())) return false;
+        roomMemberRepository.deleteByRoomId(room.getId());
+        roomRepository.delete(room);
+        return true;
     }
 
     private void assertRoomMember(UUID userId, Room room) {

@@ -19,6 +19,9 @@ public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest
 
     long countByPostIdAndStatus(UUID postId, PostJoinStatus status);
 
+    // PostService.delete() - a hard delete needs its dependents gone first (FK on post_id).
+    void deleteByPostId(UUID postId);
+
     // §4 safety-audit fix: "Show join-count ... and account age" (a trust signal for whoever's
     // about to meet a stranger from an ACTIVITY/ASK post) - how many other posts this person has
     // actually been approved into elsewhere, a track record of real participation. Batched per

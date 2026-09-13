@@ -17,6 +17,9 @@ public interface PostReactionRepository extends JpaRepository<PostReaction, UUID
 
     long countByPostId(UUID postId);
 
+    // PostService.delete() - a hard delete needs its dependents gone first (FK on post_id).
+    void deleteByPostId(UUID postId);
+
     @Query("select r.post.id as postId, count(r) as cnt from PostReaction r where r.post.id in :postIds group by r.post.id")
     List<PostCommentRepository.PostCountProjection> countByPostIdIn(@Param("postIds") List<UUID> postIds);
 

@@ -131,6 +131,16 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.cancel(principal.getId(), id)));
     }
 
+    // ARENA-FIX-EVERYTHING.md Phase 1 finding - see PostService.delete()'s own comment for why
+    // this is narrower than cancel() (refuses on real history worth preserving) rather than a
+    // second way to do the same thing.
+    @DeleteMapping("/{id}")
+    public ResponseEntity<ApiResponse<Void>> delete(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        postService.delete(principal.getId(), id);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
     @PostMapping("/{id}/joins")
     public ResponseEntity<ApiResponse<PostJoinRequestResponse>> requestJoin(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {

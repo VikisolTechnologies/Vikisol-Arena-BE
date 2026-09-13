@@ -16,6 +16,9 @@ import java.util.UUID;
 public interface PostSaveRepository extends JpaRepository<PostSave, UUID> {
     Optional<PostSave> findByPostIdAndUserId(UUID postId, UUID userId);
 
+    // PostService.delete() - a hard delete needs its dependents gone first (FK on post_id).
+    void deleteByPostId(UUID postId);
+
     boolean existsByPostIdAndUserId(UUID postId, UUID userId);
 
     @EntityGraph(attributePaths = "post")

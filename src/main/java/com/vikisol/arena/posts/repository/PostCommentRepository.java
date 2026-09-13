@@ -21,6 +21,9 @@ public interface PostCommentRepository extends JpaRepository<PostComment, UUID> 
 
     long countByPostId(UUID postId);
 
+    // PostService.delete() - a hard delete needs its dependents gone first (FK on post_id).
+    void deleteByPostId(UUID postId);
+
     // Batched comment-count warm-up for a feed/trending window - one query for the whole page
     // instead of one per post, same shape as every other batch-count method in this codebase
     // (TalentSearchService.batchUnlockedCandidateIds, etc).

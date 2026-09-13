@@ -16,6 +16,12 @@ public interface ModerationItemRepository extends JpaRepository<ModerationItem, 
     Page<ModerationItem> findByStatusOrderByCreatedAtDesc(ModerationStatus status, Pageable pageable);
     long countByStatus(ModerationStatus status);
 
+    // PostService.delete() / RoomService.deleteRoomForPostIfEmpty() - a post or room with any
+    // moderation history (pending or already resolved) is never hard-deleted; the author is
+    // pointed at cancel() instead, which leaves the moderation trail intact.
+    boolean existsByPostId(UUID postId);
+    boolean existsByRoomId(UUID roomId);
+
     // FeedRankingService's §7.3 "quality" term (Phase C) - a post's live report count via its
     // Room (only ACTIVITY/ASK posts ever have one; UPDATE posts get a neutral quality score,
     // see DECISIONS.md). Batched for a whole feed window, same shape as every other batch-count

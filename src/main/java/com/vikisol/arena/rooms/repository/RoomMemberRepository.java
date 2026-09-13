@@ -22,4 +22,8 @@ public interface RoomMemberRepository extends JpaRepository<RoomMember, UUID> {
     // P3 audit fix: RoomService.toResponse(Room,...) used to load every member row just to call
     // .size() on the list, per room, in getMyRooms - a straight COUNT query instead.
     long countByRoomId(UUID roomId);
+
+    // RoomService.deleteRoomForPostIfEmpty() - only ever reached for a room with zero messages,
+    // but members can join before anyone sends the first one.
+    void deleteByRoomId(UUID roomId);
 }

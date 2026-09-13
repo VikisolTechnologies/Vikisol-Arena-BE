@@ -15,13 +15,16 @@ import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
 import com.vikisol.arena.follows.repository.FollowRepository;
 import com.vikisol.arena.follows.service.BlockService;
 import com.vikisol.arena.notifications.service.NotificationService;
+import com.vikisol.arena.platform.repository.ModerationItemRepository;
 import com.vikisol.arena.platform.service.ModerationService;
 import com.vikisol.arena.posts.dto.CreateCompanyPostRequest;
 import com.vikisol.arena.posts.dto.CreatePostRequest;
 import com.vikisol.arena.posts.dto.PostJoinRequestResponse;
 import com.vikisol.arena.posts.dto.PostResponse;
 import com.vikisol.arena.posts.entity.*;
+import com.vikisol.arena.posts.repository.PostCommentRepository;
 import com.vikisol.arena.posts.repository.PostJoinRequestRepository;
+import com.vikisol.arena.posts.repository.PostReactionRepository;
 import com.vikisol.arena.posts.repository.PostRepository;
 import com.vikisol.arena.posts.repository.PostSaveRepository;
 import com.vikisol.arena.profile.entity.CandidateProfile;
@@ -63,6 +66,9 @@ public class PostService {
     private final ModerationService moderationService;
     private final EnterpriseProfileService enterpriseProfileService;
     private final PostSaveRepository postSaveRepository;
+    private final PostReactionRepository postReactionRepository;
+    private final PostCommentRepository postCommentRepository;
+    private final ModerationItemRepository moderationItemRepository;
 
     @Transactional(readOnly = true)
     public List<PostResponse> getFeed(UUID viewingUserId, int page, int size) {
@@ -295,6 +301,33 @@ public class PostService {
         postRepository.save(post);
         roomService.notifyRoomOfCancellation(post);
         return mapper.toResponse(post, userId, null, roomIdFor(post));
+    }
+
+    // ARENA-FIX-EVERYTHING.md Phase 1 finding - there was no way for an author to remove their
+    // own post at all, anywhere in the product (only cancel(), which keeps it visible with a
+    // CANCELLED badge). Deliberately narrower than cancel(): refuses (BadRequestException, not a
+    // silent no-op) on anything with real history worth preserving - a post already under
+    // moderation review, or a room with actual messages in it - and points the caller at cancel()
+    // instead in both cases. Notification rows already sent about this post (join requests, etc.)
+    // are a point-in-time record, same as any audit trail - they are not retroactively rewritten
+    // by a later delete, matching how every other history/audit record in this codebase behaves.
+    @Transactional
+    public void delete(UUID userId, UUID postId) {
+        Post post = requirePost(postId);
+        if (!post.getAuthorUser().getId().equals(userId)) {
+            throw new AccessDeniedException("Not your post");
+        }
+        if (moderationItemRepository.existsByPostId(postId)) {
+            throw new BadRequestException("This post is under moderation review and can't be deleted directly - use cancel instead.");
+        }
+        if (!roomService.deleteRoomForPostIfEmpty(postId)) {
+            throw new BadRequestException("This activity has an active room with messages - cancel it instead of deleting.");
+        }
+        postReactionRepository.deleteByPostId(postId);
+        postCommentRepository.deleteByPostId(postId);
+        postSaveRepository.deleteByPostId(postId);
+        postJoinRequestRepository.deleteByPostId(postId);
+        postRepository.delete(post);
     }
 
     @Transactional
