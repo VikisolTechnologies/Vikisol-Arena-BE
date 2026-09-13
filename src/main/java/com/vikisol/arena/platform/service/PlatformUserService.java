@@ -40,13 +40,11 @@ public class PlatformUserService {
     // user at all; building a genuine cascading hard-delete across 30+ tables (several with no
     // repository support for a user-scoped delete/find at all) was assessed as too large and
     // risky for this pass, and would have duplicated a decision this codebase already made
-    // deliberately - CandidateProfileService.deleteMyAccount (the DPDP right-to-erasure path)
-    // already anonymizes + permanently disables login rather than hard-deleting, for exactly
-    // that reason. This reuses that exact same, already-audited logic, just admin-triggered
-    // against a target user instead of self-triggered - no new deletion mechanism, no new risk
-    // surface. accessToken is null here (unlike the self-service call) since there's no request
-    // token of the ADMIN's to denylist and none of the TARGET's to revoke beyond what
-    // revokeAllForUser already does inside deleteMyAccount itself.
+    // deliberately - CandidateProfileService's erasure path (the DPDP right-to-erasure logic
+    // behind DELETE /profile/me) already anonymizes + permanently disables login rather than
+    // hard-deleting, for exactly that reason. This reuses that exact same, already-audited logic
+    // via its eraseAccountAsAdmin entry point, just admin-triggered against a target user instead
+    // of self-triggered - no new deletion mechanism, no new risk surface.
     @Transactional
     public void eraseAccount(UUID actorUserId, UUID targetUserId) {
         User target = userRepository.findById(targetUserId)
@@ -58,7 +56,7 @@ public class PlatformUserService {
             throw new BadRequestException("This account is already erased.");
         }
         String targetDescription = target.getName() + " (" + target.getEmail() + ")";
-        candidateProfileService.deleteMyAccount(targetUserId, null);
+        candidateProfileService.eraseAccountAsAdmin(targetUserId);
         auditService.record(null, actorUserId, AuditActions.ACCOUNT_ERASED_BY_ADMIN, targetDescription);
     }
 

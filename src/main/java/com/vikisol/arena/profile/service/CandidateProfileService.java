@@ -177,6 +177,21 @@ public class CandidateProfileService {
     // info (name, bio, skills, CV) is gone and the account can never sign in again.
     @Transactional
     public void deleteMyAccount(UUID userId, String accessToken) {
+        eraseAccount(userId, accessToken, "self-service erasure request");
+    }
+
+    // ARENA-FIX-EVERYTHING.md Phase 1 - PlatformUserService.eraseAccount's admin-triggered path
+    // reuses this exact same logic (see its own comment for why), but needs its own audit reason
+    // rather than inheriting "self-service erasure request" verbatim, which would be actively
+    // wrong when an admin - not the account itself - triggered it. accessToken is always null
+    // here: there's no request token of the admin's to denylist for THIS account, and none of the
+    // target's either - revokeAllForUser below already ends every one of their live sessions.
+    @Transactional
+    public void eraseAccountAsAdmin(UUID userId) {
+        eraseAccount(userId, null, "erased by a platform admin");
+    }
+
+    private void eraseAccount(UUID userId, String accessToken, String auditReason) {
         CandidateProfile profile = getEntityForUser(userId);
         User user = userRepository.findById(userId).orElseThrow();
 
@@ -191,6 +206,12 @@ public class CandidateProfileService {
         profile.setConsent(new ConsentSettings(false, false));
         candidateProfileRepository.save(profile);
 
+        // ARENA-FIX-EVERYTHING.md Phase 1 fix - User.name is a separate field from
+        // CandidateProfile.name (the latter is what most of the product actually renders, but
+        // anything reading User.name directly - the platform_admin Users list, notably - kept
+        // showing the real pre-erasure name forever. Erasure needs to mean erasure everywhere a
+        // name is stored, not just the surface most screens happen to read from.
+        user.setName("Deleted user");
         user.setDeletedAt(Instant.now());
         userRepository.save(user);
         refreshTokenService.revokeAllForUser(userId);
@@ -202,7 +223,7 @@ public class CandidateProfileService {
             tokenDenylistService.denylist(jwtTokenProvider.getJtiFromToken(accessToken), jwtTokenProvider.getExpiryFromToken(accessToken));
         }
 
-        auditService.record(null, userId, AuditActions.ACCOUNT_DELETED, "self-service erasure request");
+        auditService.record(null, userId, AuditActions.ACCOUNT_DELETED, auditReason);
     }
 
     // ARENA-V2-PRODUCT-ARCHITECTURE.md Phase C profile revamp - the public/other-user view
