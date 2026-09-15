@@ -41,6 +41,9 @@ import com.vikisol.arena.marketplace.entity.ProjectStatus;
 import com.vikisol.arena.marketplace.repository.BidRepository;
 import com.vikisol.arena.marketplace.repository.MilestoneRepository;
 import com.vikisol.arena.marketplace.repository.ProjectRepository;
+import com.vikisol.arena.messaging.entity.Conversation;
+import com.vikisol.arena.messaging.repository.ConversationRepository;
+import com.vikisol.arena.messaging.repository.ThreadMessageRepository;
 import com.vikisol.arena.messaging.service.ConversationService;
 import com.vikisol.arena.notifications.entity.NotificationType;
 import com.vikisol.arena.notifications.repository.NotificationRepository;
@@ -130,6 +133,8 @@ public class DemoContentService {
     private final MembershipRepository membershipRepository;
     private final InvitationRepository invitationRepository;
     private final AuditEventRepository auditEventRepository;
+    private final ConversationRepository conversationRepository;
+    private final ThreadMessageRepository threadMessageRepository;
     private final JobPostingRepository jobPostingRepository;
     private final ProjectRepository projectRepository;
     private final BidRepository bidRepository;
@@ -834,6 +839,7 @@ public class DemoContentService {
         List<JobPosting> jobPostings = jobPostingRepository.findByDemoContentTrue();
         List<Project> projects = projectRepository.findByDemoContentTrue();
         List<EnterpriseProfile> companies = enterpriseProfileRepository.findByDemoContentTrue();
+        List<User> users = userRepository.findByDemoContentTrue();
 
         Set<Room> rooms = new java.util.LinkedHashSet<>(roomRepository.findByDemoContentTrue());
         rooms.addAll(roomRepository.findByPost_DemoContentTrue());
@@ -889,7 +895,19 @@ public class DemoContentService {
         }
         enterpriseProfileRepository.deleteAll(companies);
 
-        List<User> users = userRepository.findByDemoContentTrue();
+        // Real FK gap found live (2026-09-15): Conversation/ThreadMessage (the messaging package
+        // backing the merged Inbox's DMs and "bid thread" style conversations) had no cleanup at
+        // all - deleting a demo user 409ed the moment they had a real DM. Dedups conversations
+        // shared between two demo users via the Set, same pattern as the Room cleanup above.
+        Set<Conversation> conversations = new java.util.LinkedHashSet<>();
+        for (User user : users) {
+            conversations.addAll(conversationRepository.findAllForUser(user.getId()));
+        }
+        for (Conversation conversation : conversations) {
+            threadMessageRepository.deleteByConversationId(conversation.getId());
+        }
+        conversationRepository.deleteAll(conversations);
+
         userRepository.deleteAll(users);
 
         log.info("Demo content removed: {} accounts, {} companies, {} posts, {} job postings, {} projects, {} rooms",
