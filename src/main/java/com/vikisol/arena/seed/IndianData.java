@@ -76,7 +76,15 @@ public final class IndianData {
     public static <T> List<T> pickN(List<T> list, int n) {
         List<T> pool = new java.util.ArrayList<>(list);
         java.util.Collections.shuffle(pool, RANDOM);
-        return pool.subList(0, Math.min(n, pool.size()));
+        // A genuinely independent, mutable ArrayList - not a subList() view (still backed by
+        // `pool`, with its own quirks) and never handed straight to a .stream()...toList() chain
+        // upstream, which returns a genuinely IMMUTABLE list. DemoContentService found out why
+        // this matters live: replacing an ALREADY-PERSISTED entity's @ElementCollection field
+        // (profile.setSkills(...) on an entity fetched from a repository, not set at
+        // construction time on a brand-new one) makes Hibernate try to mutate the collection
+        // you handed it - an immutable list throws UnsupportedOperationException with no
+        // message at that point, which is exactly what happened.
+        return new java.util.ArrayList<>(pool.subList(0, Math.min(n, pool.size())));
     }
 
     public static int intBetween(int min, int max) {
