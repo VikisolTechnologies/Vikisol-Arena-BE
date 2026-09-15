@@ -87,6 +87,22 @@ public class AuthService {
 
     @Transactional
     public SignInOutcome signUp(SignUpRequest request) {
+        return signUp(request, true);
+    }
+
+    // DemoContentService.seedTalentAccounts()/seedCompanies() call the false overload - real
+    // signup validation/hashing/starter-profile creation, exactly as the public endpoint does,
+    // just without the outbound email. Found out live why this needed to exist (2026-09-15):
+    // the public signup endpoint always emails (real Resend API calls now that a key is
+    // configured - a genuinely live provider, not NoopEmailProvider as an earlier version of
+    // this comment claimed), and the demo seeder deliberately creates 40+ accounts at
+    // user01-user50@demo.arena.test - a non-routable .test domain per ARENA-FINISH-IT.md
+    // §1.1's own instruction, guaranteed to hard-bounce every single send. Sending 40+
+    // real emails to a domain that can never deliver on every seed run is a real, ongoing risk
+    // to the account's sender reputation that has nothing to do with what this method is
+    // actually being asked to validate.
+    @Transactional
+    public SignInOutcome signUp(SignUpRequest request, boolean sendWelcomeEmail) {
         if (userRepository.existsByEmailIgnoreCase(request.email())) {
             throw new BadRequestException("An account with this email already exists");
         }
@@ -118,19 +134,21 @@ public class AuthService {
         }
 
         // Best-effort welcome email - a notification failure must never fail signup itself (mirrors
-        // how HRLMS-BE's own EmailService.send* helpers catch and log rather than propagate). Runs
-        // through NoopEmailProvider today since no RESEND_API_KEY is configured; see
-        // integration/config/IntegrationProviderConfig.
-        try {
-            emailProvider.sendEmail(EmailMessage.to(user.getEmail(),
-                    "Welcome to Vikisol Arena",
-                    "<p>Hi " + user.getName() + ",</p><p>Your Vikisol Arena account is ready. "
-                            + (role == Role.TALENT
-                                    ? "Complete your profile to start getting matched to roles."
-                                    : "Post your first job to start building your pipeline.")
-                            + "</p><p>- The Vikisol Arena team</p>"));
-        } catch (Exception e) {
-            log.warn("Welcome email failed for {}: {}", user.getEmail(), e.getMessage());
+        // how HRLMS-BE's own EmailService.send* helpers catch and log rather than propagate).
+        // Real Resend calls once RESEND_API_KEY is configured - see
+        // integration/config/IntegrationProviderConfig; NoopEmailProvider only when it isn't.
+        if (sendWelcomeEmail) {
+            try {
+                emailProvider.sendEmail(EmailMessage.to(user.getEmail(),
+                        "Welcome to Vikisol Arena",
+                        "<p>Hi " + user.getName() + ",</p><p>Your Vikisol Arena account is ready. "
+                                + (role == Role.TALENT
+                                        ? "Complete your profile to start getting matched to roles."
+                                        : "Post your first job to start building your pipeline.")
+                                + "</p><p>- The Vikisol Arena team</p>"));
+            } catch (Exception e) {
+                log.warn("Welcome email failed for {}: {}", user.getEmail(), e.getMessage());
+            }
         }
 
         // A brand-new account never has TOTP enabled yet, so signup always issues a full session

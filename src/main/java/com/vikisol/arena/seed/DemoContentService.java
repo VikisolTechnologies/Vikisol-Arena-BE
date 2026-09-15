@@ -230,7 +230,7 @@ public class DemoContentService {
         for (int i = 1; i <= 40; i++) {
             String name = IndianData.fullName();
             String email = String.format("user%02d@%s", i, EMAIL_DOMAIN);
-            authService.signUp(new SignUpRequest(name, email, DEMO_PASSWORD, "talent"));
+            authService.signUp(new SignUpRequest(name, email, DEMO_PASSWORD, "talent"), false);
             User user = withDemoFlag(userRepository.findByEmailIgnoreCase(email).orElseThrow());
             userRepository.save(user);
 
@@ -300,7 +300,7 @@ public class DemoContentService {
             CompanySeed seed = realSeeds.get(i);
             String email = String.format("user%02d@%s", 41 + i, EMAIL_DOMAIN);
             String adminName = seed.name() + " Talent Team";
-            authService.signUp(new SignUpRequest(adminName, email, DEMO_PASSWORD, "company_admin"));
+            authService.signUp(new SignUpRequest(adminName, email, DEMO_PASSWORD, "company_admin"), false);
             User admin = userRepository.findByEmailIgnoreCase(email).orElseThrow();
             admin.setDemoContent(true);
             userRepository.save(admin);
