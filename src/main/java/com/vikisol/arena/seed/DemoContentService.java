@@ -77,9 +77,9 @@ import java.util.UUID;
  * five seed Posts are now stale-dated - their startsAt values were relative to whenever that
  * seeder first ran, long since passed). Every entity this service creates gets
  * BaseEntity.demoContent = true; seed()/removeAll() are the "one documented command" each way -
- * exposed via PlatformAdminController, itself gated behind arena.demo-content.enabled
- * (ARENA_SEED_MODE), off by default. See DemoContentSeederConfig for why the whole bean is
- * absent, not just inert, when that flag is off.
+ * exposed via DemoContentController, itself gated behind app.demo-content.enabled
+ * (ARENA_SEED_MODE), off by default. See that class's own comment for why the whole controller
+ * bean is absent, not just inert, when that flag is off.
  */
 @Service
 @RequiredArgsConstructor
