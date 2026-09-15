@@ -90,13 +90,12 @@ public class ConversationService {
         notificationService.notify(recipient, NotificationType.SYSTEM, "New message", requireUser(userId).getName() + " sent you a message.");
 
         // Same "only audit the enterprise side" scoping as InterviewService.propose() - a
-        // conversation can be sent from either participant.
-        try {
-            var tenant = enterpriseProfileService.getEntityForUser(userId);
-            auditService.record(tenant.getId(), userId, AuditActions.MESSAGE_SENT, recipient.getName());
-        } catch (ResourceNotFoundException ignored) {
-            // Candidate sent it - nothing to audit.
-        }
+        // conversation can be sent from either participant. findEntityForUser() (not
+        // getEntityForUser() - see that method's own comment) so a candidate sender - the
+        // common case - never crosses a @Transactional boundary via a thrown exception, which
+        // used to silently doom this entire transaction before it ever reached commit.
+        enterpriseProfileService.findEntityForUser(userId)
+                .ifPresent(tenant -> auditService.record(tenant.getId(), userId, AuditActions.MESSAGE_SENT, recipient.getName()));
 
         return toResponse(message, userId);
     }
@@ -125,15 +124,17 @@ public class ConversationService {
         } else {
             // Always the tenant's identity (company name/logo), not the individual recruiter's -
             // a candidate messaging "Swiggy" should see Swiggy regardless of which of Swiggy's
-            // recruiters happens to be on the other end.
-            try {
-                var tenant = enterpriseProfileService.getEntityForUser(other.getId());
-                displayName = tenant.getCompanyName();
-                displayEmoji = tenant.getLogoEmoji();
-            } catch (ResourceNotFoundException ignored) {
-                // No resolvable tenant (e.g. a hiring_manager not yet linked) - falls back to
-                // the user's own name, set above.
+            // recruiters happens to be on the other end. findEntityForUser() (see its own
+            // comment) - the "hiring_manager not yet linked" case below is real and used to
+            // silently doom this read transaction via the same exception-crosses-a-
+            // @Transactional-boundary mechanism as sendMessage()'s audit call.
+            var tenant = enterpriseProfileService.findEntityForUser(other.getId());
+            if (tenant.isPresent()) {
+                displayName = tenant.get().getCompanyName();
+                displayEmoji = tenant.get().getLogoEmoji();
             }
+            // else: no resolvable tenant (e.g. a hiring_manager not yet linked) - falls back to
+            // the user's own name, set above.
         }
 
         return new ConversationResponse(c.getId().toString(), other.getId().toString(), displayName, displayEmoji,

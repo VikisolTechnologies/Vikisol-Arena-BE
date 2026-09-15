@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
 import java.util.UUID;
 
 @Service
@@ -28,10 +29,28 @@ public class EnterpriseProfileService {
     // that somehow predates the Membership backfill (see seed.RoleMigration).
     @Transactional(readOnly = true)
     public EnterpriseProfile getEntityForUser(UUID userId) {
+        return findEntityForUser(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("No enterprise profile for this account"));
+    }
+
+    // A real, live bug this exists to fix (2026-09-15): ConversationService's two call sites
+    // treat "not enterprise" as a normal, expected case (a candidate messaging another
+    // candidate) and catch the ResourceNotFoundException getEntityForUser() throws - but that
+    // method is its OWN @Transactional(readOnly = true) boundary, and Spring's default rollback
+    // rule marks the whole PHYSICAL transaction (shared via propagation=REQUIRED, the default)
+    // as rollback-only the instant the exception crosses that boundary - regardless of the
+    // caller catching it immediately after. Every candidate-to-candidate direct message in this
+    // product was silently failing to persist: sendMessage() ran to completion and returned a
+    // normal-looking response, but the surrounding transaction could never actually commit.
+    // Callers that genuinely need "not found" to be an error keep using getEntityForUser()
+    // above (every other call site in this codebase does, correctly - the user there is
+    // guaranteed enterprise already); callers doing a soft "is this user enterprise at all"
+    // check should use this instead, which never throws.
+    @Transactional(readOnly = true)
+    public Optional<EnterpriseProfile> findEntityForUser(UUID userId) {
         return membershipRepository.findByUserId(userId)
                 .map(m -> m.getTenant())
-                .or(() -> enterpriseProfileRepository.findByUserId(userId))
-                .orElseThrow(() -> new ResourceNotFoundException("No enterprise profile for this account"));
+                .or(() -> enterpriseProfileRepository.findByUserId(userId));
     }
 
     @Transactional(readOnly = true)

@@ -168,29 +168,22 @@ public class DemoContentService {
             return new SeedSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
-        // TEMP diagnostic wrapping (2026-09-15) - a first live attempt got 10s into this call
-        // (past seedTalentAccounts, given BCrypt alone takes that long for 40 accounts) before
-        // failing with another message-less RuntimeException; RuntimeException.class's handler
-        // in GlobalExceptionHandler only logs ex.getMessage(), not a stack trace, so there's no
-        // way to tell which step or line from Railway logs alone. Naming each step so the next
-        // failure's full stack trace (via log.error, which DOES print one) points at the exact
-        // spot - remove once seed() runs clean end to end.
-        List<CandidateProfile> talent = diag("seedTalentAccounts", this::seedTalentAccounts);
-        List<EnterpriseProfile> companies = diag("seedCompanies", this::seedCompanies);
-        List<User> team = diag("seedEnterpriseTeam", () -> seedEnterpriseTeam(companies.get(0)));
-        diag("seedPlatformAdminAccount", () -> { seedPlatformAdminAccount(); return null; });
+        List<CandidateProfile> talent = seedTalentAccounts();
+        List<EnterpriseProfile> companies = seedCompanies();
+        List<User> team = seedEnterpriseTeam(companies.get(0));
+        seedPlatformAdminAccount();
 
-        List<Post> posts = diag("seedPosts", () -> seedPosts(talent));
-        int commentCount = diag("seedCommentsReactionsSaves", () -> seedCommentsReactionsSaves(posts, talent));
-        int roomCount = diag("seedRoomsAndMessages", () -> seedRoomsAndMessages(posts, talent));
-        int conversationCount = diag("seedDirectAndBidConversations", () -> seedDirectAndBidConversations(talent, companies.get(0), team));
+        List<Post> posts = seedPosts(talent);
+        int commentCount = seedCommentsReactionsSaves(posts, talent);
+        int roomCount = seedRoomsAndMessages(posts, talent);
+        int conversationCount = seedDirectAndBidConversations(talent, companies.get(0), team);
 
-        List<JobPosting> postings = diag("seedJobPostings", () -> seedJobPostings(companies));
-        int applicationCount = diag("seedApplicationsAndInterviews", () -> seedApplicationsAndInterviews(talent, postings, team));
-        ProjectSeedResult projectResult = diag("seedProjectsAndBids", () -> seedProjectsAndBids(companies, talent));
+        List<JobPosting> postings = seedJobPostings(companies);
+        int applicationCount = seedApplicationsAndInterviews(talent, postings, team);
+        ProjectSeedResult projectResult = seedProjectsAndBids(companies, talent);
 
-        diag("seedNotifications", () -> { seedNotifications(talent, companies.get(0)); return null; });
-        diag("seedFollows", () -> { seedFollows(talent); return null; });
+        seedNotifications(talent, companies.get(0));
+        seedFollows(talent);
 
         // 40 talent + 3 real company_admin signups + 6 invited team members + 1 platform admin =
         // 50 - companies.size() (5) isn't accounts, only the first 3 (real logins) are; the
@@ -203,18 +196,6 @@ public class DemoContentService {
                 projectResult.projects().size(), projectResult.bidCount(), roomCount, conversationCount, 4);
         return new SeedSummary(accountCount, companies.size(), posts.size(), commentCount, applicationCount,
                 projectResult.projects().size(), projectResult.bidCount(), roomCount, conversationCount, 4);
-    }
-
-    // TEMP diagnostic helper - see seed()'s own comment. log.error(..., e) DOES print a full
-    // stack trace to Railway logs, unlike GlobalExceptionHandler's generic RuntimeException.class
-    // handler (message only) that would otherwise be all that's visible for an unnamed failure.
-    private <T> T diag(String step, java.util.function.Supplier<T> action) {
-        try {
-            return action.get();
-        } catch (RuntimeException e) {
-            log.error("DIAG seed() step [{}] failed", step, e);
-            throw e;
-        }
     }
 
     // ---------------------------------------------------------------------------------------
