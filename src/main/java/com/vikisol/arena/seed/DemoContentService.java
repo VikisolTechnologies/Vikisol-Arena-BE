@@ -83,6 +83,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
@@ -250,6 +251,15 @@ public class DemoContentService {
                 profile.setConsent(new ConsentSettings(IndianData.RANDOM.nextDouble() < 0.6, true));
                 profile.setAutonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED, AutonomyLevel.AUTOPILOT)));
                 profile.setBio(experienceYears + "+ years in " + industry.wireValue().toLowerCase() + ", " + home.name() + ".");
+                // Real, live gap found and fixed here (2026-09-15): PostService.requireAdult()
+                // 400s "Add your date of birth in Settings" on every create/join of an Activity
+                // or Ask - and no seeded account had one set, so the join golden path 400ed for
+                // every one of the 39 enriched demo accounts the moment a live walkthrough
+                // actually clicked Join, despite seeded posts already showing joiners (seeding
+                // writes spotsFilled directly, bypassing this real user-facing gate entirely).
+                // A plausible adult age consistent with experienceYears, not a fixed date.
+                user.setDateOfBirth(LocalDate.now().minusYears(experienceYears + IndianData.intBetween(21, 27)).minusDays(IndianData.RANDOM.nextInt(365)));
+                userRepository.save(user);
                 // First 25 get real precise-consent coordinates, spread across all 5
                 // neighborhoods, so Home/Map's nearby query has genuine density everywhere.
                 if (i <= 25) {
