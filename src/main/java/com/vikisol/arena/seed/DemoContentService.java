@@ -1,5 +1,6 @@
 package com.vikisol.arena.seed;
 
+import com.vikisol.arena.audit.AuditEventRepository;
 import com.vikisol.arena.applications.entity.Application;
 import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
@@ -128,6 +129,7 @@ public class DemoContentService {
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final MembershipRepository membershipRepository;
     private final InvitationRepository invitationRepository;
+    private final AuditEventRepository auditEventRepository;
     private final JobPostingRepository jobPostingRepository;
     private final ProjectRepository projectRepository;
     private final BidRepository bidRepository;
@@ -880,6 +882,10 @@ public class DemoContentService {
         for (EnterpriseProfile company : companies) {
             invitationRepository.deleteByTenantId(company.getId());
             membershipRepository.deleteByTenantId(company.getId());
+            // Real FK gap found live (2026-09-15): AuditEvent.tenant is a required-cascade
+            // dependency of EnterpriseProfile - team invites, postings, etc. all write one, and
+            // without this the delete below 409s the moment any tenant has audit history.
+            auditEventRepository.deleteByTenantId(company.getId());
         }
         enterpriseProfileRepository.deleteAll(companies);
 

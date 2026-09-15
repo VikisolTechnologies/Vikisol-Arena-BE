@@ -68,6 +68,12 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
 
     Page<AuditEvent> findByTenantIdOrderByCreatedAtDesc(UUID tenantId, Pageable pageable);
 
+    // DemoContentService.removeAll() - a real FK gap found live (2026-09-15): AuditEvent.tenant
+    // is a required-cascade dependency of EnterpriseProfile ("fkqducwkleomxajbogqr2ku2viu"), and
+    // nothing was ever clearing these before deleting the tenant, so the demo removal endpoint
+    // 409ed the moment any tenant had audit history (team invites, postings, etc. all write one).
+    void deleteByTenantId(UUID tenantId);
+
     // PA1 dashboard's cross-tenant recent-activity feed - unlike search() above, this is
     // deliberately not tenant-scoped (platform_admin has no tenant of its own, see
     // DECISIONS.md), so a plain derived query is fine (no null-parameter ambiguity to work
