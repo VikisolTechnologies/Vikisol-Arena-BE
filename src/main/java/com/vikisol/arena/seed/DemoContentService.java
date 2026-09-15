@@ -211,46 +211,70 @@ public class DemoContentService {
         for (int i = 1; i <= 40; i++) {
             String name = IndianData.fullName();
             String email = String.format("user%02d@%s", i, EMAIL_DOMAIN);
-            authService.signUp(new SignUpRequest(name, email, DEMO_PASSWORD, "talent"));
-            User user = withDemoFlag(userRepository.findByEmailIgnoreCase(email).orElseThrow());
-            userRepository.save(user);
-
-            CandidateProfile profile = candidateProfileRepository.findByUserId(user.getId()).orElseThrow();
-            boolean sparse = i == 40;
-            if (!sparse) {
-                Industry industry = IndianData.pick(IndianData.INDUSTRIES_LIST());
-                int experienceYears = IndianData.intBetween(0, 12);
-                Neighborhood home = IndianData.pick(NEIGHBORHOODS);
-                List<CandidateSkill> skills = IndianData.pickN(IndianData.SKILLS_BY_INDUSTRY.get(industry), IndianData.intBetween(3, 6)).stream()
-                        .map(s -> new CandidateSkill(s, IndianData.RANDOM.nextDouble() < 0.4))
-                        .toList();
-                double jitterLat = home.lat() + (IndianData.RANDOM.nextDouble() - 0.5) * 0.01;
-                double jitterLng = home.lng() + (IndianData.RANDOM.nextDouble() - 0.5) * 0.01;
-                String geohash = GeohashUtil.encode(jitterLat, jitterLng);
-                double[] approx = GeohashUtil.decode(geohash);
-
-                profile.setTitle(IndianData.pick(IndianData.TITLES_BY_INDUSTRY.get(industry)));
-                profile.setIndustry(industry);
-                profile.setLocation(home.name() + ", Hyderabad");
-                profile.setRemote(IndianData.RANDOM.nextDouble() < 0.3);
-                profile.setSkills(skills);
-                profile.setExperienceYears(experienceYears);
-                profile.setRateFloor(IndianData.intBetween(6, 35));
-                profile.setOpenTo(IndianData.pickN(List.of(OpenTo.FULL_TIME, OpenTo.CONTRACT, OpenTo.PROJECTS), IndianData.intBetween(1, 2)));
-                profile.setConsent(new ConsentSettings(IndianData.RANDOM.nextDouble() < 0.6, true));
-                profile.setAutonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED, AutonomyLevel.AUTOPILOT)));
-                profile.setBio(experienceYears + "+ years in " + industry.wireValue().toLowerCase() + ", " + home.name() + ".");
-                // First 25 get real precise-consent coordinates, spread across all 5
-                // neighborhoods, so Home/Map's nearby query has genuine density everywhere.
-                if (i <= 25) {
-                    profile.setLocationConsent(LocationConsent.PRECISE);
-                    profile.setGeohash(geohash);
-                    profile.setApproxLat(approx[0]);
-                    profile.setApproxLng(approx[1]);
-                }
+            // TEMP diagnostic wrapper (2026-09-15) - two live attempts both failed with a
+            // message-less RuntimeException immediately after user01's signup+welcome-email
+            // completed (confirmed via Railway logs: GlobalExceptionHandler's generic
+            // RuntimeException.class handler logged "Request rejected: null"). Wrapping each
+            // step so the next failure names the real exception type/message/line instead of
+            // guessing - remove once the real cause is found and fixed.
+            try {
+                authService.signUp(new SignUpRequest(name, email, DEMO_PASSWORD, "talent"));
+            } catch (RuntimeException e) {
+                throw new RuntimeException("DIAG signUp(" + email + ") failed: " + e.getClass().getName() + ": " + e.getMessage(), e);
             }
-            profile.setDemoContent(true);
-            candidates.add(candidateProfileRepository.save(profile));
+            User user;
+            try {
+                user = withDemoFlag(userRepository.findByEmailIgnoreCase(email).orElseThrow());
+                userRepository.save(user);
+            } catch (RuntimeException e) {
+                throw new RuntimeException("DIAG find/save User(" + email + ") failed: " + e.getClass().getName() + ": " + e.getMessage(), e);
+            }
+
+            CandidateProfile profile;
+            try {
+                profile = candidateProfileRepository.findByUserId(user.getId()).orElseThrow();
+            } catch (RuntimeException e) {
+                throw new RuntimeException("DIAG find CandidateProfile(" + email + ") failed: " + e.getClass().getName() + ": " + e.getMessage(), e);
+            }
+            boolean sparse = i == 40;
+            try {
+                if (!sparse) {
+                    Industry industry = IndianData.pick(IndianData.INDUSTRIES_LIST());
+                    int experienceYears = IndianData.intBetween(0, 12);
+                    Neighborhood home = IndianData.pick(NEIGHBORHOODS);
+                    List<CandidateSkill> skills = IndianData.pickN(IndianData.SKILLS_BY_INDUSTRY.get(industry), IndianData.intBetween(3, 6)).stream()
+                            .map(s -> new CandidateSkill(s, IndianData.RANDOM.nextDouble() < 0.4))
+                            .toList();
+                    double jitterLat = home.lat() + (IndianData.RANDOM.nextDouble() - 0.5) * 0.01;
+                    double jitterLng = home.lng() + (IndianData.RANDOM.nextDouble() - 0.5) * 0.01;
+                    String geohash = GeohashUtil.encode(jitterLat, jitterLng);
+                    double[] approx = GeohashUtil.decode(geohash);
+
+                    profile.setTitle(IndianData.pick(IndianData.TITLES_BY_INDUSTRY.get(industry)));
+                    profile.setIndustry(industry);
+                    profile.setLocation(home.name() + ", Hyderabad");
+                    profile.setRemote(IndianData.RANDOM.nextDouble() < 0.3);
+                    profile.setSkills(skills);
+                    profile.setExperienceYears(experienceYears);
+                    profile.setRateFloor(IndianData.intBetween(6, 35));
+                    profile.setOpenTo(IndianData.pickN(List.of(OpenTo.FULL_TIME, OpenTo.CONTRACT, OpenTo.PROJECTS), IndianData.intBetween(1, 2)));
+                    profile.setConsent(new ConsentSettings(IndianData.RANDOM.nextDouble() < 0.6, true));
+                    profile.setAutonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED, AutonomyLevel.AUTOPILOT)));
+                    profile.setBio(experienceYears + "+ years in " + industry.wireValue().toLowerCase() + ", " + home.name() + ".");
+                    // First 25 get real precise-consent coordinates, spread across all 5
+                    // neighborhoods, so Home/Map's nearby query has genuine density everywhere.
+                    if (i <= 25) {
+                        profile.setLocationConsent(LocationConsent.PRECISE);
+                        profile.setGeohash(geohash);
+                        profile.setApproxLat(approx[0]);
+                        profile.setApproxLng(approx[1]);
+                    }
+                }
+                profile.setDemoContent(true);
+                candidates.add(candidateProfileRepository.save(profile));
+            } catch (RuntimeException e) {
+                throw new RuntimeException("DIAG enrich/save CandidateProfile(" + email + ") failed: " + e.getClass().getName() + ": " + e.getMessage(), e);
+            }
         }
         return candidates;
     }
