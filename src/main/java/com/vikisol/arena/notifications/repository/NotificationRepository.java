@@ -21,4 +21,12 @@ public interface NotificationRepository extends JpaRepository<Notification, UUID
 
     // DemoContentService.removeAll().
     void deleteByDemoContentTrue();
+
+    // Real FK gap found live (2026-09-15): deleteByDemoContentTrue() above only catches
+    // notifications the seed's own seedNotifications() step wrote - a notification a demo user
+    // received through a normal, non-seed code path (e.g. NotificationService.notify() firing
+    // off a real follow/join-approval/comment-reply during testing) never gets demoContent=true,
+    // so it survived and blocked deleting the user it points at. This catches every notification
+    // FOR a demo user regardless of how it was created, by the required user_id FK instead.
+    void deleteByUserId(UUID userId);
 }

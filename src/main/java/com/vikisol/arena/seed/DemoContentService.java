@@ -875,6 +875,9 @@ public class DemoContentService {
         jobPostingRepository.deleteAll(jobPostings);
 
         notificationRepository.deleteByDemoContentTrue();
+        for (User user : users) {
+            notificationRepository.deleteByUserId(user.getId());
+        }
 
         for (CandidateProfile candidate : candidates) {
             UUID userId = candidate.getUser().getId();
