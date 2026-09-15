@@ -10,4 +10,8 @@ import java.util.UUID;
 public interface ShortlistEntryRepository extends JpaRepository<ShortlistEntry, UUID> {
     List<ShortlistEntry> findByEnterpriseId(UUID enterpriseId);
     Optional<ShortlistEntry> findByEnterpriseIdAndCandidateId(UUID enterpriseId, UUID candidateId);
+
+    // DemoContentService.removeAll() - a real enterprise could shortlist a demo candidate during
+    // the review window.
+    void deleteByCandidateId(UUID candidateId);
 }

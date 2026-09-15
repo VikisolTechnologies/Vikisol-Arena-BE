@@ -50,4 +50,7 @@ public interface EnterpriseProfileRepository extends JpaRepository<EnterprisePro
         Plan getPlan();
         long getCount();
     }
+
+    // DemoContentService - see PostRepository.findByDemoContentTrue()'s own comment.
+    List<EnterpriseProfile> findByDemoContentTrue();
 }

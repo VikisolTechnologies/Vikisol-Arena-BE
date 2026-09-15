@@ -22,6 +22,11 @@ public interface ModerationItemRepository extends JpaRepository<ModerationItem, 
     boolean existsByPostId(UUID postId);
     boolean existsByRoomId(UUID roomId);
 
+    // DemoContentService.removeAll() - a demo post/room reported during the review window still
+    // needs its moderation trail cleared before the post/room itself can go (FK).
+    void deleteByPostId(UUID postId);
+    void deleteByRoomId(UUID roomId);
+
     // FeedRankingService's §7.3 "quality" term (Phase C) - a post's live report count via its
     // Room (only ACTIVITY/ASK posts ever have one; UPDATE posts get a neutral quality score,
     // see DECISIONS.md). Batched for a whole feed window, same shape as every other batch-count

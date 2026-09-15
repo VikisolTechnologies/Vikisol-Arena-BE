@@ -29,4 +29,8 @@ public interface MembershipRepository extends JpaRepository<Membership, UUID> {
     List<Membership> findByTenantIdAndStatus(UUID tenantId, MembershipStatus status);
 
     long countByTenantIdAndStatus(UUID tenantId, MembershipStatus status);
+
+    // DemoContentService.removeAll() - a tenant's memberships go before the EnterpriseProfile
+    // (FK) and before its admin User (also FK'd from here).
+    void deleteByTenantId(UUID tenantId);
 }

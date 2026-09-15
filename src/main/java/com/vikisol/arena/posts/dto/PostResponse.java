@@ -46,6 +46,12 @@ public record PostResponse(
         // (a real participation track record); authorAccountAgeDays = how long they've had an
         // account (a fresh same-day account is a real risk signal).
         long authorJoinCount,
-        long authorAccountAgeDays
+        long authorAccountAgeDays,
+        // ARENA-WEB-AND-SEED.md Part 4.2 - "every seeded item carries a visible 'Demo content'
+        // marker in the UI... it must be impossible to screenshot it and believe the network is
+        // alive." Straight passthrough of BaseEntity.demoContent - see DemoContentService.
+        // No `is` prefix - matches this record's own existing boolean field convention (joinable,
+        // mine), which Jackson serializes as-is for records rather than stripping a get/is prefix.
+        boolean demoContent
 ) {
 }

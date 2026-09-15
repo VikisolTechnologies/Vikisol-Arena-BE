@@ -23,4 +23,9 @@ public interface BidRepository extends JpaRepository<Bid, UUID> {
 
     @EntityGraph(attributePaths = "bidderUser")
     Page<Bid> findByBidderUserIdOrderBySubmittedAtDesc(UUID userId, Pageable pageable);
+
+    // DemoContentService.removeAll() - a project's bids go before the project itself (FK); keyed
+    // on the FK, not this row's own demoContent flag, so it also catches a real bid a real user
+    // placed against a demo project during the review window.
+    void deleteByProjectId(UUID projectId);
 }

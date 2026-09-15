@@ -8,4 +8,7 @@ import java.util.UUID;
 
 public interface MilestoneRepository extends JpaRepository<Milestone, UUID> {
     List<Milestone> findByProjectIdOrderByOrderIndexAsc(UUID projectId);
+
+    // DemoContentService.removeAll() - see BidRepository.deleteByProjectId's own comment.
+    void deleteByProjectId(UUID projectId);
 }

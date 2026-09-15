@@ -16,4 +16,7 @@ public interface UnlockedCandidateRepository extends JpaRepository<UnlockedCandi
     // one query instead of one-per-row. Callers turn this into a Set for O(1) per-row lookups.
     @Query("select u.candidate.id from UnlockedCandidate u where u.enterprise.id = :enterpriseId and u.candidate.id in :candidateIds")
     List<UUID> findUnlockedCandidateIds(@Param("enterpriseId") UUID enterpriseId, @Param("candidateIds") List<UUID> candidateIds);
+
+    // DemoContentService.removeAll() - see ShortlistEntryRepository.deleteByCandidateId's own comment.
+    void deleteByCandidateId(UUID candidateId);
 }

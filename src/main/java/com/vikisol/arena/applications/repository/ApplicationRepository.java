@@ -26,4 +26,9 @@ public interface ApplicationRepository extends JpaRepository<Application, UUID> 
     // at once - one query instead of one-per-row. Callers turn this into a Set for O(1) lookups.
     @Query("select distinct a.candidate.id from Application a where a.candidate.id in :candidateIds and a.jobPosting.enterprise.id = :enterpriseId")
     List<UUID> findCandidateIdsWithApplicationToEnterprise(@Param("candidateIds") List<UUID> candidateIds, @Param("enterpriseId") UUID enterpriseId);
+
+    // DemoContentService.removeAll() - the (unlikely but possible) case of a real candidate
+    // applying to a demo job posting during the review window. deleteByJobPostingId is keyed on
+    // the FK, not this row's own demoContent flag, so it catches that too.
+    void deleteByJobPostingId(UUID jobPostingId);
 }

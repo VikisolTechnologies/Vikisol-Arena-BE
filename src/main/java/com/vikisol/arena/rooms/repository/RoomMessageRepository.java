@@ -21,4 +21,7 @@ public interface RoomMessageRepository extends JpaRepository<RoomMessage, UUID> 
     // room in getMyRooms just to read the single last element - this replaces that with exactly
     // the one row actually needed.
     Optional<RoomMessage> findTopByRoomIdOrderByCreatedAtDesc(UUID roomId);
+
+    // DemoContentService.removeAll() - a room's messages have to go before the room itself (FK).
+    void deleteByRoomId(UUID roomId);
 }

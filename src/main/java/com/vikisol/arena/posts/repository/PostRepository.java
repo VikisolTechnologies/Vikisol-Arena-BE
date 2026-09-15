@@ -60,4 +60,9 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
         UUID getPostId();
         String getValue();
     }
+
+    // DemoContentService - the on-demand, labeled/removable content overlay (ARENA-WEB-AND-SEED.md
+    // Part 4), distinct from the original DataSeeder bootstrap (which never set this flag).
+    @EntityGraph(attributePaths = "authorUser")
+    List<Post> findByDemoContentTrue();
 }

@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.List;
 import java.util.UUID;
 
 public interface ProjectRepository extends JpaRepository<Project, UUID> {
@@ -17,4 +18,7 @@ public interface ProjectRepository extends JpaRepository<Project, UUID> {
     Page<Project> findByPostedByUserId(UUID userId, Pageable pageable);
 
     long countByStatus(ProjectStatus status);
+
+    // DemoContentService - see PostRepository.findByDemoContentTrue()'s own comment.
+    List<Project> findByDemoContentTrue();
 }

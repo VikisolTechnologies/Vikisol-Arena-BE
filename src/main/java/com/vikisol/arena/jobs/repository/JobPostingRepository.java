@@ -36,4 +36,7 @@ public interface JobPostingRepository extends JpaRepository<JobPosting, UUID> {
     @EntityGraph(attributePaths = "skills")
     @Query("select j from JobPosting j where j.id in :ids")
     List<JobPosting> findByIdInFetchingSkills(@Param("ids") List<UUID> ids);
+
+    // DemoContentService - see PostRepository.findByDemoContentTrue()'s own comment.
+    List<JobPosting> findByDemoContentTrue();
 }

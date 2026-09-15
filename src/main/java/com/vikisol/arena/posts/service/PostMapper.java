@@ -161,7 +161,8 @@ public class PostMapper {
                 canSeeExactMeetingPoint ? post.getExactMeetingPoint() : null,
                 post.getRequiredVerificationLevel() == null ? null : post.getRequiredVerificationLevel().wireValue(),
                 commentCount, reactionCount, myReacted,
-                authorJoinCount, Math.max(0, authorAccountAgeDays)
+                authorJoinCount, Math.max(0, authorAccountAgeDays),
+                post.isDemoContent()
         );
     }
 

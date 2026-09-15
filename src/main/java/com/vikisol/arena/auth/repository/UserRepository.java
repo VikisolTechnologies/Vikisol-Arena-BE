@@ -45,4 +45,8 @@ public interface UserRepository extends JpaRepository<User, UUID> {
         Role getRole();
         long getCount();
     }
+
+    // DemoContentService - see PostRepository.findByDemoContentTrue()'s own comment. Deleted
+    // last of all (see removeAll()'s ordering) since nearly everything else FKs to a user.
+    List<User> findByDemoContentTrue();
 }

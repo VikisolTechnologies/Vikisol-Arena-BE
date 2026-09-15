@@ -22,4 +22,7 @@ public interface InterviewRepository extends JpaRepository<Interview, UUID> {
     // convention as ProjectRepository.findByStatus().
     @EntityGraph(attributePaths = {"application", "application.candidate", "application.jobPosting", "application.jobPosting.enterprise"})
     Page<Interview> findByAssignedHiringManagerId(UUID hiringManagerUserId, Pageable pageable);
+
+    // DemoContentService.removeAll() - an interview goes before its Application (FK).
+    void deleteByApplicationId(UUID applicationId);
 }

@@ -118,6 +118,13 @@ app:
   seed:
     enabled: ${SEED_ENABLED:true}
 
+  # ARENA-WEB-AND-SEED.md Part 4 - the on-demand, labeled, removable demo-content overlay
+  # (DemoContentService/DemoContentController), distinct from the `app.seed` bootstrap above.
+  # Off by default, unlike app.seed.enabled - "Never enabled in the production environment" is
+  # the explicit instruction, so the safe default is the opposite polarity.
+  demo-content:
+    enabled: ${ARENA_SEED_MODE:false}
+
   rate-limit:
     enabled: ${RATE_LIMIT_ENABLED:true}
     # requests-per-window, keyed by client IP for unauthenticated endpoints (auth/*) and by user

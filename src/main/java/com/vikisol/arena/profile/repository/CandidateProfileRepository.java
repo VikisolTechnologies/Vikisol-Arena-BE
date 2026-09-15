@@ -68,4 +68,8 @@ public interface CandidateProfileRepository extends JpaRepository<CandidateProfi
     long countByConsent_SearchableByEnterprisesTrue();
 
     long countByIndustryAndConsent_SearchableByEnterprisesTrue(Industry industry);
+
+    // DemoContentService - see PostRepository.findByDemoContentTrue()'s own comment.
+    @EntityGraph(attributePaths = "user")
+    List<CandidateProfile> findByDemoContentTrue();
 }

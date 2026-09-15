@@ -35,4 +35,9 @@ public interface FollowRepository extends JpaRepository<Follow, UUID> {
     boolean existsByFollowerUserIdAndFollowingCompanyId(UUID followerUserId, UUID followingCompanyId);
 
     long countByFollowingCompanyId(UUID followingCompanyId);
+
+    // DemoContentService.removeAll() - a demo candidate can be followed by, or follow, a real
+    // account during the review window; both directions have to go before the demo User itself.
+    void deleteByFollowerUserId(UUID followerUserId);
+    void deleteByFollowingUserId(UUID followingUserId);
 }
