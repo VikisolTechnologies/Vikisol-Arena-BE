@@ -1,21 +1,31 @@
 package com.vikisol.arena.seed;
 
+import com.vikisol.arena.applications.entity.Application;
+import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
+import com.vikisol.arena.auth.dto.SignUpRequest;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
+import com.vikisol.arena.auth.service.AuthService;
 import com.vikisol.arena.common.geo.GeohashUtil;
-import com.vikisol.arena.common.util.HandleGenerator;
+import com.vikisol.arena.enterprise.dto.admin.InviteMemberRequest;
 import com.vikisol.arena.enterprise.entity.CompanySize;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.entity.Membership;
 import com.vikisol.arena.enterprise.entity.MembershipStatus;
 import com.vikisol.arena.enterprise.entity.Plan;
 import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
+import com.vikisol.arena.enterprise.repository.InvitationRepository;
 import com.vikisol.arena.enterprise.repository.MembershipRepository;
 import com.vikisol.arena.enterprise.repository.ShortlistEntryRepository;
 import com.vikisol.arena.enterprise.repository.UnlockedCandidateRepository;
+import com.vikisol.arena.enterprise.service.TeamService;
+import com.vikisol.arena.follows.entity.Follow;
 import com.vikisol.arena.follows.repository.FollowRepository;
+import com.vikisol.arena.interviews.entity.Interview;
+import com.vikisol.arena.interviews.entity.InterviewSlot;
+import com.vikisol.arena.interviews.entity.InterviewStatus;
 import com.vikisol.arena.interviews.repository.InterviewRepository;
 import com.vikisol.arena.jobs.entity.EmploymentType;
 import com.vikisol.arena.jobs.entity.JobPosting;
@@ -23,24 +33,33 @@ import com.vikisol.arena.jobs.entity.PostingStatus;
 import com.vikisol.arena.jobs.repository.JobPostingRepository;
 import com.vikisol.arena.marketplace.entity.Bid;
 import com.vikisol.arena.marketplace.entity.BidStatus;
+import com.vikisol.arena.marketplace.entity.Milestone;
+import com.vikisol.arena.marketplace.entity.MilestoneStatus;
 import com.vikisol.arena.marketplace.entity.Project;
 import com.vikisol.arena.marketplace.entity.ProjectStatus;
 import com.vikisol.arena.marketplace.repository.BidRepository;
 import com.vikisol.arena.marketplace.repository.MilestoneRepository;
 import com.vikisol.arena.marketplace.repository.ProjectRepository;
+import com.vikisol.arena.messaging.service.ConversationService;
 import com.vikisol.arena.notifications.entity.NotificationType;
 import com.vikisol.arena.notifications.repository.NotificationRepository;
 import com.vikisol.arena.notifications.service.NotificationService;
 import com.vikisol.arena.platform.repository.ModerationItemRepository;
 import com.vikisol.arena.posts.entity.Post;
 import com.vikisol.arena.posts.entity.PostAudience;
+import com.vikisol.arena.posts.entity.PostComment;
 import com.vikisol.arena.posts.entity.PostIntentType;
 import com.vikisol.arena.posts.entity.PostJoinRequest;
 import com.vikisol.arena.posts.entity.PostJoinStatus;
+import com.vikisol.arena.posts.entity.PostReaction;
+import com.vikisol.arena.posts.entity.PostSave;
 import com.vikisol.arena.posts.entity.PostStatus;
 import com.vikisol.arena.posts.entity.PostVisibility;
+import com.vikisol.arena.posts.repository.PostCommentRepository;
 import com.vikisol.arena.posts.repository.PostJoinRequestRepository;
+import com.vikisol.arena.posts.repository.PostReactionRepository;
 import com.vikisol.arena.posts.repository.PostRepository;
+import com.vikisol.arena.posts.repository.PostSaveRepository;
 import com.vikisol.arena.profile.entity.AutonomyLevel;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.entity.CandidateSkill;
@@ -71,15 +90,22 @@ import java.util.Set;
 import java.util.UUID;
 
 /**
- * ARENA-WEB-AND-SEED.md Part 4 - an on-demand, labeled, fully-removable content overlay for
- * evaluating the v3 UI against realistic Hyderabad-flavored data, distinct from the original
- * DataSeeder bootstrap (which runs once on first boot, has no demoContent marker, and whose own
- * five seed Posts are now stale-dated - their startsAt values were relative to whenever that
- * seeder first ran, long since passed). Every entity this service creates gets
- * BaseEntity.demoContent = true; seed()/removeAll() are the "one documented command" each way -
- * exposed via DemoContentController, itself gated behind app.demo-content.enabled
- * (ARENA_SEED_MODE), off by default. See that class's own comment for why the whole controller
- * bean is absent, not just inert, when that flag is off.
+ * ARENA-WEB-AND-SEED.md Part 4 + ARENA-FINISH-IT.md §1. An on-demand, labeled, fully-removable
+ * content overlay - distinct from the original DataSeeder bootstrap (runs once on first boot, no
+ * demoContent marker, stale-dated posts). Every entity this service creates gets
+ * BaseEntity.demoContent = true. seed()/removeAll() are the "one documented command" each way -
+ * see SEED-CONTENT.md and DemoContentController's own comment for why the whole controller bean
+ * is absent, not just inert, when app.demo-content.enabled (ARENA_SEED_MODE) is off.
+ *
+ * Accounts go through the REAL service layer, not direct repository saves: authService.signUp()
+ * for the two self-serve roles (talent, company_admin - the same validation, password hashing,
+ * and starter-profile creation a real signup gets), teamService.invite() +
+ * teamService.acceptInvitation() for recruiter/hiring_manager (this product's only real path for
+ * those roles - see AuthService.signUp()'s own "ask your admin for an invite" refusal for those
+ * roles). platform_admin has no self-service path at all, by design, in this product - the demo
+ * account for that role reuses the same direct-creation pattern the original DataSeeder already
+ * uses for the one platform_admin account that exists today, not a fabricated "real path" that
+ * doesn't exist.
  */
 @Service
 @RequiredArgsConstructor
@@ -90,6 +116,9 @@ public class DemoContentService {
     private final CandidateProfileRepository candidateProfileRepository;
     private final PostRepository postRepository;
     private final PostJoinRequestRepository postJoinRequestRepository;
+    private final PostCommentRepository postCommentRepository;
+    private final PostReactionRepository postReactionRepository;
+    private final PostSaveRepository postSaveRepository;
     private final RoomRepository roomRepository;
     private final RoomMemberRepository roomMemberRepository;
     private final RoomMessageRepository roomMessageRepository;
@@ -97,6 +126,7 @@ public class DemoContentService {
     private final NotificationService notificationService;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final MembershipRepository membershipRepository;
+    private final InvitationRepository invitationRepository;
     private final JobPostingRepository jobPostingRepository;
     private final ProjectRepository projectRepository;
     private final BidRepository bidRepository;
@@ -108,115 +138,253 @@ public class DemoContentService {
     private final ShortlistEntryRepository shortlistEntryRepository;
     private final UnlockedCandidateRepository unlockedCandidateRepository;
     private final PasswordEncoder passwordEncoder;
+    private final AuthService authService;
+    private final TeamService teamService;
+    private final ConversationService conversationService;
 
-    private static final String DEMO_PASSWORD = "DemoContent@Preview1";
+    // ARENA-FINISH-IT.md §1.1 - "one shared, simple, documented password... these are throwaway
+    // demo logins, not secrets." Satisfies both SignUpRequest's 6-char and
+    // AcceptInvitationRequest's 8-char minimums.
+    public static final String DEMO_PASSWORD = "ArenaDemo2026!";
+    private static final String EMAIL_DOMAIN = "demo.arena.test";
 
-    // Real Hyderabad IT-corridor neighborhoods, per ARENA-WEB-AND-SEED.md 4.3's own list.
     private record Neighborhood(String name, double lat, double lng) {}
     private static final List<Neighborhood> NEIGHBORHOODS = List.of(
             new Neighborhood("Gachibowli", 17.4400, 78.3489),
             new Neighborhood("Gopanapally", 17.4602, 78.3106),
             new Neighborhood("Madhapur", 17.4483, 78.3915),
-            new Neighborhood("Kondapur", 17.4615, 78.3672)
+            new Neighborhood("Kondapur", 17.4615, 78.3672),
+            new Neighborhood("Hitec City", 17.4435, 78.3772)
     );
 
-    public record SeedSummary(int candidates, int posts, int rooms, int jobPostings, int projects, int notifications) {}
-    public record RemovalSummary(int candidates, int posts, int rooms, int jobPostings, int projects, int notifications) {}
+    public record SeedSummary(int accounts, int companies, int posts, int comments, int applications,
+                               int projects, int bids, int rooms, int conversations, int notifications) {}
+    public record RemovalSummary(int accounts, int companies, int posts, int jobPostings, int projects, int rooms) {}
 
     @Transactional
     public SeedSummary seed() {
         if (!postRepository.findByDemoContentTrue().isEmpty()) {
             log.info("Demo content already present - skipping seed (call removeAll() first to reseed)");
-            var existing = postRepository.findByDemoContentTrue();
-            return new SeedSummary(candidateProfileRepository.findByDemoContentTrue().size(), existing.size(),
-                    roomRepository.findByDemoContentTrue().size(), jobPostingRepository.findByDemoContentTrue().size(),
-                    projectRepository.findByDemoContentTrue().size(), 0);
+            return new SeedSummary(0, 0, 0, 0, 0, 0, 0, 0, 0, 0);
         }
 
-        List<CandidateProfile> candidates = seedCandidates();
-        List<Post> posts = seedPosts(candidates);
-        int roomCount = seedRoomsAndMessages(posts, candidates);
-        EnterpriseProfile company = seedDemoCompany();
-        List<JobPosting> jobPostings = seedJobPostings(company);
-        List<Project> projects = seedProjects(company, candidates);
-        int notificationCount = seedNotifications(candidates);
+        List<CandidateProfile> talent = seedTalentAccounts();
+        List<EnterpriseProfile> companies = seedCompanies();
+        List<User> team = seedEnterpriseTeam(companies.get(0));
+        seedPlatformAdminAccount();
 
-        log.info("Demo content seeded: {} candidates, {} posts, {} rooms, {} job postings, {} projects, {} notifications",
-                candidates.size(), posts.size(), roomCount, jobPostings.size(), projects.size(), notificationCount);
-        return new SeedSummary(candidates.size(), posts.size(), roomCount, jobPostings.size(), projects.size(), notificationCount);
+        List<Post> posts = seedPosts(talent);
+        int commentCount = seedCommentsReactionsSaves(posts, talent);
+        int roomCount = seedRoomsAndMessages(posts, talent);
+        int conversationCount = seedDirectAndBidConversations(talent, companies.get(0), team);
+
+        List<JobPosting> postings = seedJobPostings(companies);
+        int applicationCount = seedApplicationsAndInterviews(talent, postings, team);
+        ProjectSeedResult projectResult = seedProjectsAndBids(companies, talent);
+
+        seedNotifications(talent, companies.get(0));
+        seedFollows(talent);
+
+        // 40 talent + 3 real company_admin signups + 6 invited team members + 1 platform admin =
+        // 50 - companies.size() (5) isn't accounts, only the first 3 (real logins) are; the
+        // other 2 are content-only backing tenants (see seedCompanies()'s own comment).
+        int accountCount = talent.size() + 3 + team.size() + 1;
+
+        log.info("Demo content seeded: {} accounts, {} companies, {} posts, {} comments, {} applications, "
+                        + "{} projects, {} bids, {} rooms, {} conversations, {} notifications",
+                accountCount, companies.size(), posts.size(), commentCount, applicationCount,
+                projectResult.projects().size(), projectResult.bidCount(), roomCount, conversationCount, 4);
+        return new SeedSummary(accountCount, companies.size(), posts.size(), commentCount, applicationCount,
+                projectResult.projects().size(), projectResult.bidCount(), roomCount, conversationCount, 4);
     }
 
-    // §4.3 "~15 user profiles with avatars, skills, outcome counts, varying account ages and
-    // verification states." This entity's only avatar representation is avatarEmoji (no photo
-    // URL field exists on CandidateProfile) - the same mechanism every real and previously-
-    // seeded profile in this app already uses. Adding a new photo-URL column just for this
-    // overlay would be schema expansion beyond what's needed (the new Home UI's own
-    // ChampagneAvatar renders initials, never a photo, by deliberate design - see arena-web's
-    // Home rebuild), so profiles get realistic emoji avatars, not stock photography - a scoped
-    // trim from §4.3's literal wording, noted here rather than silently done.
-    private List<CandidateProfile> seedCandidates() {
+    // ---------------------------------------------------------------------------------------
+    // §1.1 Accounts
+    // ---------------------------------------------------------------------------------------
+
+    // 40 talent accounts (user01-user40), through the real signup endpoint's own service method.
+    // One (index 39, user40) is deliberately sparse - §1.1/§4.4's "thin state" test case: no
+    // skills, no bio, minimal experience, exactly what a real just-signed-up account looks like
+    // before onboarding, left that way rather than enriched like the other 39.
+    private List<CandidateProfile> seedTalentAccounts() {
         List<CandidateProfile> candidates = new ArrayList<>();
-        for (int i = 0; i < 15; i++) {
+        for (int i = 1; i <= 40; i++) {
             String name = IndianData.fullName();
-            Industry industry = IndianData.pick(IndianData.INDUSTRIES_LIST());
-            int experienceYears = IndianData.intBetween(0, 12);
-            Neighborhood home = IndianData.pick(NEIGHBORHOODS);
+            String email = String.format("user%02d@%s", i, EMAIL_DOMAIN);
+            authService.signUp(new SignUpRequest(name, email, DEMO_PASSWORD, "talent"));
+            User user = withDemoFlag(userRepository.findByEmailIgnoreCase(email).orElseThrow());
+            userRepository.save(user);
 
-            User user = userRepository.save(withDemoFlag(User.builder()
-                    .email("demo" + i + "." + System.nanoTime() + "@preview.arena.vikisol.dev")
-                    .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
-                    .name(name)
-                    .role(Role.TALENT)
-                    .handle(HandleGenerator.generate(name, userRepository::existsByHandle))
-                    .dateOfBirth(java.time.LocalDate.now().minusYears(IndianData.intBetween(22, 40)))
-                    .build()));
-
-            List<CandidateSkill> skills = i == 14
-                    // §4.4 edge case: one deliberately sparse profile, to test the thin state.
-                    ? List.of()
-                    : IndianData.pickN(IndianData.SKILLS_BY_INDUSTRY.get(industry), IndianData.intBetween(3, 6)).stream()
+            CandidateProfile profile = candidateProfileRepository.findByUserId(user.getId()).orElseThrow();
+            boolean sparse = i == 40;
+            if (!sparse) {
+                Industry industry = IndianData.pick(IndianData.INDUSTRIES_LIST());
+                int experienceYears = IndianData.intBetween(0, 12);
+                Neighborhood home = IndianData.pick(NEIGHBORHOODS);
+                List<CandidateSkill> skills = IndianData.pickN(IndianData.SKILLS_BY_INDUSTRY.get(industry), IndianData.intBetween(3, 6)).stream()
                         .map(s -> new CandidateSkill(s, IndianData.RANDOM.nextDouble() < 0.4))
                         .toList();
+                double jitterLat = home.lat() + (IndianData.RANDOM.nextDouble() - 0.5) * 0.01;
+                double jitterLng = home.lng() + (IndianData.RANDOM.nextDouble() - 0.5) * 0.01;
+                String geohash = GeohashUtil.encode(jitterLat, jitterLng);
+                double[] approx = GeohashUtil.decode(geohash);
 
-            double jitterLat = home.lat() + (IndianData.RANDOM.nextDouble() - 0.5) * 0.01;
-            double jitterLng = home.lng() + (IndianData.RANDOM.nextDouble() - 0.5) * 0.01;
-            String geohash = GeohashUtil.encode(jitterLat, jitterLng);
-            double[] approx = GeohashUtil.decode(geohash);
-
-            CandidateProfile profile = CandidateProfile.builder()
-                    .user(user)
-                    .name(name)
-                    .avatarEmoji(IndianData.pick(IndianData.AVATAR_EMOJIS))
-                    .title(i == 14 ? "New to Arena" : IndianData.pick(IndianData.TITLES_BY_INDUSTRY.get(industry)))
-                    .industry(industry)
-                    .location(home.name() + ", Hyderabad")
-                    .remote(IndianData.RANDOM.nextDouble() < 0.3)
-                    .skills(skills)
-                    .experienceYears(i == 14 ? 0 : experienceYears)
-                    .rateFloor(IndianData.intBetween(6, 35))
-                    .openTo(IndianData.pickN(List.of(OpenTo.FULL_TIME, OpenTo.CONTRACT, OpenTo.PROJECTS), IndianData.intBetween(1, 2)))
-                    .careerHealth(i == 14 ? 15 : IndianData.intBetween(35, 90))
-                    .consent(new ConsentSettings(IndianData.RANDOM.nextDouble() < 0.6, true))
-                    .autonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED, AutonomyLevel.AUTOPILOT)))
-                    .bio(i == 14 ? null : experienceYears + "+ years in " + industry.wireValue().toLowerCase() + ", " + home.name() + ".")
-                    .locationConsent(LocationConsent.PRECISE)
-                    .geohash(geohash)
-                    .approxLat(approx[0])
-                    .approxLng(approx[1])
-                    .build();
+                profile.setTitle(IndianData.pick(IndianData.TITLES_BY_INDUSTRY.get(industry)));
+                profile.setIndustry(industry);
+                profile.setLocation(home.name() + ", Hyderabad");
+                profile.setRemote(IndianData.RANDOM.nextDouble() < 0.3);
+                profile.setSkills(skills);
+                profile.setExperienceYears(experienceYears);
+                profile.setRateFloor(IndianData.intBetween(6, 35));
+                profile.setOpenTo(IndianData.pickN(List.of(OpenTo.FULL_TIME, OpenTo.CONTRACT, OpenTo.PROJECTS), IndianData.intBetween(1, 2)));
+                profile.setConsent(new ConsentSettings(IndianData.RANDOM.nextDouble() < 0.6, true));
+                profile.setAutonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED, AutonomyLevel.AUTOPILOT)));
+                profile.setBio(experienceYears + "+ years in " + industry.wireValue().toLowerCase() + ", " + home.name() + ".");
+                // First 25 get real precise-consent coordinates, spread across all 5
+                // neighborhoods, so Home/Map's nearby query has genuine density everywhere.
+                if (i <= 25) {
+                    profile.setLocationConsent(LocationConsent.PRECISE);
+                    profile.setGeohash(geohash);
+                    profile.setApproxLat(approx[0]);
+                    profile.setApproxLng(approx[1]);
+                }
+            }
             profile.setDemoContent(true);
             candidates.add(candidateProfileRepository.save(profile));
         }
         return candidates;
     }
 
-    // §4.3's ~12 activities + ~8 needs, §4.4's edge cases (one very long title, one zero-join
-    // activity). All startsAt values are relative to NOW (seed-time), unlike the original
-    // DataSeeder's posts - the whole point of this overlay is content that's still "today" when
-    // whoever's reviewing actually looks.
+    // 3 real company_admin signups (each starts its own tenant, per AuthService.signUp()), then
+    // enriched from a blank starter company into a named one - plus 2 lightweight extra tenants
+    // (no dedicated login) purely so §1.2's "5 demo companies" content target is met without
+    // fabricating logins nobody asked for. user41-43 are the 3 admins.
+    private List<EnterpriseProfile> seedCompanies() {
+        record CompanySeed(String name, String emoji, Industry industry) {}
+        List<CompanySeed> realSeeds = List.of(
+                new CompanySeed("Preview Labs", "🔶", Industry.ENGINEERING),
+                new CompanySeed("Northstar Design Co", "🎨", Industry.DESIGN),
+                new CompanySeed("Meridian Health Partners", "🩺", Industry.HEALTHCARE)
+        );
+        List<EnterpriseProfile> companies = new ArrayList<>();
+        for (int i = 0; i < realSeeds.size(); i++) {
+            CompanySeed seed = realSeeds.get(i);
+            String email = String.format("user%02d@%s", 41 + i, EMAIL_DOMAIN);
+            String adminName = seed.name() + " Talent Team";
+            authService.signUp(new SignUpRequest(adminName, email, DEMO_PASSWORD, "company_admin"));
+            User admin = userRepository.findByEmailIgnoreCase(email).orElseThrow();
+            admin.setDemoContent(true);
+            userRepository.save(admin);
+
+            EnterpriseProfile profile = enterpriseProfileRepository.findByUserId(admin.getId()).orElseThrow();
+            profile.setCompanyName(seed.name());
+            profile.setLogoEmoji(seed.emoji());
+            profile.setIndustry(seed.industry());
+            profile.setSize(CompanySize.S_11_50);
+            profile.setHiringFor(List.of("Engineers", "Designers", "Sales reps"));
+            profile.setPlan(Plan.PRO);
+            // Room for the 6 invited teammates (§1.1: 5 recruiter + 1 hiring_manager) plus the
+            // admin itself - seatsTotal gates TeamService.invite()'s own seat-limit check.
+            profile.setSeatsTotal(10);
+            profile.setUnlockCreditsTotal(25);
+            profile.setDemoContent(true);
+            companies.add(enterpriseProfileRepository.save(profile));
+
+            Membership membership = membershipRepository.findByUserId(admin.getId()).orElseThrow();
+            membership.setDemoContent(true);
+            membershipRepository.save(membership);
+        }
+
+        // 2 more, content-only (no dedicated admin login) - IndianData.COMPANIES gives real
+        // Indian-market company names/emojis distinct from the 3 above.
+        for (int i = 0; i < 2; i++) {
+            IndianData.CompanySeed seed = IndianData.COMPANIES.get(i);
+            User user = withDemoFlag(User.builder()
+                    .email(String.format("company-backing-%d.%s@%s", i, System.nanoTime(), EMAIL_DOMAIN))
+                    .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                    .name(seed.name() + " Talent Team")
+                    .role(Role.COMPANY_ADMIN)
+                    .handle(com.vikisol.arena.common.util.HandleGenerator.generate(seed.name() + " Talent Team", userRepository::existsByHandle))
+                    .build());
+            user = userRepository.save(user);
+            EnterpriseProfile profile = EnterpriseProfile.builder()
+                    .user(user).companyName(seed.name()).logoEmoji(seed.emoji())
+                    .industry(IndianData.pick(IndianData.INDUSTRIES_LIST()))
+                    .size(CompanySize.S_51_200).hiringFor(List.of("Engineers", "Support staff"))
+                    .plan(Plan.FREE).seatsUsed(1).seatsTotal(3).unlockCreditsUsed(0).unlockCreditsTotal(10)
+                    .build();
+            profile.setDemoContent(true);
+            profile = enterpriseProfileRepository.save(profile);
+            Membership membership = Membership.builder().user(user).tenant(profile).status(MembershipStatus.ACTIVE).joinedAt(user.getCreatedAt()).build();
+            membership.setDemoContent(true);
+            membershipRepository.save(membership);
+            companies.add(profile);
+        }
+        return companies;
+    }
+
+    // §1.1's remaining roles: 5 recruiter + 1 hiring_manager (user44-49), through the REAL
+    // invite -> accept flow against the first real company - the only path this product has for
+    // these two roles (AuthService.signUp() refuses them outright).
+    private List<User> seedEnterpriseTeam(EnterpriseProfile primaryCompany) {
+        UUID adminId = primaryCompany.getUser().getId();
+        List<User> team = new ArrayList<>();
+        record Invitee(String name, Role role) {}
+        List<Invitee> invitees = List.of(
+                new Invitee("Priyanka Rao", Role.RECRUITER),
+                new Invitee("Karthik Iyer", Role.RECRUITER),
+                new Invitee("Divya Menon", Role.RECRUITER),
+                new Invitee("Rahul Kapoor", Role.RECRUITER),
+                new Invitee("Sneha Pillai", Role.RECRUITER),
+                new Invitee("Arjun Nair", Role.HIRING_MANAGER)
+        );
+        for (int i = 0; i < invitees.size(); i++) {
+            Invitee invitee = invitees.get(i);
+            String email = String.format("user%02d@%s", 44 + i, EMAIL_DOMAIN);
+            teamService.invite(adminId, new InviteMemberRequest(email, invitee.role().wireValue()));
+            var invitation = invitationRepository.findByTenantIdAndEmailIgnoreCase(primaryCompany.getId(), email).orElseThrow();
+            invitation.setDemoContent(true);
+            invitationRepository.save(invitation);
+
+            User user = teamService.acceptInvitation(invitation.getToken(), invitee.name(), DEMO_PASSWORD);
+            user.setDemoContent(true);
+            userRepository.save(user);
+            Membership membership = membershipRepository.findByUserId(user.getId()).orElseThrow();
+            membership.setDemoContent(true);
+            membershipRepository.save(membership);
+            team.add(user);
+        }
+        return team;
+    }
+
+    // §1.1 platform_admin - no self-service path exists for this role anywhere in this product
+    // (by design, for security - see the class-level comment). The original DataSeeder already
+    // created exactly one (admin@vikisol.dev) this same direct way; user50 mirrors it rather
+    // than pretending a "real path" exists where none does.
+    private User seedPlatformAdminAccount() {
+        String email = String.format("user50@%s", EMAIL_DOMAIN);
+        User user = withDemoFlag(User.builder()
+                .email(email).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                .name("Demo Platform Admin").role(Role.PLATFORM_ADMIN)
+                .handle(com.vikisol.arena.common.util.HandleGenerator.generate("Demo Platform Admin", userRepository::existsByHandle))
+                .build());
+        return userRepository.save(user);
+    }
+
+    private User withDemoFlag(User user) {
+        user.setDemoContent(true);
+        return user;
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // §1.2 Content
+    // ---------------------------------------------------------------------------------------
+
+    private record ActivitySeed(String body, Neighborhood where, PostVisibility visibility, Integer capacity, int startsInHours, String meetingPoint) {}
+    private record NeedSeed(String body) {}
+
     private List<Post> seedPosts(List<CandidateProfile> candidates) {
-        record ActivitySeed(String body, Neighborhood where, PostVisibility visibility, Integer capacity, int startsInHours, String meetingPoint) {}
-        List<ActivitySeed> activitySeeds = List.of(
+        List<ActivitySeed> activityTemplates = List.of(
                 new ActivitySeed("Badminton doubles tonight, need 2 more - court's already booked", NEIGHBORHOODS.get(0), PostVisibility.PUBLIC, 4, 3, "Smash Badminton Academy, Gachibowli - Court 2"),
                 new ActivitySeed("Morning cricket - 6-a-side, casual, all skill levels welcome", NEIGHBORHOODS.get(3), PostVisibility.PUBLIC, 12, 14, "Kondapur Community Ground, near the water tank"),
                 new ActivitySeed("UI/UX design jam - bring a half-finished project, leave with feedback", NEIGHBORHOODS.get(1), PostVisibility.APPROVAL, 8, 5, "WeWork Gopanapally, 3rd floor breakout room"),
@@ -225,34 +393,64 @@ public class DemoContentService {
                 new ActivitySeed("Startup weekend hackathon kickoff - form teams, pitch by Sunday", NEIGHBORHOODS.get(0), PostVisibility.APPROVAL, 30, 20, "T-Hub, Gachibowli - main auditorium"),
                 new ActivitySeed("Sci-fi book club - this month's pick is a Ted Chiang collection", NEIGHBORHOODS.get(3), PostVisibility.PUBLIC, 8, 6, "Roastery Coffee House, Kondapur"),
                 new ActivitySeed("Football, 5-a-side, turf's booked till 9", NEIGHBORHOODS.get(1), PostVisibility.PUBLIC, 10, 4, "Play Arena Turf, Gopanapally"),
-                new ActivitySeed("Sunrise photography walk - HITEC City to Madhapur, bring any camera", NEIGHBORHOODS.get(2), PostVisibility.PUBLIC, 6, 60, "Cyber Towers main gate, HITEC City"),
-                // §4.4 edge case: an activity with zero joins - nobody's said yes yet.
+                new ActivitySeed("Sunrise photography walk - HITEC City to Madhapur, bring any camera", NEIGHBORHOODS.get(4), PostVisibility.PUBLIC, 6, 60, "Cyber Towers main gate, HITEC City"),
                 new ActivitySeed("Chess meetup - bring a board if you have one, a few spares available", NEIGHBORHOODS.get(0), PostVisibility.APPROVAL, 8, 30, "Gachibowli Community Hall, room 4"),
                 new ActivitySeed("Sunrise yoga - all levels, mats available to borrow", NEIGHBORHOODS.get(3), PostVisibility.PUBLIC, 15, 16, "Kondapur District Park, near the jogging track"),
-                new ActivitySeed("Board games evening - Catan, Codenames, whatever people bring", NEIGHBORHOODS.get(1), PostVisibility.PUBLIC, 6, 7, "Community clubhouse, Gopanapally Phase 2")
+                new ActivitySeed("Board games evening - Catan, Codenames, whatever people bring", NEIGHBORHOODS.get(1), PostVisibility.PUBLIC, 6, 7, "Community clubhouse, Gopanapally Phase 2"),
+                new ActivitySeed("Weekend trek - Ananthagiri Hills, early start, first-timers welcome", NEIGHBORHOODS.get(3), PostVisibility.APPROVAL, 6, 50, "Vikarabad bus stand, 5:30am sharp"),
+                new ActivitySeed("Volleyball, beach-style on sand court", NEIGHBORHOODS.get(4), PostVisibility.PUBLIC, 12, 26, "Hitec City Sports Complex, court 1"),
+                new ActivitySeed("Pottery workshop - beginner friendly, materials provided", NEIGHBORHOODS.get(2), PostVisibility.APPROVAL, 8, 34, "ClayWorks Studio, Madhapur"),
+                new ActivitySeed("Running club - 5K easy pace, then coffee", NEIGHBORHOODS.get(0), PostVisibility.PUBLIC, 20, 15, "Gachibowli Stadium outer track, gate 2"),
+                new ActivitySeed("Live music jam - bring an instrument or just listen", NEIGHBORHOODS.get(1), PostVisibility.PUBLIC, 15, 28, "Rooftop, Gopanapally Phase 1"),
+                new ActivitySeed("Table tennis league night - singles bracket, all levels", NEIGHBORHOODS.get(3), PostVisibility.PUBLIC, 8, 12, "Kondapur Sports Club"),
+                new ActivitySeed("Career-switchers meetup - swap notes on moving into tech", NEIGHBORHOODS.get(2), PostVisibility.APPROVAL, 12, 45, "Madhapur Co-working Hub, event room"),
+                new ActivitySeed("Weekend farmers market volunteer morning", NEIGHBORHOODS.get(4), PostVisibility.PUBLIC, 10, 55, "Hitec City Community Ground"),
+                // §1.2/§4.4 edge case - zero joins, nobody's said yes yet.
+                new ActivitySeed("Late-night coding jam - bring a side project, snacks provided", NEIGHBORHOODS.get(0), PostVisibility.APPROVAL, 10, 70, "Gachibowli maker space, back room"),
+                new ActivitySeed("Salsa dancing - absolute beginners welcome, no partner needed", NEIGHBORHOODS.get(1), PostVisibility.PUBLIC, 16, 22, "Dance Studio Gopanapally"),
+                new ActivitySeed("Rock climbing gym session - top-rope, gear rental on site", NEIGHBORHOODS.get(3), PostVisibility.PUBLIC, 6, 18, "Boulder Box Kondapur"),
+                new ActivitySeed("Investing 101 - a casual, no-pitch discussion over coffee", NEIGHBORHOODS.get(2), PostVisibility.APPROVAL, 10, 65, "Third Wave Coffee, Madhapur")
         );
-
-        record NeedSeed(String body) {}
-        List<NeedSeed> needSeeds = List.of(
-                new NeedSeed("Looking for a Figma expert to review a portfolio - 30 minutes, happy to pay"),
+        List<NeedSeed> needTemplates = List.of(
+                new NeedSeed("Need someone experienced in both React Native and native iOS to help debug a really "
+                        + "specific animation performance issue that only shows up on older Android devices under "
+                        + "memory pressure, happy to pay for a couple of hours of pairing this week if anyone's free"),
                 new NeedSeed("Anyone have a spare badminton racket for tonight's game near Gachibowli?"),
                 new NeedSeed("Good GST-compliant invoicing tool for freelancers? Tired of doing this by hand"),
                 new NeedSeed("Need 2 more flatmates near Kondapur - IT professionals preferred, move-in this month"),
                 new NeedSeed("Looking for a daily carpool partner, Gachibowli to Madhapur commute"),
                 new NeedSeed("Searching for a Spring Boot mentor - a couple of hours a week, can pay"),
                 new NeedSeed("Anyone selling a used standing desk in Hyderabad? Preferably Gachibowli area"),
-                // §4.4 edge case: one very long post title/body.
-                new NeedSeed("Need someone experienced in both React Native and native iOS to help debug a really "
-                        + "specific animation performance issue that only shows up on older Android devices under "
-                        + "memory pressure, happy to pay for a couple of hours of pairing this week if anyone's free")
+                new NeedSeed("Looking for a Figma expert to review a portfolio - 30 minutes, happy to pay"),
+                new NeedSeed("Need a second opinion on a freelance contract before I sign it"),
+                new NeedSeed("Anyone know a reliable AC repair person near Kondapur?"),
+                new NeedSeed("Looking for a co-founder with a sales background, early-stage SaaS idea"),
+                new NeedSeed("Need someone to proofread a grant application, due Friday"),
+                new NeedSeed("Anyone have a referral at Zoho or Freshworks? Applying this week"),
+                new NeedSeed("Looking for a Hindi-English translator for a short video, one-off gig"),
+                new NeedSeed("Need help moving a couch this Saturday, Gachibowli to Madhapur"),
+                new NeedSeed("Anyone rent out a DSLR for a weekend shoot?"),
+                new NeedSeed("Looking for a running partner, early mornings, Gachibowli area"),
+                new NeedSeed("Need advice on switching from a service company to a product company"),
+                new NeedSeed("Anyone selling a used bicycle, road or hybrid, Hyderabad"),
+                new NeedSeed("Looking for a part-time bookkeeper for a small business, few hours a week"),
+                new NeedSeed("Need someone who's done a UK visa application recently - a few questions"),
+                new NeedSeed("Anyone have a spare desk chair? Working from home now"),
+                new NeedSeed("Looking for a design mentor for a portfolio review before interviews start"),
+                new NeedSeed("Need a plumber recommendation near Kondapur, nothing urgent"),
+                new NeedSeed("Anyone up for a language exchange - Telugu for Spanish?")
         );
 
         List<Post> saved = new ArrayList<>();
-        for (int i = 0; i < activitySeeds.size(); i++) {
-            ActivitySeed seed = activitySeeds.get(i);
+        for (int i = 0; i < activityTemplates.size(); i++) {
+            ActivitySeed seed = activityTemplates.get(i);
             CandidateProfile author = candidates.get(i % candidates.size());
             String geohash = GeohashUtil.encode(seed.where().lat(), seed.where().lng());
             double[] approx = GeohashUtil.decode(geohash);
+            Integer capacity = seed.capacity();
+            // Vary joins from 0 to full across the set (§4.4 edge case: index 20's activity
+            // above is one of the ones that lands at zero).
+            int spotsFilled = capacity == null ? 0 : (i == 20 ? 0 : IndianData.intBetween(0, capacity));
             Post post = Post.builder()
                     .authorUser(author.getUser())
                     .intentType(PostIntentType.ACTIVITY)
@@ -260,23 +458,23 @@ public class DemoContentService {
                     .locationText(seed.where().name())
                     .audience(PostAudience.GLOBAL)
                     .visibility(seed.visibility())
-                    .capacity(seed.capacity())
-                    .status(PostStatus.OPEN)
+                    .capacity(capacity)
+                    .spotsFilled(spotsFilled)
+                    .status(capacity != null && spotsFilled >= capacity ? PostStatus.FULL : PostStatus.OPEN)
                     .startsAt(Instant.now().plus(Duration.ofHours(seed.startsInHours())))
                     .exactMeetingPoint(seed.meetingPoint())
-                    .geohash(geohash)
-                    .approxLat(approx[0])
-                    .approxLng(approx[1])
+                    .geohash(geohash).approxLat(approx[0]).approxLng(approx[1])
                     .build();
             post.setDemoContent(true);
             saved.add(postRepository.save(post));
         }
-        for (int i = 0; i < needSeeds.size(); i++) {
-            CandidateProfile author = candidates.get((i + 3) % candidates.size());
+        for (int i = 0; i < needTemplates.size(); i++) {
+            CandidateProfile author = candidates.get((i + 7) % candidates.size());
+            // §4.4 edge case: the first need (index 0) carries a deliberately very long body.
             Post post = Post.builder()
                     .authorUser(author.getUser())
                     .intentType(PostIntentType.ASK)
-                    .body(needSeeds.get(i).body())
+                    .body(needTemplates.get(i).body())
                     .audience(PostAudience.GLOBAL)
                     .visibility(PostVisibility.PUBLIC)
                     .status(PostStatus.OPEN)
@@ -287,29 +485,68 @@ public class DemoContentService {
         return saved;
     }
 
-    // §4.3 "~5 conversations" (a leaner 2 for this pass - group rooms, the type this data model
-    // actually supports today; see removeAll()'s own note on why direct-message/bid-thread
-    // conversation types aren't seeded - Room is 1:1 with Post in the current schema, a real
-    // structural gap for Inbox screen 5, not something to paper over with fabricated rows here).
-    // §4.4 edge case: one very long last message.
+    // ~60+ comments spread unevenly, reactions + saves at uneven density - some posts busy, some
+    // with one comment, most with none, matching §1.2's own "not more than needed" instruction.
+    private int seedCommentsReactionsSaves(List<Post> posts, List<CandidateProfile> candidates) {
+        List<String> commentTemplates = List.of(
+                "Count me in!", "What time exactly?", "Is this still happening?", "Can I bring a friend?",
+                "Perfect, see you there.", "Following - interested if a spot opens up.",
+                "Been wanting to try this, thanks for organizing.", "Any prep needed beforehand?",
+                "Same, this is exactly what I was looking for.", "How do I get there by public transport?",
+                "Second this - great idea.", "Is there a WhatsApp group for coordination?"
+        );
+        int commentCount = 0;
+        for (int i = 0; i < posts.size(); i++) {
+            Post post = posts.get(i);
+            // Skewed distribution: ~15% of posts get 4-6 comments, ~35% get 1-2, the rest get none.
+            int n = i % 7 == 0 ? IndianData.intBetween(4, 6) : i % 3 == 0 ? IndianData.intBetween(1, 2) : 0;
+            for (int c = 0; c < n; c++) {
+                CandidateProfile commenter = candidates.get((i * 3 + c + 1) % candidates.size());
+                PostComment comment = PostComment.builder()
+                        .post(post).authorUser(commenter.getUser())
+                        .content(IndianData.pick(commentTemplates))
+                        .build();
+                comment.setDemoContent(true);
+                postCommentRepository.save(comment);
+                commentCount++;
+            }
+            // Reactions/saves at uneven, unrelated density.
+            int reactors = IndianData.intBetween(0, Math.min(6, candidates.size()));
+            for (CandidateProfile reactor : IndianData.pickN(candidates, reactors)) {
+                if (reactor.getUser().getId().equals(post.getAuthorUser().getId())) continue;
+                PostReaction reaction = PostReaction.builder().post(post).user(reactor.getUser()).build();
+                reaction.setDemoContent(true);
+                postReactionRepository.save(reaction);
+            }
+            if (IndianData.RANDOM.nextDouble() < 0.25) {
+                CandidateProfile saver = IndianData.pick(candidates);
+                if (!saver.getUser().getId().equals(post.getAuthorUser().getId())) {
+                    PostSave save = PostSave.builder().post(post).user(saver.getUser()).build();
+                    save.setDemoContent(true);
+                    postSaveRepository.save(save);
+                }
+            }
+        }
+        return commentCount;
+    }
+
+    // Group activity rooms with pinned meeting points - approve one join per selected activity
+    // post, create the Room, seed a short (or, for one, §4.4's deliberately very long) message
+    // thread.
     private int seedRoomsAndMessages(List<Post> posts, List<CandidateProfile> candidates) {
-        int[] roomPostIndexes = {0, 4}; // badminton (short thread) + study group (long last message)
+        int[] roomPostIndexes = {0, 1, 4, 9}; // badminton, cricket, study group, chess
         int roomCount = 0;
-        for (int postIndex : roomPostIndexes) {
-            Post post = posts.get(postIndex);
-            CandidateProfile joiner = candidates.get((postIndex + 5) % candidates.size());
+        for (int idx = 0; idx < roomPostIndexes.length; idx++) {
+            Post post = posts.get(roomPostIndexes[idx]);
+            CandidateProfile joiner = candidates.get((roomPostIndexes[idx] + 5) % candidates.size());
             if (joiner.getUser().getId().equals(post.getAuthorUser().getId())) {
-                joiner = candidates.get((postIndex + 6) % candidates.size());
+                joiner = candidates.get((roomPostIndexes[idx] + 6) % candidates.size());
             }
 
-            PostJoinRequest join = PostJoinRequest.builder()
-                    .post(post).user(joiner.getUser())
-                    .status(PostJoinStatus.APPROVED).decidedAt(Instant.now())
-                    .build();
+            PostJoinRequest join = PostJoinRequest.builder().post(post).user(joiner.getUser())
+                    .status(PostJoinStatus.APPROVED).decidedAt(Instant.now()).build();
             join.setDemoContent(true);
             postJoinRequestRepository.save(join);
-            post.setSpotsFilled(post.getSpotsFilled() + 1);
-            postRepository.save(post);
 
             Room room = Room.builder().post(post).build();
             room.setDemoContent(true);
@@ -322,16 +559,18 @@ public class DemoContentService {
             member.setDemoContent(true);
             roomMemberRepository.save(member);
 
-            List<String> messages = postIndex == 0
-                    ? List.of("Count me in - what time should we get there?", "6pm sharp, bring your own racket if you have one.", "Perfect, see you there!")
-                    : List.of("Is this still happening today?", "Yes! Room 2nd floor, we've got the whole session booked.",
-                        "One more thing before we start - if anyone hasn't already, it'd help a lot if you could skim through the "
-                        + "three chapters on hooks and context we talked about last week, since today's session is going to build "
-                        + "directly on that and we'd rather spend the time actually working through the tricky parts in the real "
-                        + "codebase together instead of re-explaining the basics from scratch for whoever hasn't had a chance yet");
+            List<String> messages = idx == 2
+                    // §4.4 edge case: a deliberately very long last message.
+                    ? List.of("Is this still happening today?", "Yes! Room 2nd floor, we've got the whole session booked.",
+                        "One more thing before we start - if anyone hasn't already, it'd help a lot if you could skim "
+                        + "through the three chapters on hooks and context we talked about last week, since today's "
+                        + "session is going to build directly on that and we'd rather spend the time actually working "
+                        + "through the tricky parts in the real codebase together instead of re-explaining the basics "
+                        + "from scratch for whoever hasn't had a chance yet")
+                    : List.of("Count me in - what time should we get there?", "Sounds good, see you there!", "Perfect.");
             User[] senders = { joiner.getUser(), post.getAuthorUser(), joiner.getUser() };
             for (int i = 0; i < messages.size(); i++) {
-                RoomMessage msg = RoomMessage.builder().room(room).sender(senders[i]).content(messages.get(i)).build();
+                RoomMessage msg = RoomMessage.builder().room(room).sender(senders[i % senders.length]).content(messages.get(i)).build();
                 msg.setDemoContent(true);
                 roomMessageRepository.save(msg);
             }
@@ -340,68 +579,72 @@ public class DemoContentService {
         return roomCount;
     }
 
-    // A single lightweight demo company as FK backing for demo job postings/projects only -
-    // ARENA-PHASE-1-BUILD.md's current run explicitly excludes company pages ("don't start...
-    // company pages, and don't restyle them in passing"), so this is intentionally NOT §4.3's
-    // "~4 company pages with banners and posts" - just enough of an EnterpriseProfile to satisfy
-    // JobPosting.enterprise's required FK, not a company-page seeding deliverable in its own right.
-    private EnterpriseProfile seedDemoCompany() {
-        User admin = userRepository.save(withDemoFlag(User.builder()
-                .email("demo.company." + System.nanoTime() + "@preview.arena.vikisol.dev")
-                .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
-                .name("Preview Labs Talent Team")
-                .role(Role.COMPANY_ADMIN)
-                .handle(HandleGenerator.generate("Preview Labs Talent Team", userRepository::existsByHandle))
-                .build()));
-        EnterpriseProfile profile = EnterpriseProfile.builder()
-                .user(admin)
-                .companyName("Preview Labs")
-                .logoEmoji("🔶")
-                .industry(Industry.ENGINEERING)
-                .size(CompanySize.S_11_50)
-                .hiringFor(List.of("Engineers", "Designers"))
-                .plan(Plan.PRO)
-                .seatsUsed(1)
-                .seatsTotal(3)
-                .unlockCreditsUsed(0)
-                .unlockCreditsTotal(10)
-                .build();
-        profile.setDemoContent(true);
-        profile = enterpriseProfileRepository.save(profile);
-        Membership membership = Membership.builder().user(admin).tenant(profile).status(MembershipStatus.ACTIVE).joinedAt(admin.getCreatedAt()).build();
-        membership.setDemoContent(true);
-        membershipRepository.save(membership);
-        return profile;
+    // §1.2 "direct messages, and bid threads" - Conversation/ThreadMessage (messaging package),
+    // a genuinely separate mechanism from Room/RoomMessage (which is 1:1 with a Post). Real
+    // service calls (ConversationService.getOrCreate/sendMessage), same as everything else here.
+    private int seedDirectAndBidConversations(List<CandidateProfile> candidates, EnterpriseProfile company, List<User> team) {
+        int count = 0;
+        // 2 plain direct messages between candidates.
+        for (int i = 0; i < 2; i++) {
+            User a = candidates.get(i).getUser();
+            User b = candidates.get(i + 10).getUser();
+            var conversation = conversationService.getOrCreate(a.getId(), b.getId(), null);
+            conversationService.sendMessage(a.getId(), UUID.fromString(conversation.id()), "Hey, saw your post - still looking for someone?");
+            conversationService.sendMessage(b.getId(), UUID.fromString(conversation.id()), "Yep! Are you interested?");
+            count++;
+        }
+        // 2 "bid thread" style conversations - a candidate messaging the company directly about
+        // a role, context field naming what it's about.
+        User recruiter = team.stream().filter(u -> u.getRole() == Role.RECRUITER).findFirst().orElse(company.getUser());
+        for (int i = 0; i < 2; i++) {
+            User candidate = candidates.get(i + 20).getUser();
+            var conversation = conversationService.getOrCreate(candidate.getId(), recruiter.getId(), "Re: Frontend Developer role");
+            conversationService.sendMessage(candidate.getId(), UUID.fromString(conversation.id()), "Hi, I saw the Frontend Developer opening - is it still open?");
+            conversationService.sendMessage(recruiter.getId(), UUID.fromString(conversation.id()), "Yes! Feel free to apply through the postings page.");
+            count++;
+        }
+        return count;
     }
 
-    // §4.3 "~6 projects and jobs, with budgets and bid counts, some with existing bids" - a
-    // leaner 4 job postings + 2 projects for this pass (Work screen isn't in this batch; see
-    // this service's class comment). Real, varied, TODAY-relative where that matters (postings
-    // don't carry a startsAt, so recency comes from createdAt alone, left at seed-time - no
-    // backdating needed, unlike the original DataSeeder's older-looking postings).
-    private List<JobPosting> seedJobPostings(EnterpriseProfile company) {
-        record JobSeed(String title, Industry industry, String location, boolean remote, EmploymentType type, int salaryMin, int salaryMax) {}
-        List<JobSeed> seeds = List.of(
-                new JobSeed("Frontend Developer", Industry.ENGINEERING, "Gachibowli, Hyderabad", false, EmploymentType.FULL_TIME, 8, 16),
-                new JobSeed("Product Designer", Industry.DESIGN, "Madhapur, Hyderabad", true, EmploymentType.FULL_TIME, 10, 18),
-                new JobSeed("DevOps Engineer", Industry.ENGINEERING, "Kondapur, Hyderabad", false, EmploymentType.CONTRACT, 12, 22),
-                new JobSeed("Business Development Intern", Industry.SALES, "Gopanapally, Hyderabad", false, EmploymentType.INTERNSHIP, 2, 4)
+    // §1.2's 20 job postings, spread across the 5 companies.
+    private List<JobPosting> seedJobPostings(List<EnterpriseProfile> companies) {
+        record JobSeed(String title, Industry industry, EmploymentType type) {}
+        List<JobSeed> titles = List.of(
+                new JobSeed("Frontend Developer", Industry.ENGINEERING, EmploymentType.FULL_TIME),
+                new JobSeed("Backend Developer", Industry.ENGINEERING, EmploymentType.FULL_TIME),
+                new JobSeed("DevOps Engineer", Industry.ENGINEERING, EmploymentType.CONTRACT),
+                new JobSeed("Product Designer", Industry.DESIGN, EmploymentType.FULL_TIME),
+                new JobSeed("UI/UX Designer", Industry.DESIGN, EmploymentType.CONTRACT),
+                new JobSeed("Business Development Manager", Industry.SALES, EmploymentType.FULL_TIME),
+                new JobSeed("Account Executive", Industry.SALES, EmploymentType.FULL_TIME),
+                new JobSeed("Registered Nurse", Industry.HEALTHCARE, EmploymentType.FULL_TIME),
+                new JobSeed("Clinical Coordinator", Industry.HEALTHCARE, EmploymentType.CONTRACT),
+                new JobSeed("Logistics Coordinator", Industry.LOGISTICS, EmploymentType.FULL_TIME),
+                new JobSeed("Supply Chain Analyst", Industry.LOGISTICS, EmploymentType.FULL_TIME),
+                new JobSeed("Data Engineer", Industry.ENGINEERING, EmploymentType.FULL_TIME),
+                new JobSeed("Full Stack Developer", Industry.ENGINEERING, EmploymentType.FULL_TIME),
+                new JobSeed("Design Lead", Industry.DESIGN, EmploymentType.FULL_TIME),
+                new JobSeed("Sales Manager", Industry.SALES, EmploymentType.FULL_TIME),
+                new JobSeed("Healthcare Analyst", Industry.HEALTHCARE, EmploymentType.CONTRACT),
+                new JobSeed("Warehouse Manager", Industry.LOGISTICS, EmploymentType.FULL_TIME),
+                new JobSeed("Business Development Intern", Industry.SALES, EmploymentType.INTERNSHIP),
+                new JobSeed("Junior Frontend Developer", Industry.ENGINEERING, EmploymentType.INTERNSHIP),
+                new JobSeed("Visual Designer", Industry.DESIGN, EmploymentType.FULL_TIME)
         );
         List<JobPosting> postings = new ArrayList<>();
-        for (JobSeed seed : seeds) {
+        for (int i = 0; i < titles.size(); i++) {
+            JobSeed seed = titles.get(i);
+            EnterpriseProfile company = companies.get(i % companies.size());
             List<String> skills = IndianData.pickN(IndianData.SKILLS_BY_INDUSTRY.get(seed.industry()), IndianData.intBetween(3, 5));
+            int salaryMin = IndianData.intBetween(6, 20);
             JobPosting posting = JobPosting.builder()
-                    .enterprise(company)
-                    .title(seed.title())
-                    .industry(seed.industry())
-                    .location(seed.location())
-                    .remote(seed.remote())
-                    .employmentType(seed.type())
-                    .salaryMin(seed.salaryMin())
-                    .salaryMax(seed.salaryMax())
+                    .enterprise(company).title(seed.title()).industry(seed.industry())
+                    .location(IndianData.pick(NEIGHBORHOODS).name() + ", Hyderabad")
+                    .remote(IndianData.RANDOM.nextDouble() < 0.35).employmentType(seed.type())
+                    .salaryMin(salaryMin).salaryMax(salaryMin + IndianData.intBetween(4, 15))
                     .skills(skills)
-                    .description("Preview Labs is hiring a " + seed.title().toLowerCase() + " to join a small, fast-moving team in Hyderabad.")
-                    .status(PostingStatus.OPEN)
+                    .description(company.getCompanyName() + " is hiring a " + seed.title().toLowerCase() + " to join a growing team in Hyderabad.")
+                    .status(IndianData.RANDOM.nextDouble() < 0.85 ? PostingStatus.OPEN : PostingStatus.PAUSED)
                     .build();
             posting.setDemoContent(true);
             postings.add(jobPostingRepository.save(posting));
@@ -409,83 +652,155 @@ public class DemoContentService {
         return postings;
     }
 
-    private List<Project> seedProjects(EnterpriseProfile company, List<CandidateProfile> candidates) {
+    // §1.2's 15 applications at varied pipeline stages.
+    private int seedApplicationsAndInterviews(List<CandidateProfile> candidates, List<JobPosting> postings, List<User> team) {
+        List<JobPosting> open = postings.stream().filter(p -> p.getStatus() == PostingStatus.OPEN).toList();
+        if (open.isEmpty()) return 0;
+        List<ApplicationStage> stagePool = List.of(
+                ApplicationStage.APPLIED, ApplicationStage.APPLIED, ApplicationStage.SCREENING,
+                ApplicationStage.SCREENING, ApplicationStage.INTERVIEW, ApplicationStage.OFFER, ApplicationStage.REJECTED);
+        int count = 0;
+        for (int i = 0; i < 15 && i < candidates.size(); i++) {
+            CandidateProfile candidate = candidates.get(i);
+            JobPosting posting = IndianData.pick(open);
+            if (applicationRepository.existsByCandidateIdAndJobPostingId(candidate.getId(), posting.getId())) continue;
+            ApplicationStage stage = IndianData.pick(stagePool);
+            Application application = Application.builder()
+                    .candidate(candidate).jobPosting(posting).stage(stage)
+                    .appliedAt(Instant.now().minus(Duration.ofDays(IndianData.intBetween(0, 10))))
+                    .build();
+            application.setDemoContent(true);
+            application = applicationRepository.save(application);
+            count++;
+
+            if (stage == ApplicationStage.INTERVIEW || stage == ApplicationStage.OFFER) {
+                List<InterviewSlot> slots = new ArrayList<>();
+                Interview interview = Interview.builder().application(application).status(InterviewStatus.PROPOSED).build();
+                for (int d = 1; d <= 3; d++) {
+                    InterviewSlot slot = InterviewSlot.builder().interview(interview)
+                            .start(Instant.now().plus(Duration.ofDays(d)).plus(Duration.ofHours(14)))
+                            .durationMinutes(45).build();
+                    slot.setDemoContent(true);
+                    slots.add(slot);
+                }
+                interview.setProposedSlots(slots);
+                interview.setDemoContent(true);
+                if (stage == ApplicationStage.OFFER) interview.setStatus(InterviewStatus.CONFIRMED);
+                interview = interviewRepository.save(interview);
+                if (stage == ApplicationStage.OFFER && !interview.getProposedSlots().isEmpty()) {
+                    interview.setConfirmedSlotId(interview.getProposedSlots().get(0).getId());
+                    interviewRepository.save(interview);
+                }
+            }
+        }
+        return count;
+    }
+
+    // §1.2's 12 projects, 0-6 bids each, two fully resolved (won/lost visible).
+    private record ProjectSeedResult(List<Project> projects, int bidCount) {}
+    private ProjectSeedResult seedProjectsAndBids(List<EnterpriseProfile> companies, List<CandidateProfile> candidates) {
         record ProjectSeed(String title, Industry industry, int budgetMin, int budgetMax, int weeks, int bidCount) {}
         List<ProjectSeed> seeds = List.of(
                 new ProjectSeed("Landing page redesign - short-term engagement", Industry.DESIGN, 30000, 60000, 3, 3),
-                new ProjectSeed("Backend API cleanup and documentation", Industry.ENGINEERING, 40000, 80000, 4, 0)
+                new ProjectSeed("Backend API cleanup and documentation", Industry.ENGINEERING, 40000, 80000, 4, 0),
+                new ProjectSeed("Mobile app QA pass before launch", Industry.ENGINEERING, 25000, 50000, 2, 5),
+                new ProjectSeed("Brand identity refresh", Industry.DESIGN, 50000, 100000, 5, 6),
+                new ProjectSeed("Sales deck + pitch narrative for Series A", Industry.SALES, 20000, 40000, 2, 2),
+                new ProjectSeed("Patient intake flow redesign", Industry.HEALTHCARE, 35000, 70000, 4, 0),
+                new ProjectSeed("Warehouse inventory system audit", Industry.LOGISTICS, 30000, 55000, 3, 1),
+                new ProjectSeed("Data pipeline migration to a new warehouse", Industry.ENGINEERING, 60000, 120000, 6, 4),
+                new ProjectSeed("Illustration set for onboarding flow", Industry.DESIGN, 15000, 30000, 2, 3),
+                new ProjectSeed("Cold outreach sequence + CRM setup", Industry.SALES, 18000, 35000, 2, 0),
+                new ProjectSeed("Compliance audit for telemedicine flow", Industry.HEALTHCARE, 40000, 80000, 4, 2),
+                new ProjectSeed("Route optimization proof-of-concept", Industry.LOGISTICS, 45000, 90000, 5, 1)
         );
         List<Project> projects = new ArrayList<>();
-        for (ProjectSeed seed : seeds) {
+        int totalBids = 0;
+        for (int i = 0; i < seeds.size(); i++) {
+            ProjectSeed seed = seeds.get(i);
+            EnterpriseProfile company = companies.get(i % companies.size());
             List<String> skills = IndianData.pickN(IndianData.SKILLS_BY_INDUSTRY.get(seed.industry()), IndianData.intBetween(3, 4));
             Project project = Project.builder()
-                    .postedByUser(company.getUser())
-                    .title(seed.title())
-                    .description("A focused, fixed-scope engagement. Clear deliverables, fast turnaround.")
-                    .budgetMin(seed.budgetMin())
-                    .budgetMax(seed.budgetMax())
-                    .durationWeeks(seed.weeks())
-                    .skills(skills)
-                    .status(ProjectStatus.OPEN)
+                    .postedByUser(company.getUser()).title(seed.title())
+                    .description("A focused, fixed-scope engagement for a " + seed.industry().wireValue().toLowerCase() + " specialist. Clear deliverables, fast turnaround.")
+                    .budgetMin(seed.budgetMin()).budgetMax(seed.budgetMax()).durationWeeks(seed.weeks())
+                    .skills(skills).status(ProjectStatus.OPEN)
                     .endsAt(Instant.now().plus(Duration.ofDays(IndianData.intBetween(5, 20))))
                     .build();
             project.setDemoContent(true);
             project = projectRepository.save(project);
 
+            List<Bid> bids = new ArrayList<>();
             Set<CandidateProfile> bidders = new HashSet<>(IndianData.pickN(candidates, Math.min(seed.bidCount(), candidates.size())));
             for (CandidateProfile bidder : bidders) {
-                int amount = seed.budgetMin() + IndianData.intBetween(0, seed.budgetMax() - seed.budgetMin());
-                Bid bid = Bid.builder()
-                        .project(project).bidderUser(bidder.getUser()).amount(amount)
-                        .matchPercentage(IndianData.intBetween(60, 95))
-                        .agentPick(false).status(BidStatus.PENDING)
-                        .submittedAt(Instant.now().minus(Duration.ofHours(IndianData.intBetween(1, 48))))
+                int amount = seed.budgetMin() + IndianData.intBetween(0, Math.max(1, seed.budgetMax() - seed.budgetMin()));
+                Bid bid = Bid.builder().project(project).bidderUser(bidder.getUser()).amount(amount)
+                        .matchPercentage(IndianData.intBetween(60, 95)).agentPick(false).status(BidStatus.PENDING)
+                        .submittedAt(Instant.now().minus(Duration.ofHours(IndianData.intBetween(1, 72))))
                         .build();
                 bid.setDemoContent(true);
-                bidRepository.save(bid);
+                bids.add(bidRepository.save(bid));
+                totalBids++;
+            }
+            // §1.2 "two fully resolved so won/lost states are visible" - the first two projects
+            // with bids get awarded.
+            if (!bids.isEmpty() && i < 2) {
+                Bid top = bids.stream().max((a, b) -> Integer.compare(a.getAmount(), b.getAmount())).orElseThrow();
+                for (Bid b : bids) b.setStatus(b.getId().equals(top.getId()) ? BidStatus.WON : BidStatus.LOST);
+                bidRepository.saveAll(bids);
+                project.setStatus(ProjectStatus.AWARDED);
+                project.setAwardedBidId(top.getId());
+                projectRepository.save(project);
+
+                List<String> labels = List.of("Kickoff & plan", "Midpoint delivery", "Final delivery");
+                double[] split = {0.3, 0.4, 0.3};
+                for (int m = 0; m < labels.size(); m++) {
+                    int tranche = (int) Math.round(top.getAmount() * split[m]);
+                    Milestone milestone = Milestone.builder().project(project).label(labels.get(m)).orderIndex(m)
+                            .amount(tranche).status(m == 0 ? MilestoneStatus.ACCEPTED : MilestoneStatus.PENDING).build();
+                    milestone.setDemoContent(true);
+                    milestoneRepository.save(milestone);
+                }
             }
             projects.add(project);
         }
-        return projects;
+        return new ProjectSeedResult(projects, totalBids);
     }
 
-    // §4.3 "notifications of each type" - one AGENT/INTERVIEW/BID/SYSTEM each, on the first
-    // seeded candidate, so a reviewer signed into a demo account (or looking at the badge on any
-    // seeded profile) sees the full set. notify() doesn't accept the demoContent flag directly
-    // (it's the same real path a genuine notification takes) - re-saved immediately after with
-    // the flag set, same pattern as everything else in this service.
-    private int seedNotifications(List<CandidateProfile> candidates) {
+    private void seedNotifications(List<CandidateProfile> candidates, EnterpriseProfile company) {
         CandidateProfile recipient = candidates.get(0);
         record NotifSeed(NotificationType type, String title, String body) {}
         List<NotifSeed> seeds = List.of(
-                new NotifSeed(NotificationType.AGENT, "Your agent found something", "Jenny noticed 3 activities near Gachibowli happening today that match your interests."),
-                new NotifSeed(NotificationType.INTERVIEW, "Interview scheduled", "Preview Labs proposed a time for your Frontend Developer interview."),
-                new NotifSeed(NotificationType.BID, "New bid on your project", "A candidate placed a bid on \"Landing page redesign\"."),
+                new NotifSeed(NotificationType.AGENT, "Your agent found something", "Jenny noticed several activities near Gachibowli happening today that match your interests."),
+                new NotifSeed(NotificationType.INTERVIEW, "Interview scheduled", company.getCompanyName() + " proposed a time for your interview."),
+                new NotifSeed(NotificationType.BID, "New bid on your project", "A candidate placed a bid on your open project."),
                 new NotifSeed(NotificationType.SYSTEM, "Complete your profile", "Add a bio and verify more skills to improve your career health score.")
         );
-        int count = 0;
         for (NotifSeed seed : seeds) {
             var notification = notificationService.notify(recipient.getUser(), seed.type(), seed.title(), seed.body());
             notification.setDemoContent(true);
             notificationRepository.save(notification);
-            count++;
         }
-        return count;
     }
 
-    // Regular Lombok @Builder (not @SuperBuilder) ignores inherited BaseEntity fields, same
-    // reasoning as BaseEntity's own class comment - set demoContent post-build, before save().
-    private User withDemoFlag(User user) {
-        user.setDemoContent(true);
-        return user;
+    private void seedFollows(List<CandidateProfile> candidates) {
+        for (int i = 0; i < 15; i++) {
+            CandidateProfile follower = candidates.get(i);
+            CandidateProfile following = candidates.get((i + 7) % candidates.size());
+            if (follower.getUser().getId().equals(following.getUser().getId())) continue;
+            if (followRepository.existsByFollowerUserIdAndFollowingUserId(follower.getUser().getId(), following.getUser().getId())) continue;
+            Follow follow = Follow.builder().followerUser(follower.getUser()).followingUser(following.getUser()).build();
+            follow.setDemoContent(true);
+            followRepository.save(follow);
+        }
     }
 
-    // --------------------------------------------------------------------------------------
-    // Removal - "one documented command removes it completely." Dependency order: children
-    // before parents, keyed on the FK (not the child row's own demoContent flag) wherever a real
-    // user could plausibly have interacted with seeded content during the review window - see
-    // each repository method's own comment for which scenario it covers.
-    // --------------------------------------------------------------------------------------
+    // ---------------------------------------------------------------------------------------
+    // Removal - FK-driven, not just demoContent-flag-driven, so it also cleans up anything a
+    // real account did against seeded content while it was live (joined a demo activity,
+    // applied to a demo job, bid on a demo project, followed a demo profile, messaged a demo
+    // recruiter) - not just the rows the seeder itself created.
+    // ---------------------------------------------------------------------------------------
 
     @Transactional
     public RemovalSummary removeAll() {
@@ -507,6 +822,9 @@ public class DemoContentService {
 
         for (Post post : posts) {
             postJoinRequestRepository.deleteByPostId(post.getId());
+            postCommentRepository.deleteByPostId(post.getId());
+            postReactionRepository.deleteByPostId(post.getId());
+            postSaveRepository.deleteByPostId(post.getId());
             moderationItemRepository.deleteByPostId(post.getId());
         }
         postRepository.deleteAll(posts);
@@ -537,6 +855,7 @@ public class DemoContentService {
         candidateProfileRepository.deleteAll(candidates);
 
         for (EnterpriseProfile company : companies) {
+            invitationRepository.deleteByTenantId(company.getId());
             membershipRepository.deleteByTenantId(company.getId());
         }
         enterpriseProfileRepository.deleteAll(companies);
@@ -544,8 +863,8 @@ public class DemoContentService {
         List<User> users = userRepository.findByDemoContentTrue();
         userRepository.deleteAll(users);
 
-        log.info("Demo content removed: {} candidates, {} posts, {} rooms, {} job postings, {} projects",
-                candidates.size(), posts.size(), roomCount, jobPostings.size(), projects.size());
-        return new RemovalSummary(candidates.size(), posts.size(), roomCount, jobPostings.size(), projects.size(), 0);
+        log.info("Demo content removed: {} accounts, {} companies, {} posts, {} job postings, {} projects, {} rooms",
+                users.size(), companies.size(), posts.size(), jobPostings.size(), projects.size(), roomCount);
+        return new RemovalSummary(users.size(), companies.size(), posts.size(), jobPostings.size(), projects.size(), roomCount);
     }
 }
