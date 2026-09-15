@@ -11,6 +11,7 @@ import com.vikisol.arena.profile.entity.Industry;
 import com.vikisol.arena.profile.entity.OpenTo;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -32,10 +33,19 @@ public class SeedDataFactory {
                 .industry(industry)
                 .location("Bengaluru")
                 .remote(false)
-                .skills(List.of())
+                // Genuinely mutable, independent ArrayLists - not List.of(). A real, latent bug
+                // found live (2026-09-15) via DemoContentService: any later code that fetches an
+                // already-persisted profile and calls repository.save() without first replacing
+                // these @ElementCollection fields makes Hibernate try to .clear() the collection
+                // it's still holding at merge time - an immutable backing list throws
+                // UnsupportedOperationException with no message right there. Not hypothetical -
+                // this is exactly what a never-onboarded blank profile (skills/openTo still at
+                // their blankCandidateProfile() defaults) does the moment anything else on it
+                // gets updated and saved.
+                .skills(new ArrayList<>())
                 .experienceYears(0)
                 .rateFloor(6)
-                .openTo(List.of(OpenTo.FULL_TIME))
+                .openTo(new ArrayList<>(List.of(OpenTo.FULL_TIME)))
                 .careerHealth(20)
                 .consent(new ConsentSettings(false, true))
                 .autonomy(AutonomyLevel.SUPERVISED)
@@ -50,7 +60,7 @@ public class SeedDataFactory {
                 .logoEmoji("🏢")
                 .industry(Industry.ENGINEERING)
                 .size(CompanySize.S_1_10)
-                .hiringFor(List.of())
+                .hiringFor(new ArrayList<>())
                 .plan(Plan.FREE)
                 .seatsUsed(1)
                 .seatsTotal(3)
