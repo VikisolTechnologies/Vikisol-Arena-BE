@@ -564,7 +564,12 @@ public class DemoContentService {
     // post, create the Room, seed a short (or, for one, §4.4's deliberately very long) message
     // thread.
     private int seedRoomsAndMessages(List<Post> posts, List<CandidateProfile> candidates) {
-        int[] roomPostIndexes = {0, 1, 4, 9}; // badminton, cricket, study group, chess
+        // Widened from the original {0, 1, 4, 9} (4 rooms) to a broader spread across activity
+        // types - testing "general rooms" needs more than a handful of examples to actually
+        // look like a real inbox rather than four hand-picked demo cases.
+        int[] roomPostIndexes = {0, 1, 2, 3, 4, 6, 8, 9, 11, 13, 15, 18};
+        // badminton, cricket, design jam, cycling, study group, hackathon, football, chess,
+        // sunrise yoga, trek, running club, career-switchers meetup
         int roomCount = 0;
         for (int idx = 0; idx < roomPostIndexes.length; idx++) {
             Post post = posts.get(roomPostIndexes[idx]);
