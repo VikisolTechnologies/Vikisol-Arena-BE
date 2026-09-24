@@ -22,18 +22,24 @@ public class ProjectController {
 
     private final ProjectService projectService;
 
+    // "Enter as guest" - Marketplace must be browsable before signup; no class-level
+    // @PreAuthorize on this controller, so SecurityConfig's own permitAll for these two GETs is
+    // what actually opens them up. projectService's mapper already treats a null viewingUserId
+    // as anonymous (mine: false, no bidder-only fields leaking).
     @GetMapping("/projects")
     public ResponseEntity<ApiResponse<PagedResponse<ProjectResponse>>> getProjects(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        return ResponseEntity.ok(ApiResponse.ok(projectService.getOpenProjects(pageable, principal.getId())));
+        UUID viewerId = principal == null ? null : principal.getId();
+        return ResponseEntity.ok(ApiResponse.ok(projectService.getOpenProjects(pageable, viewerId)));
     }
 
     @GetMapping("/projects/{id}")
     public ResponseEntity<ApiResponse<ProjectResponse>> getProject(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(projectService.getProject(id, principal.getId())));
+        UUID viewerId = principal == null ? null : principal.getId();
+        return ResponseEntity.ok(ApiResponse.ok(projectService.getProject(id, viewerId)));
     }
 
     @PostMapping("/projects")

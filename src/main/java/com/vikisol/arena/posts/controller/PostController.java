@@ -36,20 +36,27 @@ public class PostController {
     private final PostReactionService postReactionService;
     private final ModerationService moderationService;
 
+    // "Enter as guest" - Home's feed must render before signup; postService.getFeed already
+    // treats a null viewingUserId as anonymous (empty follow-set, no personalized interest
+    // vector) - overrides the class-level hasRole('TALENT'), same pattern as by-user below.
+    @PreAuthorize("permitAll()")
     @GetMapping("/feed")
     public ResponseEntity<ApiResponse<List<PostResponse>>> getFeed(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.getFeed(principal.getId(), page, size)));
+        UUID viewerId = principal == null ? null : principal.getId();
+        return ResponseEntity.ok(ApiResponse.ok(postService.getFeed(viewerId, page, size)));
     }
 
+    @PreAuthorize("permitAll()")
     @GetMapping("/trending")
     public ResponseEntity<ApiResponse<List<PostResponse>>> getTrending(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.getTrending(principal.getId(), page, size)));
+        UUID viewerId = principal == null ? null : principal.getId();
+        return ResponseEntity.ok(ApiResponse.ok(postService.getTrending(viewerId, page, size)));
     }
 
     // ARENA-INVENTORY-FIXES.md FIX 1 - the public profile page's "Activity" section needs this
@@ -65,6 +72,9 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.getUserPosts(userId, viewerId, pageable)));
     }
 
+    // Map page must render before signup too - postService.getNearby is a plain geo+time query,
+    // no personalization to degrade (see its own null-tolerant signature).
+    @PreAuthorize("permitAll()")
     @GetMapping("/nearby")
     public ResponseEntity<ApiResponse<List<PostResponse>>> getNearby(
             @AuthenticationPrincipal UserPrincipal principal,
@@ -72,7 +82,8 @@ public class PostController {
             @RequestParam(defaultValue = "5") double radiusKm,
             @RequestParam(required = false) Integer withinHours,
             @RequestParam(required = false) String intentType) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.getNearby(principal.getId(), lat, lng, radiusKm, withinHours, intentType)));
+        UUID viewerId = principal == null ? null : principal.getId();
+        return ResponseEntity.ok(ApiResponse.ok(postService.getNearby(viewerId, lat, lng, radiusKm, withinHours, intentType)));
     }
 
     // ARENA-STABILIZE.md Phase 2, G9 - shared post links (the app's growth loop, same reasoning

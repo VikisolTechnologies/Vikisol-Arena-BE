@@ -24,13 +24,18 @@ public class CompanyController {
 
     private final CompanyService companyService;
 
+    // "Enter as guest" - Companies must be browsable before signup; overrides the class-level
+    // hasRole('TALENT'). companyService.listCompanies already treats a null viewingUserId as
+    // anonymous (viewerFollows: null), same as getCompany below.
+    @PreAuthorize("permitAll()")
     @GetMapping
     public ResponseEntity<ApiResponse<PagedResponse<CompanyResponse>>> list(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(required = false) String query,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
         var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
-        return ResponseEntity.ok(ApiResponse.ok(companyService.listCompanies(query, principal.getId(), pageable)));
+        UUID viewerId = principal == null ? null : principal.getId();
+        return ResponseEntity.ok(ApiResponse.ok(companyService.listCompanies(query, viewerId, pageable)));
     }
 
     // ARENA-INVENTORY-FIXES.md FIX 1 - a shared company link is the growth loop, so this must

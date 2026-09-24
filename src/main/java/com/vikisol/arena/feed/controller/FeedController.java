@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.List;
+import java.util.UUID;
 
 // ARENA-MASTER-ARCHITECTURE.md PART 6 "FEED GET /feed?tab=for-you|nearby|following&cursor=" -
 // the unified Home feed (PART 7.5). `nearby` deliberately delegates to the existing
@@ -31,12 +32,18 @@ public class FeedController {
 
     private final FeedAggregationService feedAggregationService;
 
+    // "Enter as guest" - Home's global-feed fallback (no location yet) must render before
+    // signup; overrides the class-level hasRole('TALENT'). feedAggregationService.getFeed
+    // already treats a null viewingUserId as anonymous throughout (empty follow-set, no "mine"
+    // flags on posts/jobs/projects).
+    @PreAuthorize("permitAll()")
     @GetMapping
     public ResponseEntity<ApiResponse<List<FeedItemResponse>>> getFeed(
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "for-you") String tab,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(feedAggregationService.getFeed(principal.getId(), tab, page, size)));
+        UUID viewerId = principal == null ? null : principal.getId();
+        return ResponseEntity.ok(ApiResponse.ok(feedAggregationService.getFeed(viewerId, tab, page, size)));
     }
 }

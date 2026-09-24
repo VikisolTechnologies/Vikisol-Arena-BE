@@ -99,17 +99,29 @@ public class SecurityConfig {
                         // would wrongly expose the caller's own full profile anonymously.
                         .requestMatchers(HttpMethod.GET, "/profile/me").authenticated()
                         .requestMatchers(HttpMethod.GET, "/profile/*").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/companies/*", "/companies/*/jobs").permitAll()
+                        // "Enter as guest" - a visitor can browse the whole app (feed, jobs,
+                        // projects, companies, map) read-only before ever signing up; only the
+                        // actual write (post, join, apply, bid, follow, message) asks for an
+                        // account, via SignInPrompt on the frontend. Every service method behind
+                        // these GETs already treats a null viewingUserId as "anonymous" (see
+                        // PostService/FeedAggregationService/ProjectService/CompanyService) -
+                        // that null-tolerance was already there for shared-link support (FIX 1 /
+                        // G9 below); this just opens the same door to the main browse surfaces.
+                        .requestMatchers(HttpMethod.GET, "/companies", "/companies/*", "/companies/*/jobs").permitAll()
                         .requestMatchers(HttpMethod.GET, "/jobs").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/feed").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/marketplace/projects", "/marketplace/projects/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/posts/by-user/*").permitAll()
                         // ARENA-STABILIZE.md Phase 2, G9 - shared post links must work
                         // logged-out too. Same "specific-before-wildcard" ordering as above:
                         // "/posts/*" (single Ant segment) would also match the literal
-                        // "/posts/feed", "/posts/mine", "/posts/saved", "/posts/nearby",
-                        // "/posts/trending" GET endpoints - list those explicitly first so the
-                        // wildcard below only ever reaches an actual post id.
-                        .requestMatchers(HttpMethod.GET, "/posts/feed", "/posts/mine", "/posts/saved",
-                                "/posts/nearby", "/posts/trending").authenticated()
+                        // "/posts/mine"/"/posts/saved" GET endpoints - list those explicitly
+                        // first so the wildcard below only ever reaches an actual post id.
+                        // feed/trending/nearby used to be forced authenticated here too, but
+                        // that's what blocked guest browsing of Home/Map - each already degrades
+                        // to anonymous-safe defaults (no follow-boost, no "mine" flags), same as
+                        // every other permitAll GET on this list.
+                        .requestMatchers(HttpMethod.GET, "/posts/mine", "/posts/saved").authenticated()
                         .requestMatchers(HttpMethod.GET, "/posts/*", "/posts/*/comments").permitAll()
                         .anyRequest().authenticated()
                 )
