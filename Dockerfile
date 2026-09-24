@@ -28,6 +28,16 @@ RUN addgroup -S arena && adduser -S arena -G arena
 COPY --from=build /build/target/*.jar app.jar
 RUN { echo "commit=${RAILWAY_GIT_COMMIT_SHA}"; echo "builtAt=$(date -u +%Y-%m-%dT%H:%M:%SZ)"; } > build-info.properties && \
     chown arena:arena app.jar build-info.properties
+# LocalDiskFileStorageService writes to ./uploads (resolves to /app/uploads, app.storage.
+# root-dir) - only app.jar/build-info.properties were ever chown'd above, so /app itself stayed
+# root-owned and the non-root `arena` user had no permission to create a new directory under it.
+# Every resume/CV/image upload has been failing with "Could not store file" in production as a
+# result (found live-testing the new onboarding resume-upload step, not introduced by it - this
+# endpoint predates that work). Note this still doesn't make uploads durable across redeploys
+# (Railway's container filesystem is ephemeral) - that's a separate, pre-existing limitation this
+# class's own comment already flagged; this fix only makes uploads work AT ALL within a given
+# container's lifetime.
+RUN mkdir -p /app/uploads && chown -R arena:arena /app/uploads
 USER arena
 
 # Railway injects PORT; application.yml already reads it (server.port: ${PORT:8081}).
