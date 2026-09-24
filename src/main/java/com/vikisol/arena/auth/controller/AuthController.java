@@ -3,6 +3,8 @@ package com.vikisol.arena.auth.controller;
 import com.vikisol.arena.auth.dto.AcceptInvitationRequest;
 import com.vikisol.arena.auth.dto.ChangeEmailRequest;
 import com.vikisol.arena.auth.dto.ChangePasswordRequest;
+import com.vikisol.arena.auth.dto.EmailOtpRequest;
+import com.vikisol.arena.auth.dto.EmailSigninVerifyRequest;
 import com.vikisol.arena.auth.dto.ForgotPasswordRequest;
 import com.vikisol.arena.auth.dto.GoogleSignInRequest;
 import com.vikisol.arena.auth.dto.MfaVerifyRequest;
@@ -145,6 +147,19 @@ public class AuthController {
     @PostMapping("/phone/signin/verify-otp")
     public ResponseEntity<ApiResponse<SessionResponse>> verifyPhoneSigninOtp(@Valid @RequestBody PhoneSigninVerifyRequest request, HttpServletResponse response) {
         return respond(authService.verifyPhoneSigninOtp(request.phoneNumber(), request.code()), response);
+    }
+
+    // --- Email OTP sign-in (existing accounts, any role) - public, see SecurityConfig ---
+
+    @PostMapping("/email/signin/request-otp")
+    public ResponseEntity<ApiResponse<Void>> requestEmailSigninOtp(@Valid @RequestBody EmailOtpRequest request) {
+        authService.requestEmailSigninOtp(request.email());
+        return ResponseEntity.ok(ApiResponse.ok("Code sent", null));
+    }
+
+    @PostMapping("/email/signin/verify-otp")
+    public ResponseEntity<ApiResponse<SessionResponse>> verifyEmailSigninOtp(@Valid @RequestBody EmailSigninVerifyRequest request, HttpServletResponse response) {
+        return respond(authService.verifyEmailSigninOtp(request.email(), request.code()), response);
     }
 
     // --- Phone signup (brand-new TALENT account) - public, see SecurityConfig ---

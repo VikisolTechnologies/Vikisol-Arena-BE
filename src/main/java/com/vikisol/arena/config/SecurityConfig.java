@@ -79,6 +79,7 @@ public class SecurityConfig {
                                 // this list on purpose (they fall to .anyRequest().authenticated()).
                                 "/auth/google", "/auth/phone/signin/request-otp", "/auth/phone/signin/verify-otp",
                                 "/auth/phone/signup/request-otp", "/auth/phone/signup/verify-otp",
+                                "/auth/email/signin/request-otp", "/auth/email/signin/verify-otp",
                                 "/auth/forgot-password", "/auth/reset-password").permitAll()
                         .requestMatchers(HttpMethod.GET, "/auth/invitations/*").permitAll()
                         .requestMatchers("/actuator/**").permitAll()

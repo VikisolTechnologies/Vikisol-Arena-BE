@@ -349,6 +349,74 @@ public class AuthService {
         return issueSession(user);
     }
 
+    // --- Email OTP sign-in (existing accounts only, any role - unlike phone/Google this isn't
+    // scoped to TALENT, since it's just an alternate credential for an account that already has
+    // one, same as password sign-in). Signin-only, no signup counterpart - creating an account
+    // still requires signup's normal email+password flow. ---
+
+    @Transactional
+    public void requestEmailSigninOtp(String email) {
+        // Same message signIn() already throws for an unknown email - the frontend's existing
+        // accountNotFound handling (built for the password form) keys off this exact string, so
+        // reusing it means no new frontend error-message branching is needed.
+        User user = userRepository.findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new BadRequestException("No account found with this email"));
+        if (user.getDeletedAt() != null) {
+            throw new BadRequestException("No account found with this email");
+        }
+        issueEmailOtp(user);
+    }
+
+    @Transactional
+    public SignInOutcome verifyEmailSigninOtp(String email, String code) {
+        User user = userRepository.findByEmailIgnoreCase(email)
+                .orElseThrow(() -> new BadRequestException("No account found with this email"));
+        // Same DPDP/tenant-suspension gates as password sign-in (AuthService.signIn) and phone
+        // sign-in (verifyPhoneSigninOtp) - an alternate credential for the exact same account.
+        if (user.getDeletedAt() != null) {
+            throw new BadCredentialsException("Invalid email or code");
+        }
+        consumeOtp(user, code);
+        userRepository.save(user);
+        if (user.getRole().hasTenant()) {
+            membershipRepository.findByUserId(user.getId()).ifPresent(m -> {
+                if (m.getTenant().getStatus() == TenantStatus.SUSPENDED) {
+                    throw new BadRequestException("This company's account has been suspended. Contact Vikisol support for help.");
+                }
+            });
+        }
+        if (user.isTotpEnabled() && MFA_ELIGIBLE_ROLES.contains(user.getRole())) {
+            return new SignInOutcome.MfaRequired(jwtTokenProvider.generateMfaPendingToken(user.getId()));
+        }
+        return issueSession(user);
+    }
+
+    // Doesn't reuse issueOtp() (the phone helper) - that one also sets user.setPhoneNumber(...),
+    // which doesn't apply here.
+    private void issueEmailOtp(User user) {
+        String code = generateOtpCode();
+        user.setPendingOtpHash(passwordEncoder.encode(code));
+        user.setPendingOtpExpiresAt(Instant.now().plus(OTP_TTL_MINUTES, ChronoUnit.MINUTES));
+        userRepository.save(user);
+        // Unlike signUp's welcome email / forgotPassword's reset link (best-effort, caught and
+        // logged so a Resend outage never fails the calling flow) - here the email IS the
+        // delivery mechanism the caller is waiting on, so a failed send has to surface as a real
+        // error rather than silently telling the user "code sent" when nothing arrived.
+        try {
+            emailProvider.sendEmail(EmailMessage.to(user.getEmail(),
+                    "Your Vikisol Arena sign-in code: " + code,
+                    "<p>Hi " + user.getName() + ",</p>"
+                            + "<p>Use this code to sign in to Vikisol Arena:</p>"
+                            + "<p style=\"font-size:32px;font-weight:700;letter-spacing:6px;\">" + code + "</p>"
+                            + "<p>This code expires in " + OTP_TTL_MINUTES + " minutes. If you didn't request this, "
+                            + "you can safely ignore this email.</p>"
+                            + "<p>- The Vikisol Arena team</p>"));
+        } catch (Exception e) {
+            log.warn("Email OTP send failed for {}: {}", user.getEmail(), e.getMessage());
+            throw new BadRequestException("Could not send the code right now - please try again");
+        }
+    }
+
     // --- Phone signup (brand-new account, TALENT only - see PhoneSignupVerifyRequest's comment)
     // ---
 
@@ -383,6 +451,10 @@ public class AuthService {
             throw new BadRequestException("This phone number is already registered - sign in instead");
         }
         consumeOtp(user, code);
+        // consumeOtp() itself no longer sets this (see its own comment) - moved here, the one
+        // caller that actually needs it, so verifyEmailSigninOtp doesn't silently mark an
+        // email-only account "phone verified" with no phone involved.
+        user.setPhoneVerified(true);
         user.setName(name);
         user.setHandle(HandleGenerator.generate(name, userRepository::existsByHandle));
         if (!user.getVerificationLevel().atLeast(VerificationLevel.PHONE)) {
@@ -449,6 +521,11 @@ public class AuthService {
         phoneOtpProvider.sendOtp(phoneNumber, code);
     }
 
+    // Shared by phone and email OTP verification. Deliberately does NOT set phoneVerified here
+    // anymore - it used to, unconditionally, which was harmless for the two phone callers but
+    // wrong for verifyEmailSigninOtp (would mark an email-only account "phone verified" with no
+    // phone involved). verifyPhoneSignupOtp sets it explicitly right after calling this; phone
+    // sign-in doesn't need to since it already requires phoneVerified=true to get here.
     private void consumeOtp(User user, String code) {
         if (user.getPendingOtpHash() == null || user.getPendingOtpExpiresAt() == null) {
             throw new BadRequestException("No verification code is pending - request a new one");
@@ -459,7 +536,6 @@ public class AuthService {
         if (!passwordEncoder.matches(code, user.getPendingOtpHash())) {
             throw new BadRequestException("That code doesn't match");
         }
-        user.setPhoneVerified(true);
         user.setPendingOtpHash(null);
         user.setPendingOtpExpiresAt(null);
     }
