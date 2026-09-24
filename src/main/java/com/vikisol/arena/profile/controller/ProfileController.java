@@ -58,7 +58,9 @@ public class ProfileController {
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody UpdateProfileDetailsRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(profileService.updateDetails(
                 principal.getId(), request.name(), request.title(), request.industry(),
-                request.experienceYears(), request.rateFloor(), request.openTo())));
+                request.experienceYears(), request.rateFloor(), request.openTo(),
+                request.cameForJob(), request.organization(), request.currentCtc(),
+                request.expectedCtc(), request.preferredLocation())));
     }
 
     @PutMapping("/me/skills")

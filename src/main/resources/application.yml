@@ -73,7 +73,12 @@ app:
     secret: ${JWT_SECRET:local-dev-only-arena-secret-do-not-use-in-any-deployed-environment-change-me}
     require-real-secret: ${JWT_REQUIRE_REAL_SECRET:false}
     expiration-ms: ${JWT_EXPIRATION_MS:900000} # 15 min access token (was 24h - see DECISIONS.md)
-    refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:604800000} # 7 days
+    # 90 days - the refresh token (rotating, Redis-backed, RefreshTokenService) is what actually
+    # keeps someone signed in; the 15-min access token above renews silently against it via
+    # POST /auth/refresh on every page load, so this is the real "how long until you're logged
+    # out" number from a user's point of view. Was 7 days - founder's call: users should stay
+    # signed in until they clear their cookies/cache, not get silently logged out mid-week.
+    refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:7776000000} # 90 days
     issuer: ${JWT_ISSUER:vikisol-arena}
     audience: ${JWT_AUDIENCE:vikisol-arena-web}
     # See RefreshCookieHelper's class comment - false/Lax for local http://localhost dev,

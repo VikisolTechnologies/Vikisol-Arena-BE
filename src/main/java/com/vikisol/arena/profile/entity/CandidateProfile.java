@@ -96,4 +96,13 @@ public class CandidateProfile extends BaseEntity {
     private String geohash;
     private Double approxLat;
     private Double approxLng;
+
+    // Onboarding wizard job-intent branch (see V13 migration) - all nullable, all skippable.
+    // null cameForJob = never asked/answered (older accounts, or skipped); true = job seeker
+    // (unlocks the Naukri/LinkedIn-style fields below), false = "just here to explore/connect".
+    private Boolean cameForJob;
+    private String organization;
+    private Integer currentCtc;
+    private Integer expectedCtc;
+    private String preferredLocation;
 }

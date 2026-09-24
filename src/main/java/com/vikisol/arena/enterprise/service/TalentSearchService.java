@@ -191,7 +191,13 @@ public class TalentSearchService {
                 response.location(), response.remote(), response.skills(), response.experienceYears(), response.rateFloor(),
                 response.openTo(), response.careerHealth(), response.consent(), response.autonomy(), response.bio(),
                 fullAccess ? response.cvUrl() : null, fullAccess ? response.cvFileName() : null,
-                response.locationConsent(), null, null, null, fullAccess);
+                response.locationConsent(), null, null, null,
+                response.cameForJob(),
+                fullAccess ? response.organization() : null,
+                fullAccess ? response.currentCtc() : null,
+                fullAccess ? response.expectedCtc() : null,
+                fullAccess ? response.preferredLocation() : null,
+                fullAccess);
     }
 
     private EnterpriseProfile requireEnterprise(UUID userId) {

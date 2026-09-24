@@ -25,6 +25,11 @@ public record CandidateProfileResponse(
         String homeCity,
         Double approxLat,
         Double approxLng,
+        Boolean cameForJob,
+        String organization,
+        Integer currentCtc,
+        Integer expectedCtc,
+        String preferredLocation,
         // True for every self/public view (CandidateProfileMapper.toResponse callers always have
         // full access to what they're looking at). Only ever false when TalentSearchService's
         // redactIfLocked() overrides it for an enterprise viewer who hasn't unlocked this

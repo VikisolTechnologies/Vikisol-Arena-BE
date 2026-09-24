@@ -37,6 +37,11 @@ public class CandidateProfileMapper {
                 p.getHomeCity(),
                 p.getApproxLat(),
                 p.getApproxLng(),
+                p.getCameForJob(),
+                p.getOrganization(),
+                p.getCurrentCtc(),
+                p.getExpectedCtc(),
+                p.getPreferredLocation(),
                 true
         );
     }

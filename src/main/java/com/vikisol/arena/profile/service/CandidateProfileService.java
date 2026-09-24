@@ -73,7 +73,9 @@ public class CandidateProfileService {
 
     @Transactional
     public CandidateProfileResponse updateDetails(UUID userId, String name, String title, String industry,
-                                                    int experienceYears, int rateFloor, List<String> openTo) {
+                                                    int experienceYears, int rateFloor, List<String> openTo,
+                                                    Boolean cameForJob, String organization, Integer currentCtc,
+                                                    Integer expectedCtc, String preferredLocation) {
         CandidateProfile profile = getEntityForUser(userId);
         profile.setName(name);
         profile.setTitle(title);
@@ -83,6 +85,15 @@ public class CandidateProfileService {
         // Hibernate's @ElementCollection needs a mutable backing list to manage - Stream.toList()
         // returns an immutable one, which blows up with UnsupportedOperationException on flush.
         profile.setOpenTo(new java.util.ArrayList<>(openTo.stream().map(OpenTo::fromWireValue).toList()));
+        // Job-intent branch fields - all optional, only overwritten when the caller actually
+        // sends something. A null here means "not answered/skipped this time," not "clear the
+        // previously saved value" - e.g. calling this again from the profile-edit screen for an
+        // unrelated field shouldn't silently wipe a CTC the onboarding wizard already collected.
+        if (cameForJob != null) profile.setCameForJob(cameForJob);
+        if (organization != null) profile.setOrganization(organization);
+        if (currentCtc != null) profile.setCurrentCtc(currentCtc);
+        if (expectedCtc != null) profile.setExpectedCtc(expectedCtc);
+        if (preferredLocation != null) profile.setPreferredLocation(preferredLocation);
         return saveAndScore(profile);
     }
 
