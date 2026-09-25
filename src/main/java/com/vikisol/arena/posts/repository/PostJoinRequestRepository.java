@@ -17,6 +17,8 @@ public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest
 
     Optional<PostJoinRequest> findByPostIdAndUserId(UUID postId, UUID userId);
 
+    Optional<PostJoinRequest> findByIdAndPostId(UUID id, UUID postId);
+
     long countByPostIdAndStatus(UUID postId, PostJoinStatus status);
 
     // PostService.delete() - a hard delete needs its dependents gone first (FK on post_id).

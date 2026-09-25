@@ -65,13 +65,13 @@ class RealAgentServiceClientTest {
     // JennySol's side, but this client only ever granted arena.searchJobs until this fix).
     @Test
     void grantsApplyToJobScopeOnlyToTalentAccounts() {
-        assertThat(RealAgentServiceClient.scopeFor("TALENT")).containsExactly("arena.searchJobs", "arena.applyToJob");
+        assertThat(RealAgentServiceClient.scopeFor("TALENT")).contains("arena.searchJobs", "arena.applyToJob", "arena.joinActivity", "arena.createPost", "arena.search");
     }
 
     @Test
     void doesNotGrantApplyToJobScopeToNonTalentAccounts() {
-        assertThat(RealAgentServiceClient.scopeFor("COMPANY_ADMIN")).containsExactly("arena.searchJobs");
-        assertThat(RealAgentServiceClient.scopeFor("RECRUITER")).containsExactly("arena.searchJobs");
-        assertThat(RealAgentServiceClient.scopeFor("PLATFORM_ADMIN")).containsExactly("arena.searchJobs");
+        assertThat(RealAgentServiceClient.scopeFor("COMPANY_ADMIN")).contains("arena.searchJobs", "arena.search").doesNotContain("arena.applyToJob", "arena.joinActivity", "arena.createPost", "arena.placeBid");
+        assertThat(RealAgentServiceClient.scopeFor("RECRUITER")).contains("arena.searchJobs", "arena.search").doesNotContain("arena.applyToJob", "arena.joinActivity", "arena.createPost", "arena.placeBid");
+        assertThat(RealAgentServiceClient.scopeFor("PLATFORM_ADMIN")).contains("arena.searchJobs", "arena.search").doesNotContain("arena.applyToJob", "arena.joinActivity", "arena.createPost", "arena.placeBid");
     }
 }

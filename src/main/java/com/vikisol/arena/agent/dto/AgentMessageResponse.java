@@ -8,5 +8,6 @@ public record AgentMessageResponse(
         String role,
         String content,
         boolean serviceUnavailable,
+        java.util.List<AgentActionResponse> actions,
         Instant createdAt
 ) {}

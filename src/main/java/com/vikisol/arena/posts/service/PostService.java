@@ -422,7 +422,7 @@ public class PostService {
 
     @Transactional
     public PostResponse cancel(UUID userId, UUID postId) {
-        Post post = requirePost(postId);
+        Post post = requireLockedPost(postId);
         if (!post.getAuthorUser().getId().equals(userId)) {
             throw new AccessDeniedException("Not your post");
         }
@@ -445,7 +445,7 @@ public class PostService {
     // by a later delete, matching how every other history/audit record in this codebase behaves.
     @Transactional
     public void delete(UUID userId, UUID postId) {
-        Post post = requirePost(postId);
+        Post post = requireLockedPost(postId);
         if (!post.getAuthorUser().getId().equals(userId)) {
             throw new AccessDeniedException("Not your post");
         }
@@ -464,7 +464,7 @@ public class PostService {
 
     @Transactional
     public PostJoinRequestResponse requestJoin(UUID userId, UUID postId) {
-        Post post = requirePost(postId);
+        Post post = requireLockedPost(postId);
         if (!post.isJoinable()) {
             throw new BadRequestException("This post doesn't accept join requests");
         }
@@ -474,9 +474,7 @@ public class PostService {
         if (postJoinRequestRepository.findByPostIdAndUserId(postId, userId).isPresent()) {
             throw new BadRequestException("You've already requested to join this post");
         }
-        if (post.getStatus() != PostStatus.OPEN) {
-            throw new BadRequestException("This post is no longer open");
-        }
+        requireOpenCapacity(post);
         if (blockService.isBlockedEitherDirection(userId, post.getAuthorUser().getId())) {
             throw new BadRequestException("You can't join this post");
         }
@@ -506,14 +504,26 @@ public class PostService {
 
     @Transactional
     public PostJoinRequestResponse decideJoin(UUID userId, UUID postId, UUID joinRequestId, boolean approve) {
-        Post post = requirePost(postId);
+        Post post = requireLockedPost(postId);
         if (!post.getAuthorUser().getId().equals(userId)) {
             throw new AccessDeniedException("Not your post");
         }
-        PostJoinRequest joinRequest = postJoinRequestRepository.findById(joinRequestId)
+        PostJoinRequest joinRequest = postJoinRequestRepository.findByIdAndPostId(joinRequestId, postId)
                 .orElseThrow(() -> new ResourceNotFoundException("Join request not found: " + joinRequestId));
         if (joinRequest.getStatus() != PostJoinStatus.PENDING) {
             throw new BadRequestException("This join request has already been decided");
+        }
+
+        if (approve) {
+            requireOpenCapacity(post);
+            if (blockService.isBlockedEitherDirection(userId, joinRequest.getUser().getId())) {
+                throw new BadRequestException("You can't approve this request");
+            }
+            if (post.getIntentType() == PostIntentType.ACTIVITY) requireAdult(joinRequest.getUser());
+            if (post.getRequiredVerificationLevel() != null &&
+                    !joinRequest.getUser().getVerificationLevel().atLeast(post.getRequiredVerificationLevel())) {
+                throw new BadRequestException("This participant no longer meets the verification requirement");
+            }
         }
 
         joinRequest.setStatus(approve ? PostJoinStatus.APPROVED : PostJoinStatus.DECLINED);
@@ -540,6 +550,7 @@ public class PostService {
     // Shared by both the PUBLIC-auto-approve path and the APPROVAL-manual-approve path so the
     // room/spots/notification side effects only ever live in one place.
     private void onJoinApproved(Post post, PostJoinRequest joinRequest) {
+        requireOpenCapacity(post);
         Room room = roomService.getOrCreateForPost(post);
         roomService.addMember(room, joinRequest.getUser());
 
@@ -610,6 +621,25 @@ public class PostService {
 
     private Post requirePost(UUID id) {
         return postRepository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Post not found: " + id));
+    }
+
+    private Post requireLockedPost(UUID id) {
+        return postRepository.findByIdForUpdate(id)
+                .orElseThrow(() -> new ResourceNotFoundException("Post not found: " + id));
+    }
+
+    private void requireOpenCapacity(Post post) {
+        if (!post.isJoinable() || post.getStatus() != PostStatus.OPEN) {
+            throw new BadRequestException("This post is no longer open for joining");
+        }
+        if (post.getCapacity() != null && post.getSpotsFilled() >= post.getCapacity()) {
+            throw new BadRequestException("This activity is full");
+        }
+        java.time.Instant now = java.time.Instant.now();
+        if ((post.getEndsAt() != null && !post.getEndsAt().isAfter(now)) ||
+                (post.getIntentType() == PostIntentType.ACTIVITY && post.getStartsAt() != null && !post.getStartsAt().isAfter(now))) {
+            throw new BadRequestException("This activity has already started or ended");
+        }
     }
 
     private User requireUser(UUID id) {

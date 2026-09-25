@@ -15,6 +15,11 @@ import java.util.List;
 import java.util.UUID;
 
 public interface PostRepository extends JpaRepository<Post, UUID> {
+    // Serialize participant decisions and cancellation on the same post. The lock is held
+    // until the service transaction commits, including room membership and capacity updates.
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select p from Post p where p.id = :id")
+    java.util.Optional<Post> findByIdForUpdate(@Param("id") UUID id);
     // Bounded recent-post window for FeedRankingService to score in Java - see its own comment
     // for why there's no single ORDER BY that expresses a follows+recency composite score.
     // authorCompany included since COMPANY posts now appear in this same feed window.

@@ -40,4 +40,13 @@ public class AgentController {
             @Valid @RequestBody SendAgentMessageRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(agentService.sendMessage(principal.getId(), id, request.content())));
     }
+    public record ActionDecisionRequest(@jakarta.validation.constraints.NotNull Boolean approve) {}
+
+    @PostMapping("/actions/{id}")
+    public ResponseEntity<ApiResponse<com.vikisol.arena.agent.dto.AgentActionResponse>> decideAction(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+            @Valid @RequestBody ActionDecisionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(agentService.decideAction(principal.getId(), id, request.approve())));
+    }
+
 }

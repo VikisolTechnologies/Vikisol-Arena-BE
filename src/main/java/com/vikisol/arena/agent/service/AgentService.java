@@ -36,6 +36,8 @@ public class AgentService {
     private final AgentMessageRepository messageRepository;
     private final AgentServiceClient agentServiceClient;
     private final UserRepository userRepository;
+    private final com.vikisol.arena.agent.repository.AgentActionRepository actionRepository;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     // One running conversation per user for v1 - matches what the old /agent page actually gave
     // users (a single chat thread), just persisted server-side now instead of React state. Real
@@ -63,21 +65,32 @@ public class AgentService {
     public AgentMessageResponse sendMessage(UUID userId, UUID conversationId, String content) {
         AgentConversation conversation = requireOwnedConversation(userId, conversationId);
 
+        // Read prior turns BEFORE saving the current message; otherwise it is sent twice.
+        List<AgentHistoryEntry> history = messageRepository
+                .findTop20ByConversationIdOrderByCreatedAtDesc(conversation.getId()).stream()
+                .filter(m -> !m.isServiceUnavailable())
+                .sorted(Comparator.comparing(AgentMessage::getCreatedAt))
+                .map(m -> new AgentHistoryEntry(m.getRole() == AgentMessageRole.USER ? "user" : "assistant", m.getContent()))
+                .toList();
         messageRepository.save(AgentMessage.builder()
                 .conversation(conversation).role(AgentMessageRole.USER).content(content).build());
 
         AgentMessage reply;
         if (agentServiceClient.isAvailable()) {
-            List<AgentHistoryEntry> history = messageRepository
-                    .findTop20ByConversationIdOrderByCreatedAtDesc(conversation.getId()).stream()
-                    .sorted(Comparator.comparing(AgentMessage::getCreatedAt))
-                    .map(m -> new AgentHistoryEntry(m.getRole().name().toLowerCase(), m.getContent()))
-                    .toList();
-            User user = userRepository.getReferenceById(userId);
-            AgentReply agentReply = agentServiceClient.sendMessage(
-                    new AgentContext(userId, user.getRole().name()), history, content);
-            reply = messageRepository.save(AgentMessage.builder()
-                    .conversation(conversation).role(AgentMessageRole.AGENT).content(agentReply.content()).build());
+            try {
+                User user = userRepository.getReferenceById(userId);
+                AgentReply agentReply = agentServiceClient.sendMessage(contextFor(user), history, content);
+                reply = messageRepository.save(AgentMessage.builder()
+                        .conversation(conversation).role(AgentMessageRole.AGENT).content(agentReply.content()).build());
+                for (var proposal : agentReply.pendingActions()) {
+                    actionRepository.save(com.vikisol.arena.agent.entity.AgentAction.builder()
+                            .message(reply).externalActionId(proposal.actionId()).toolName(proposal.toolName())
+                            .argsJson(proposal.args().toString()).expiresAt(proposal.expiresAt()).build());
+                }
+            } catch (com.vikisol.arena.agent.client.RealAgentServiceClient.AgentServiceException e) {
+                reply = messageRepository.save(AgentMessage.builder().conversation(conversation)
+                        .role(AgentMessageRole.AGENT).content(UNAVAILABLE_MESSAGE).serviceUnavailable(true).build());
+            }
         } else {
             reply = messageRepository.save(AgentMessage.builder()
                     .conversation(conversation).role(AgentMessageRole.AGENT)
@@ -104,6 +117,53 @@ public class AgentService {
 
     private AgentMessageResponse toMessageResponse(AgentMessage m) {
         return new AgentMessageResponse(
-                m.getId(), m.getRole().name().toLowerCase(), m.getContent(), m.isServiceUnavailable(), m.getCreatedAt());
+                m.getId(), m.getRole().name().toLowerCase(), m.getContent(), m.isServiceUnavailable(),
+                actionRepository.findByMessageIdInOrderByCreatedAtAsc(List.of(m.getId())).stream().map(this::toActionResponse).toList(), m.getCreatedAt());
     }
+    private AgentContext contextFor(User user) {
+        // Minimal context from Arena's authenticated identity, never client-supplied roles or secrets.
+        return new AgentContext(user.getId(), user.getRole().name(), "Name: " + user.getName());
+    }
+
+    @Transactional
+    public com.vikisol.arena.agent.dto.AgentActionResponse decideAction(UUID userId, UUID actionId, boolean approve) {
+        var action = actionRepository.findOwnedForUpdate(actionId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("Action not found"));
+        if (action.getStatus() != com.vikisol.arena.agent.entity.AgentActionStatus.PENDING) return toActionResponse(action);
+        if (action.getExpiresAt() != null && !action.getExpiresAt().isAfter(java.time.Instant.now())) {
+            action.setStatus(com.vikisol.arena.agent.entity.AgentActionStatus.EXPIRED);
+        } else if (!agentServiceClient.isAvailable()) {
+            // No request left Arena; the proposal remains pending and can safely be tried later.
+            throw new com.vikisol.arena.common.exception.BadRequestException(UNAVAILABLE_MESSAGE);
+        } else {
+            var decision = agentServiceClient.decideAction(contextFor(userRepository.getReferenceById(userId)),
+                    action.getExternalActionId(), approve);
+            action.setStatus(switch (decision.status()) {
+                case "done" -> com.vikisol.arena.agent.entity.AgentActionStatus.DONE;
+                case "declined" -> com.vikisol.arena.agent.entity.AgentActionStatus.DECLINED;
+                case "expired" -> com.vikisol.arena.agent.entity.AgentActionStatus.EXPIRED;
+                case "failed" -> com.vikisol.arena.agent.entity.AgentActionStatus.FAILED;
+                default -> com.vikisol.arena.agent.entity.AgentActionStatus.UNKNOWN;
+            });
+            action.setResultJson(decision.result() == null ? null : decision.result().toString());
+            action.setError(decision.error());
+        }
+        actionRepository.save(action);
+        return toActionResponse(action);
+    }
+
+    private com.vikisol.arena.agent.dto.AgentActionResponse toActionResponse(com.vikisol.arena.agent.entity.AgentAction action) {
+        String status = action.getStatus().wireValue();
+        if (action.getStatus() == com.vikisol.arena.agent.entity.AgentActionStatus.PENDING && action.getExpiresAt() != null &&
+                !action.getExpiresAt().isAfter(java.time.Instant.now())) status = "expired";
+        try {
+            return new com.vikisol.arena.agent.dto.AgentActionResponse(action.getId(), action.getToolName(),
+                    objectMapper.readTree(action.getArgsJson()), status,
+                    action.getResultJson() == null ? null : objectMapper.readTree(action.getResultJson()),
+                    action.getError(), action.getExpiresAt());
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("Invalid persisted agent action", e);
+        }
+    }
+
 }

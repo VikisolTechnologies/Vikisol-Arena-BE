@@ -47,14 +47,31 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
     private final UserRepository userRepository;
     private final AuditService auditService;
 
-    // The only mapping that exists as of M7 - grows one entry per write tool as they're added.
-    // Deliberately explicit and small rather than a naming convention the request path has to
-    // match automatically: a typo'd or unexpectedly-shaped Arena endpoint should fail closed
-    // (no entry found -> filter does nothing -> normal auth rules apply, most likely 401/403),
-    // never accidentally grant a service token more than this table says it should have.
-    private static final Map<String, String> ENDPOINT_TO_REQUIRED_SCOPE = Map.of(
-            "POST /applications", "arena.applyToJob"
+    // One entry per write tool (grows as tools are added). Deliberately explicit and small rather
+    // than a naming convention the request path has to match automatically: a typo'd or
+    // unexpectedly-shaped Arena endpoint should fail closed (no entry found -> filter does nothing
+    // -> normal auth rules apply, most likely 401/403), never accidentally grant a service token
+    // more than this table says it should have. Keys are "METHOD path-pattern", where "*" matches
+    // exactly one path segment (an id) - never "**".
+    static final Map<String, String> ENDPOINT_TO_REQUIRED_SCOPE = Map.of(
+            "POST /applications", "arena.applyToJob",
+            // Arena restructure Phase 3 (Jenny) write tools.
+            "POST /posts", "arena.createPost",
+            "POST /posts/*/joins", "arena.joinActivity",
+            "POST /marketplace/projects", "arena.createProject",
+            "POST /marketplace/projects/*/bids", "arena.placeBid"
     );
+
+    private static final org.springframework.util.AntPathMatcher PATHS = new org.springframework.util.AntPathMatcher();
+
+    // The scope a request needs, or null if no service token may authenticate it at all.
+    static String requiredScopeFor(String method, String servletPath) {
+        for (var entry : ENDPOINT_TO_REQUIRED_SCOPE.entrySet()) {
+            String[] key = entry.getKey().split(" ", 2);
+            if (key[0].equals(method) && PATHS.match(key[1], servletPath)) return entry.getValue();
+        }
+        return null;
+    }
 
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
@@ -66,7 +83,7 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
 
             if (claims != null) {
                 String endpointKey = request.getMethod() + " " + request.getServletPath();
-                String requiredScope = ENDPOINT_TO_REQUIRED_SCOPE.get(endpointKey);
+                String requiredScope = requiredScopeFor(request.getMethod(), request.getServletPath());
                 if (requiredScope != null && claims.scope().contains(requiredScope)) {
                     var user = userRepository.findById(claims.userId());
                     if (user.isPresent()) {
