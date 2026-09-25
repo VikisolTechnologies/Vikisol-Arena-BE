@@ -18,6 +18,7 @@ import com.vikisol.arena.notifications.service.NotificationService;
 import com.vikisol.arena.platform.repository.ModerationItemRepository;
 import com.vikisol.arena.platform.service.ModerationService;
 import com.vikisol.arena.common.service.CloudinaryService;
+import com.vikisol.arena.search.SearchText;
 import com.vikisol.arena.posts.dto.CreateCompanyPostRequest;
 import com.vikisol.arena.posts.dto.CreatePostRequest;
 import com.vikisol.arena.posts.dto.PostJoinRequestResponse;
@@ -52,6 +53,9 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class PostService {
+
+    // How many of the newest live posts search looks through - see SearchText on why in-memory.
+    private static final int SEARCH_WINDOW = 2000;
 
     private final PostRepository postRepository;
     private final PostJoinRequestRepository postJoinRequestRepository;
@@ -143,6 +147,35 @@ public class PostService {
         // (see getUserPosts' own comment) rather than a second, more complex counting query.
         return new PagedResponse<>(toResponseList(visible, viewingUserId), page.getNumber(), page.getSize(),
                 page.getTotalElements(), page.getTotalPages(), page.isLast());
+    }
+
+    // Global search (SearchService) - live posts matching every query word in their title, body,
+    // place or author, best match first. Same visibility rules as a profile's post list: GLOBAL
+    // posts for everyone, FOLLOWERS posts only for the author's followers (or the author), and
+    // nothing from a blocked/blocking user.
+    @Transactional(readOnly = true)
+    public List<PostResponse> search(UUID viewingUserId, List<String> terms, java.util.function.Predicate<Post> kind, int limit) {
+        if (terms.isEmpty()) return List.of();
+        List<Post> window = postRepository.findByStatusInOrderByCreatedAtDesc(
+                List.of(PostStatus.OPEN, PostStatus.FULL), PageRequest.of(0, SEARCH_WINDOW)).getContent();
+        Set<UUID> following = viewingUserId == null ? Set.of()
+                : Set.copyOf(followRepository.findFollowingUserIdsByFollowerUserId(viewingUserId));
+        record Hit(Post post, int score) {
+        }
+        List<Post> ranked = window.stream()
+                .filter(kind)
+                .filter(p -> p.getAudience() == PostAudience.GLOBAL
+                        || p.getAuthorUser().getId().equals(viewingUserId)
+                        || following.contains(p.getAuthorUser().getId()))
+                .map(p -> new Hit(p, SearchText.score(terms, p.getTitle(), SearchText.haystack(
+                        p.getBody(), p.getLocationText(), p.getAuthorUser().getName(),
+                        p.getAuthorCompany() == null ? null : p.getAuthorCompany().getCompanyName()))))
+                .filter(h -> h.score() > 0)
+                .sorted(java.util.Comparator.comparingInt(Hit::score).reversed())
+                .map(Hit::post)
+                .toList();
+        List<Post> visible = excludeBlocked(ranked, viewingUserId);
+        return toResponseList(visible.subList(0, Math.min(limit, visible.size())), viewingUserId);
     }
 
     private List<PostResponse> toResponseList(List<Post> posts, UUID viewingUserId) {

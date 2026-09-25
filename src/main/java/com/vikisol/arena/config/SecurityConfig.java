@@ -109,6 +109,7 @@ public class SecurityConfig {
                         // G9 below); this just opens the same door to the main browse surfaces.
                         .requestMatchers(HttpMethod.GET, "/companies", "/companies/*", "/companies/*/jobs").permitAll()
                         .requestMatchers(HttpMethod.GET, "/jobs").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/search").permitAll()
                         .requestMatchers(HttpMethod.GET, "/feed").permitAll()
                         .requestMatchers(HttpMethod.GET, "/marketplace/projects", "/marketplace/projects/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/posts/by-user/*").permitAll()

@@ -21,6 +21,9 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
     Page<Post> findByStatusOrderByCreatedAtDesc(PostStatus status, Pageable pageable);
 
+    // Search candidates - live posts only (open or full), newest first.
+    Page<Post> findByStatusInOrderByCreatedAtDesc(java.util.Collection<PostStatus> statuses, Pageable pageable);
+
     @EntityGraph(attributePaths = "authorUser")
     Page<Post> findByAuthorUserIdOrderByCreatedAtDesc(UUID authorUserId, Pageable pageable);
 
