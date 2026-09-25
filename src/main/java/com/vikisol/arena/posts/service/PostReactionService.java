@@ -26,13 +26,33 @@ public class PostReactionService {
 
     @Transactional
     public void react(UUID userId, UUID postId) {
-        if (postReactionRepository.existsByPostIdAndUserId(postId, userId)) return; // idempotent
+        vote(userId, postId, 1);
+    }
+
+    /**
+     * Phase 2 (Discuss) up/down vote: 1 = up, -1 = down, 0 = clear. Idempotent - voting the
+     * same way twice is a no-op, switching direction updates the one row. See V14.
+     */
+    @Transactional
+    public void vote(UUID userId, UUID postId, int value) {
+        if (value != -1 && value != 0 && value != 1) {
+            throw new BadRequestException("A vote must be 1, -1 or 0");
+        }
+        var existing = postReactionRepository.findByPostIdAndUserId(postId, userId);
+        if (value == 0) {
+            existing.ifPresent(postReactionRepository::delete);
+            return;
+        }
+        if (existing.isPresent()) {
+            existing.get().setValue((short) value);
+            return;
+        }
         Post post = postRepository.findById(postId).orElseThrow(() -> new ResourceNotFoundException("Post not found: " + postId));
         if (blockService.isBlockedEitherDirection(userId, post.getAuthorUser().getId())) {
             throw new BadRequestException("You can't react to this post");
         }
         User user = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("Account not found"));
-        postReactionRepository.save(PostReaction.builder().post(post).user(user).build());
+        postReactionRepository.save(PostReaction.builder().post(post).user(user).value((short) value).build());
     }
 
     @Transactional

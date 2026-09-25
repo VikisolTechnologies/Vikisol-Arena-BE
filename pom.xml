@@ -112,6 +112,15 @@
             <artifactId>spring-boot-starter-test</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- SchemaValidationTest: a throwaway real Postgres (downloaded binaries, no Docker) so
+             every Flyway migration and every entity mapping is checked before it reaches
+             Railway - ddl-auto: validate would otherwise only fail at production startup. -->
+        <dependency>
+            <groupId>io.zonky.test</groupId>
+            <artifactId>embedded-postgres</artifactId>
+            <version>2.0.7</version>
+            <scope>test</scope>
+        </dependency>
         <dependency>
             <groupId>org.springframework.security</groupId>
             <artifactId>spring-security-test</artifactId>

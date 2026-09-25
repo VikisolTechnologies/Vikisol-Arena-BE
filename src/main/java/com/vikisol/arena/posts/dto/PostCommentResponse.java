@@ -8,6 +8,10 @@ public record PostCommentResponse(
         String authorName,
         String authorEmoji,
         String content,
-        String createdAt
+        String createdAt,
+        // Phase 2 (Discuss) threads: the comment this answers (null = top-level), and whether
+        // it was deleted while still having replies (content is blank then).
+        String parentCommentId,
+        boolean deleted
 ) {
 }

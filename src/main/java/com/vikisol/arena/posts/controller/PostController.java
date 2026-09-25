@@ -188,7 +188,7 @@ public class PostController {
     @PostMapping("/{id}/comments")
     public ResponseEntity<ApiResponse<PostCommentResponse>> addComment(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody CreateCommentRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(postCommentService.addComment(principal.getId(), id, request.content())));
+        return ResponseEntity.ok(ApiResponse.ok(postCommentService.addComment(principal.getId(), id, request.content(), request.parentCommentId())));
     }
 
     @DeleteMapping("/{id}/comments/{commentId}")
@@ -202,6 +202,17 @@ public class PostController {
     public ResponseEntity<ApiResponse<Void>> react(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
         postReactionService.react(principal.getId(), id);
         return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    // Phase 2 (Discuss) - {"value": 1 | -1 | 0}.
+    @PutMapping("/{id}/vote")
+    public ResponseEntity<ApiResponse<Void>> vote(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @RequestBody VoteRequest request) {
+        postReactionService.vote(principal.getId(), id, request.value());
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    public record VoteRequest(int value) {
     }
 
     @DeleteMapping("/{id}/react")

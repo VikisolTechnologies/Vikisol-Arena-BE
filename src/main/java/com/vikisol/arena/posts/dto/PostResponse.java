@@ -41,6 +41,10 @@ public record PostResponse(
         long commentCount,
         long reactionCount,
         Boolean myReacted,
+        // Phase 2 (Discuss) votes - score = upvotes minus downvotes; myVote = 1, -1, or null
+        // (not voted / signed out). reactionCount/myReacted above stay "upvotes"/"upvoted".
+        long score,
+        Integer myVote,
         // §4 safety-audit additions - trust signals for whoever's about to meet this post's
         // author in person. authorJoinCount = how many other posts they've been APPROVED into
         // (a real participation track record); authorAccountAgeDays = how long they've had an

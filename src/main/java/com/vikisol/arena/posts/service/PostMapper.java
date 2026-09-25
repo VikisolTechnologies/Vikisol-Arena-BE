@@ -42,13 +42,16 @@ public class PostMapper {
         Boolean myReacted = viewingUserId == null ? null : postReactionRepository.existsByPostIdAndUserId(post.getId(), viewingUserId);
         long authorJoinCount = postJoinRequestRepository.countApprovedByUserIdIn(List.of(post.getAuthorUser().getId())).stream()
                 .mapToLong(PostJoinRequestRepository.UserJoinCountProjection::getCnt).sum();
+        long score = batchScores(List.of(post.getId())).getOrDefault(post.getId(), 0L);
+        Integer myVote = batchMyVotes(List.of(post.getId()), viewingUserId).get(post.getId());
         return toResponse(post, viewingUserId, myJoinStatus, roomId, profile.orElse(null), commentCount, reactionCount, myReacted, authorJoinCount,
-                post.getTags(), post.getMediaUrls());
+                post.getTags(), post.getMediaUrls(), score, myVote);
     }
 
     public PostResponse toResponse(Post post, UUID viewingUserId, String myJoinStatus, String roomId,
                                     Map<UUID, CandidateProfile> authorProfiles) {
-        return toResponse(post, viewingUserId, myJoinStatus, roomId, authorProfiles, Map.of(), Map.of(), Set.of(), Map.of(), Map.of(), Map.of());
+        return toResponse(post, viewingUserId, myJoinStatus, roomId, authorProfiles, Map.of(), Map.of(), Set.of(), Map.of(), Map.of(), Map.of(),
+                Map.of(), Map.of());
     }
 
     // Fully batched overload - one count query and one reaction-membership query for the entire
@@ -59,13 +62,28 @@ public class PostMapper {
                                     Map<UUID, CandidateProfile> authorProfiles,
                                     Map<UUID, Long> commentCounts, Map<UUID, Long> reactionCounts, Set<UUID> myReactedIds,
                                     Map<UUID, Long> authorJoinCounts,
-                                    Map<UUID, List<String>> tagsByPostId, Map<UUID, List<String>> mediaUrlsByPostId) {
+                                    Map<UUID, List<String>> tagsByPostId, Map<UUID, List<String>> mediaUrlsByPostId,
+                                    Map<UUID, Long> scores, Map<UUID, Integer> myVotes) {
         UUID authorId = post.getAuthorUser().getId();
         return toResponse(post, viewingUserId, myJoinStatus, roomId, authorProfiles.get(authorId),
                 commentCounts.getOrDefault(post.getId(), 0L), reactionCounts.getOrDefault(post.getId(), 0L),
                 viewingUserId == null ? null : myReactedIds.contains(post.getId()),
                 authorJoinCounts.getOrDefault(authorId, 0L),
-                tagsByPostId.getOrDefault(post.getId(), List.of()), mediaUrlsByPostId.getOrDefault(post.getId(), List.of()));
+                tagsByPostId.getOrDefault(post.getId(), List.of()), mediaUrlsByPostId.getOrDefault(post.getId(), List.of()),
+                scores.getOrDefault(post.getId(), 0L), myVotes.get(post.getId()));
+    }
+
+    // Phase 2 (Discuss) - batched score (upvotes minus downvotes) and the viewer's own vote.
+    public Map<UUID, Long> batchScores(List<UUID> postIds) {
+        if (postIds.isEmpty()) return Map.of();
+        return postReactionRepository.sumValueByPostIdIn(postIds).stream()
+                .collect(Collectors.toMap(PostCommentRepository.PostCountProjection::getPostId, PostCommentRepository.PostCountProjection::getCnt));
+    }
+
+    public Map<UUID, Integer> batchMyVotes(List<UUID> postIds, UUID viewingUserId) {
+        if (postIds.isEmpty() || viewingUserId == null) return Map.of();
+        return postReactionRepository.findMyVotes(viewingUserId, postIds).stream()
+                .collect(Collectors.toMap(PostReactionRepository.MyVoteProjection::getPostId, v -> (int) v.getValue()));
     }
 
     public Map<UUID, Long> batchCommentCounts(List<UUID> postIds) {
@@ -113,7 +131,7 @@ public class PostMapper {
 
     private PostResponse toResponse(Post post, UUID viewingUserId, String myJoinStatus, String roomId, CandidateProfile authorProfile,
                                      long commentCount, long reactionCount, Boolean myReacted, long authorJoinCount,
-                                     List<String> tags, List<String> mediaUrls) {
+                                     List<String> tags, List<String> mediaUrls, long score, Integer myVote) {
         String authorName = post.getAuthorUser().getName();
         String authorEmoji = "🧑🏽";
         if (authorProfile != null) {
@@ -161,6 +179,7 @@ public class PostMapper {
                 canSeeExactMeetingPoint ? post.getExactMeetingPoint() : null,
                 post.getRequiredVerificationLevel() == null ? null : post.getRequiredVerificationLevel().wireValue(),
                 commentCount, reactionCount, myReacted,
+                score, myVote,
                 authorJoinCount, Math.max(0, authorAccountAgeDays),
                 post.isDemoContent()
         );

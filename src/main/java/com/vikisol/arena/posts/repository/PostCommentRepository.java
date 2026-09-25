@@ -22,7 +22,14 @@ public interface PostCommentRepository extends JpaRepository<PostComment, UUID> 
     long countByPostId(UUID postId);
 
     // PostService.delete() - a hard delete needs its dependents gone first (FK on post_id).
-    void deleteByPostId(UUID postId);
+    // One bulk statement, not Spring's derived delete-by (which removes rows one at a time in
+    // load order): with threaded replies (V14) a parent could go before its reply and trip the
+    // self-referencing FK, whereas Postgres checks a single statement's FKs once, at its end.
+    @org.springframework.data.jpa.repository.Modifying(flushAutomatically = true, clearAutomatically = true)
+    @org.springframework.data.jpa.repository.Query("delete from PostComment c where c.post.id = :postId")
+    void deleteByPostId(@org.springframework.data.repository.query.Param("postId") UUID postId);
+
+    boolean existsByParentCommentId(UUID parentCommentId);
 
     // Batched comment-count warm-up for a feed/trending window - one query for the whole page
     // instead of one per post, same shape as every other batch-count method in this codebase

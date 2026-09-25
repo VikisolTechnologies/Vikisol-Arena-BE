@@ -50,13 +50,22 @@ public class PostCommentService {
     }
 
     @Transactional
-    public PostCommentResponse addComment(UUID userId, UUID postId, String content) {
+    public PostCommentResponse addComment(UUID userId, UUID postId, String content, UUID parentCommentId) {
         Post post = requirePost(postId);
+        PostComment parent = null;
+        if (parentCommentId != null) {
+            parent = postCommentRepository.findById(parentCommentId)
+                    .filter(c -> c.getPost().getId().equals(postId))
+                    .orElseThrow(() -> new ResourceNotFoundException("That reply's comment isn't on this post"));
+            if (parent.isDeleted()) {
+                throw new BadRequestException("That comment was deleted - reply to the thread instead");
+            }
+        }
         if (blockService.isBlockedEitherDirection(userId, post.getAuthorUser().getId())) {
             throw new BadRequestException("You can't comment on this post");
         }
         User author = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("Account not found"));
-        PostComment comment = postCommentRepository.save(PostComment.builder().post(post).authorUser(author).content(content).build());
+        PostComment comment = postCommentRepository.save(PostComment.builder().post(post).authorUser(author).content(content).parentComment(parent).build());
         return toResponse(comment, batchAuthorProfiles(List.of(comment)));
     }
 
@@ -72,10 +81,22 @@ public class PostCommentService {
         if (!isAuthor && !isPostOwner) {
             throw new AccessDeniedException("Not your comment");
         }
+        // Still has replies: keep the row as "[deleted]" so the replies under it keep their place.
+        if (postCommentRepository.existsByParentCommentId(commentId)) {
+            comment.setDeleted(true);
+            comment.setContent("");
+            return;
+        }
         postCommentRepository.delete(comment);
     }
 
     private PostCommentResponse toResponse(PostComment comment, Map<UUID, CandidateProfile> profiles) {
+        String parentId = comment.getParentComment() == null ? null : comment.getParentComment().getId().toString();
+        if (comment.isDeleted()) {
+            // Who wrote a deleted comment isn't shown either - only that something was here.
+            return new PostCommentResponse(comment.getId().toString(), comment.getPost().getId().toString(),
+                    null, "[deleted]", "", "", comment.getCreatedAt().toString(), parentId, true);
+        }
         String name = comment.getAuthorUser().getName();
         String emoji = "🧑🏽";
         CandidateProfile profile = profiles.get(comment.getAuthorUser().getId());
@@ -84,7 +105,8 @@ public class PostCommentService {
             emoji = profile.getAvatarEmoji();
         }
         return new PostCommentResponse(comment.getId().toString(), comment.getPost().getId().toString(),
-                comment.getAuthorUser().getId().toString(), name, emoji, comment.getContent(), comment.getCreatedAt().toString());
+                comment.getAuthorUser().getId().toString(), name, emoji, comment.getContent(), comment.getCreatedAt().toString(),
+                parentId, false);
     }
 
     private Post requirePost(UUID postId) {

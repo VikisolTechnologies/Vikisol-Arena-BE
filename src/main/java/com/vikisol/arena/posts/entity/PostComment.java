@@ -30,4 +30,14 @@ public class PostComment extends BaseEntity {
 
     @Column(nullable = false, columnDefinition = "TEXT")
     private String content;
+
+    // Phase 2 (Discuss) threaded replies - the comment this one answers; null = top-level.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "parent_comment_id")
+    private PostComment parentComment;
+
+    // Soft delete for a comment that still has replies - see V14 and PostCommentService.
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean deleted = false;
 }

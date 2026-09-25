@@ -25,4 +25,9 @@ public class PostReaction extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
+
+    // Phase 2 (Discuss): 1 = upvote (every pre-existing "like"), -1 = downvote. See V14.
+    @Column(nullable = false)
+    @Builder.Default
+    private short value = 1;
 }
