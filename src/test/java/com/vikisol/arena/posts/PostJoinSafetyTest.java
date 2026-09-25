@@ -50,6 +50,38 @@ class PostJoinSafetyTest extends EmbeddedPostgresAppTest {
         assertThat(owned.getSpotsFilled()).isZero();
     }
 
+    @Test void leavingFreesAFullActivityAndAllowsRejoining() {
+        var host = user();
+        var activity = post(host, 1);
+        activity.setVisibility(PostVisibility.PUBLIC);
+        var participant = user();
+        service.requestJoin(participant.getId(), activity.getId());
+        assertThat(posts.findById(activity.getId()).orElseThrow().getStatus()).isEqualTo(PostStatus.FULL);
+
+        service.withdrawJoin(participant.getId(), activity.getId());
+        var reopened = posts.findById(activity.getId()).orElseThrow();
+        assertThat(reopened.getSpotsFilled()).isZero();
+        assertThat(reopened.getStatus()).isEqualTo(PostStatus.OPEN);
+        assertThat(joins.findByPostIdAndUserId(activity.getId(), participant.getId()).orElseThrow().getStatus())
+                .isEqualTo(PostJoinStatus.WITHDRAWN);
+
+        service.requestJoin(participant.getId(), activity.getId());
+        assertThat(posts.findById(activity.getId()).orElseThrow().getSpotsFilled()).isEqualTo(1);
+    }
+
+    @Test void withdrawingAPendingRequestDoesNotTakeASpot() {
+        var host = user();
+        var activity = post(host, 2);
+        var participant = user();
+        pending(activity, participant);
+        service.withdrawJoin(participant.getId(), activity.getId());
+        assertThat(joins.findByPostIdAndUserId(activity.getId(), participant.getId()).orElseThrow().getStatus())
+                .isEqualTo(PostJoinStatus.WITHDRAWN);
+        assertThat(activity.getSpotsFilled()).isZero();
+        assertThatThrownBy(() -> service.withdrawJoin(user().getId(), activity.getId()))
+                .hasMessageContaining("haven't requested");
+    }
+
     @Test void cannotApproveWhenFullCancelledOrStarted() {
         var host = user(); var activity = post(host, 1); var request = pending(activity, user());
         activity.setSpotsFilled(1);

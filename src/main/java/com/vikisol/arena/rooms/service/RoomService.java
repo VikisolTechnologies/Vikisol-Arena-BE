@@ -115,6 +115,15 @@ public class RoomService {
         notificationService.notifyRemovedFromRoom(target.getUser(), post);
     }
 
+    /** Drops a participant from the post's room without touching capacity. PostService owns the spot count. */
+    @Transactional
+    public void dropParticipant(UUID postId, UUID userId) {
+        roomRepository.findByPostId(postId).ifPresent(room ->
+                roomMemberRepository.findByRoomIdAndUserId(room.getId(), userId)
+                        .filter(member -> member.getRole() != RoomMemberRole.ADMIN)
+                        .ifPresent(roomMemberRepository::delete));
+    }
+
     @Transactional(readOnly = true)
     public Optional<String> findRoomIdForPost(UUID postId) {
         return roomRepository.findByPostId(postId).map(r -> r.getId().toString());

@@ -91,6 +91,12 @@ public class NotificationService {
                 "You're in! \"" + preview(joinRequest.getPost().getBody()) + "\" now has a room.");
     }
 
+    public void notifyPostJoinWithdrawn(Post post, String participantName, boolean hadJoined) {
+        notify(post.getAuthorUser(), NotificationType.SYSTEM,
+                hadJoined ? "Someone left" : "Join request withdrawn",
+                participantName + (hadJoined ? " left \"" : " withdrew their request to join \"") + preview(post.getBody()) + "\".");
+    }
+
     public void notifyPostJoinDeclined(PostJoinRequest joinRequest) {
         notify(joinRequest.getUser(), NotificationType.SYSTEM, "Join request declined",
                 "Your request to join \"" + preview(joinRequest.getPost().getBody()) + "\" wasn't accepted this time.");

@@ -170,6 +170,12 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, true)));
     }
 
+    @DeleteMapping("/{id}/joins/me")
+    public ResponseEntity<ApiResponse<PostJoinRequestResponse>> withdrawJoin(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.withdrawJoin(principal.getId(), id)));
+    }
+
     @PutMapping("/{id}/joins/{joinId}/decline")
     public ResponseEntity<ApiResponse<PostJoinRequestResponse>> declineJoin(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId) {

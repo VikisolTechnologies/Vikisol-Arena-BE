@@ -471,7 +471,8 @@ public class PostService {
         if (post.getAuthorUser().getId().equals(userId)) {
             throw new BadRequestException("You can't join your own post");
         }
-        if (postJoinRequestRepository.findByPostIdAndUserId(postId, userId).isPresent()) {
+        PostJoinRequest existing = postJoinRequestRepository.findByPostIdAndUserId(postId, userId).orElse(null);
+        if (existing != null && existing.getStatus() != PostJoinStatus.WITHDRAWN && existing.getStatus() != PostJoinStatus.DECLINED) {
             throw new BadRequestException("You've already requested to join this post");
         }
         requireOpenCapacity(post);
@@ -488,11 +489,10 @@ public class PostService {
         }
 
         boolean autoApprove = post.getVisibility() == PostVisibility.PUBLIC;
-        PostJoinRequest joinRequest = postJoinRequestRepository.save(PostJoinRequest.builder()
-                .post(post).user(user)
-                .status(autoApprove ? PostJoinStatus.APPROVED : PostJoinStatus.PENDING)
-                .decidedAt(autoApprove ? Instant.now() : null)
-                .build());
+        PostJoinRequest joinRequest = existing != null ? existing : PostJoinRequest.builder().post(post).user(user).build();
+        joinRequest.setStatus(autoApprove ? PostJoinStatus.APPROVED : PostJoinStatus.PENDING);
+        joinRequest.setDecidedAt(autoApprove ? Instant.now() : null);
+        joinRequest = postJoinRequestRepository.save(joinRequest);
 
         if (autoApprove) {
             onJoinApproved(post, joinRequest);
@@ -538,6 +538,28 @@ public class PostService {
         return mapper.toResponse(joinRequest);
     }
 
+    @Transactional
+    public PostJoinRequestResponse withdrawJoin(UUID userId, UUID postId) {
+        Post post = requireLockedPost(postId);
+        PostJoinRequest joinRequest = postJoinRequestRepository.findByPostIdAndUserId(postId, userId)
+                .orElseThrow(() -> new ResourceNotFoundException("You haven't requested to join this post"));
+        if (joinRequest.getStatus() != PostJoinStatus.PENDING && joinRequest.getStatus() != PostJoinStatus.APPROVED) {
+            throw new BadRequestException("There's nothing to withdraw");
+        }
+        boolean hadJoined = joinRequest.getStatus() == PostJoinStatus.APPROVED;
+        joinRequest.setStatus(PostJoinStatus.WITHDRAWN);
+        joinRequest.setDecidedAt(Instant.now());
+        postJoinRequestRepository.save(joinRequest);
+        if (hadJoined) {
+            roomService.dropParticipant(postId, userId);
+            if (post.getSpotsFilled() > 0) post.setSpotsFilled(post.getSpotsFilled() - 1);
+            if (post.getStatus() == PostStatus.FULL) post.setStatus(PostStatus.OPEN);
+            postRepository.save(post);
+        }
+        notificationService.notifyPostJoinWithdrawn(post, joinRequest.getUser().getName(), hadJoined);
+        return mapper.toResponse(joinRequest);
+    }
+
     @Transactional(readOnly = true)
     public List<PostJoinRequestResponse> getJoinRequests(UUID userId, UUID postId) {
         Post post = requirePost(postId);
@@ -580,6 +602,7 @@ public class PostService {
     private String myJoinStatus(Post post, UUID viewingUserId) {
         if (viewingUserId == null || !post.isJoinable()) return null;
         return postJoinRequestRepository.findByPostIdAndUserId(post.getId(), viewingUserId)
+                .filter(j -> j.getStatus() != PostJoinStatus.WITHDRAWN)
                 .map(j -> j.getStatus().wireValue()).orElse(null);
     }
 
