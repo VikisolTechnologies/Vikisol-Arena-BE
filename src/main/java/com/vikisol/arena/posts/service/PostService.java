@@ -17,6 +17,7 @@ import com.vikisol.arena.follows.service.BlockService;
 import com.vikisol.arena.notifications.service.NotificationService;
 import com.vikisol.arena.platform.repository.ModerationItemRepository;
 import com.vikisol.arena.platform.service.ModerationService;
+import com.vikisol.arena.common.service.CloudinaryService;
 import com.vikisol.arena.posts.dto.CreateCompanyPostRequest;
 import com.vikisol.arena.posts.dto.CreatePostRequest;
 import com.vikisol.arena.posts.dto.PostJoinRequestResponse;
@@ -69,6 +70,7 @@ public class PostService {
     private final PostReactionRepository postReactionRepository;
     private final PostCommentRepository postCommentRepository;
     private final ModerationItemRepository moderationItemRepository;
+    private final CloudinaryService cloudinaryService;
 
     @Transactional(readOnly = true)
     public List<PostResponse> getFeed(UUID viewingUserId, int page, int size) {
@@ -198,6 +200,7 @@ public class PostService {
         if (intentType == PostIntentType.ACTIVITY) {
             requireAdult(author);
         }
+        cloudinaryService.requireOwnMedia(request.mediaUrls());
 
         Post.PostBuilder builder = Post.builder()
                 .authorUser(author)

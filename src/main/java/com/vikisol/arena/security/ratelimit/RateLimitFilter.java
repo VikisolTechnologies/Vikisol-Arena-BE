@@ -105,7 +105,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
             // here too rather than the generic default bucket.
             return new Bucket("auth", authPerMinute);
         }
-        if (path.endsWith("/cv") && "POST".equalsIgnoreCase(request.getMethod())) {
+        if ((path.endsWith("/cv") || path.endsWith("/media/upload-signature")) && "POST".equalsIgnoreCase(request.getMethod())) {
             return new Bucket("upload", uploadPerMinute);
         }
         if (path.endsWith("/unlock")) {

@@ -120,6 +120,13 @@ app:
     signing-secret: ${FILE_SIGNING_SECRET:local-dev-only-file-signing-secret-change-me}
     signed-url-ttl-ms: ${FILE_SIGNED_URL_TTL_MS:600000} # 10 min
 
+  # Post photos/videos - uploaded browser -> Cloudinary with a server-issued signature (see
+  # CloudinaryService). Blank = uploads report "not set up yet"; nothing else is affected.
+  cloudinary:
+    cloud-name: ${CLOUDINARY_CLOUD_NAME:}
+    api-key: ${CLOUDINARY_API_KEY:}
+    api-secret: ${CLOUDINARY_API_SECRET:}
+
   seed:
     enabled: ${SEED_ENABLED:true}
 
