@@ -33,4 +33,8 @@ public class PostJoinRequest extends BaseEntity {
     private PostJoinStatus status = PostJoinStatus.PENDING;
 
     private Instant decidedAt;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 32)
+    private PostJoinOutcome outcome;
 }

@@ -82,6 +82,23 @@ class PostJoinSafetyTest extends EmbeddedPostgresAppTest {
                 .hasMessageContaining("haven't requested");
     }
 
+    @Test void hostRecordsAttendanceOnlyAfterStartAndOnlyOnTheirPost() {
+        var host = user();
+        var activity = post(host, 2);
+        var participant = user();
+        var request = pending(activity, participant);
+        service.decideJoin(host.getId(), activity.getId(), request.getId(), true);
+        assertThatThrownBy(() -> service.recordOutcome(host.getId(), activity.getId(), request.getId(), "attended"))
+                .hasMessageContaining("after the activity starts");
+        activity.setStartsAt(Instant.now().minusSeconds(60));
+        var recorded = service.recordOutcome(host.getId(), activity.getId(), request.getId(), "no_show");
+        assertThat(recorded.outcome()).isEqualTo("no_show");
+        var someoneElse = user();
+        var other = post(someoneElse, 2);
+        assertThatThrownBy(() -> service.recordOutcome(host.getId(), other.getId(), request.getId(), "attended"))
+                .hasMessageContaining("Not your post");
+    }
+
     @Test void cannotApproveWhenFullCancelledOrStarted() {
         var host = user(); var activity = post(host, 1); var request = pending(activity, user());
         activity.setSpotsFilled(1);

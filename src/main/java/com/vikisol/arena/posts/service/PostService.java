@@ -560,6 +560,32 @@ public class PostService {
         return mapper.toResponse(joinRequest);
     }
 
+    @Transactional
+    public PostJoinRequestResponse recordOutcome(UUID userId, UUID postId, UUID joinRequestId, String outcomeWire) {
+        Post post = requireLockedPost(postId);
+        if (!post.getAuthorUser().getId().equals(userId)) {
+            throw new AccessDeniedException("Not your post");
+        }
+        if (post.getStartsAt() != null && post.getStartsAt().isAfter(Instant.now())) {
+            throw new BadRequestException("You can record who showed up after the activity starts");
+        }
+        PostJoinOutcome outcome;
+        try {
+            outcome = PostJoinOutcome.fromWire(outcomeWire);
+        } catch (IllegalArgumentException ex) {
+            throw new BadRequestException(ex.getMessage());
+        }
+        PostJoinRequest joinRequest = postJoinRequestRepository.findByIdAndPostId(joinRequestId, postId)
+                .orElseThrow(() -> new ResourceNotFoundException("Join request not found: " + joinRequestId));
+        if (joinRequest.getStatus() != PostJoinStatus.APPROVED) {
+            throw new BadRequestException("Only someone who joined can be marked present or absent");
+        }
+        joinRequest.setOutcome(outcome);
+        postJoinRequestRepository.save(joinRequest);
+        notificationService.notifyJoinOutcome(joinRequest);
+        return mapper.toResponse(joinRequest);
+    }
+
     @Transactional(readOnly = true)
     public List<PostJoinRequestResponse> getJoinRequests(UUID userId, UUID postId) {
         Post post = requirePost(postId);

@@ -29,7 +29,9 @@ public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest
     // actually been approved into elsewhere, a track record of real participation. Batched per
     // feed/nearby window, same shape as every other batch-count query in PostMapper.
     @Query("select j.user.id as userId, count(j) as cnt from PostJoinRequest j " +
-            "where j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED and j.user.id in :userIds group by j.user.id")
+            "where j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED " +
+            "and (j.outcome is null or j.outcome <> com.vikisol.arena.posts.entity.PostJoinOutcome.NO_SHOW) " +
+            "and j.user.id in :userIds group by j.user.id")
     List<UserJoinCountProjection> countApprovedByUserIdIn(@Param("userIds") List<UUID> userIds);
 
     interface UserJoinCountProjection {

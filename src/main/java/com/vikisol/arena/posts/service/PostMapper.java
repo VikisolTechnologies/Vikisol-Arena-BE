@@ -214,7 +214,8 @@ public class PostMapper {
         return new PostJoinRequestResponse(
                 joinRequest.getId().toString(), joinRequest.getPost().getId().toString(),
                 joinRequest.getUser().getId().toString(), userName, userEmoji,
-                joinRequest.getStatus().wireValue(), joinRequest.getCreatedAt().toString());
+                joinRequest.getStatus().wireValue(), joinRequest.getCreatedAt().toString(),
+                joinRequest.getOutcome() == null ? null : joinRequest.getOutcome().wireValue());
     }
 
     public List<PostJoinRequestResponse> toResponseList(List<PostJoinRequest> requests) {

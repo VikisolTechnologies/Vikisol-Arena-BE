@@ -176,6 +176,15 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.withdrawJoin(principal.getId(), id)));
     }
 
+    @PutMapping("/{id}/joins/{joinId}/outcome")
+    public ResponseEntity<ApiResponse<PostJoinRequestResponse>> recordOutcome(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId,
+            @RequestBody OutcomeRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.recordOutcome(principal.getId(), id, joinId, request.outcome())));
+    }
+
+    public record OutcomeRequest(String outcome) {}
+
     @PutMapping("/{id}/joins/{joinId}/decline")
     public ResponseEntity<ApiResponse<PostJoinRequestResponse>> declineJoin(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId) {

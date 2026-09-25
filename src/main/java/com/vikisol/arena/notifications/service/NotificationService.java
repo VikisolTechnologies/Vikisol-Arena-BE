@@ -97,6 +97,14 @@ public class NotificationService {
                 participantName + (hadJoined ? " left \"" : " withdrew their request to join \"") + preview(post.getBody()) + "\".");
     }
 
+    public void notifyJoinOutcome(PostJoinRequest joinRequest) {
+        boolean showed = joinRequest.getOutcome() == com.vikisol.arena.posts.entity.PostJoinOutcome.ATTENDED;
+        notify(joinRequest.getUser(), NotificationType.SYSTEM,
+                showed ? "You were marked present" : "You were marked as a no-show",
+                "The host recorded that you " + (showed ? "showed up for \"" : "didn't show up for \"")
+                        + preview(joinRequest.getPost().getBody()) + "\".");
+    }
+
     public void notifyPostJoinDeclined(PostJoinRequest joinRequest) {
         notify(joinRequest.getUser(), NotificationType.SYSTEM, "Join request declined",
                 "Your request to join \"" + preview(joinRequest.getPost().getBody()) + "\" wasn't accepted this time.");

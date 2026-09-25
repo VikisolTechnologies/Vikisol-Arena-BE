@@ -7,6 +7,7 @@ public record PostJoinRequestResponse(
         String userName,
         String userEmoji,
         String status,
-        String createdAt
+        String createdAt,
+        String outcome
 ) {
 }
