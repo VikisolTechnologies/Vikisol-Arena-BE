@@ -24,6 +24,30 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     // Search candidates - live posts only (open or full), newest first.
     Page<Post> findByStatusInOrderByCreatedAtDesc(java.util.Collection<PostStatus> statuses, Pageable pageable);
 
+    // Discuss thread lists (Phase 2) - live discussions, optionally inside one community.
+    @Query("select p from Post p where p.status in :statuses and p.intentType in :types order by p.createdAt desc")
+    Page<Post> findDiscussions(@Param("statuses") java.util.Collection<PostStatus> statuses,
+                               @Param("types") java.util.Collection<com.vikisol.arena.posts.entity.PostIntentType> types, Pageable pageable);
+
+    @Query("select p from Post p where p.community.id = :communityId and p.status in :statuses order by p.createdAt desc")
+    Page<Post> findByCommunity(@Param("communityId") UUID communityId,
+                               @Param("statuses") java.util.Collection<PostStatus> statuses, Pageable pageable);
+
+    // DemoContentService.removeAll - a real user's post in a demo community goes back to general
+    // Discuss instead of blocking the community's removal.
+    @org.springframework.data.jpa.repository.Modifying(flushAutomatically = true)
+    @Query("update Post p set p.community = null where p.community.id = :communityId")
+    void detachFromCommunity(@Param("communityId") UUID communityId);
+
+    interface CommunityPostCount {
+        UUID getCommunityId();
+
+        long getCnt();
+    }
+
+    @Query("select p.community.id as communityId, count(p) as cnt from Post p where p.community.id in :ids and p.status in :statuses group by p.community.id")
+    List<CommunityPostCount> countByCommunity(@Param("ids") java.util.Collection<UUID> ids, @Param("statuses") java.util.Collection<PostStatus> statuses);
+
     @EntityGraph(attributePaths = "authorUser")
     Page<Post> findByAuthorUserIdOrderByCreatedAtDesc(UUID authorUserId, Pageable pageable);
 

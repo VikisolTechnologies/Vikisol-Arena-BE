@@ -181,7 +181,11 @@ public class PostMapper {
                 commentCount, reactionCount, myReacted,
                 score, myVote,
                 authorJoinCount, Math.max(0, authorAccountAgeDays),
-                post.isDemoContent()
+                post.isDemoContent(),
+                post.getCommunity() == null ? null : post.getCommunity().getId().toString(),
+                post.getCommunity() == null ? null : post.getCommunity().getSlug(),
+                post.getCommunity() == null ? null : post.getCommunity().getName(),
+                post.getCommunity() == null ? null : post.getCommunity().getEmoji()
         );
     }
 

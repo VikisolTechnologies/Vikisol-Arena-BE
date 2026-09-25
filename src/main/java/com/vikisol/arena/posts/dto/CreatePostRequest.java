@@ -25,7 +25,9 @@ public record CreatePostRequest(
         Double lat,
         Double lng,
         String exactMeetingPoint,
-        String requiredVerificationLevel
+        String requiredVerificationLevel,
+        // Phase 2 (Discuss) - post a question/update into this community (id); null = general.
+        String communityId
 ) {
     public CreatePostRequest {
         if (tags == null) tags = List.of();

@@ -118,6 +118,8 @@ import java.util.UUID;
 public class DemoContentService {
 
     private final UserRepository userRepository;
+    private final com.vikisol.arena.communities.repository.CommunityRepository communityRepository;
+    private final com.vikisol.arena.communities.repository.CommunityMemberRepository communityMemberRepository;
     private final CandidateProfileRepository candidateProfileRepository;
     private final PostRepository postRepository;
     private final PostJoinRequestRepository postJoinRequestRepository;
@@ -864,6 +866,18 @@ public class DemoContentService {
             moderationItemRepository.deleteByPostId(post.getId());
         }
         postRepository.deleteAll(posts);
+
+        // Phase 2 (Discuss) communities: demo ones go entirely (real members' rows included; a
+        // real user's post in one is moved back to general Discuss), and demo users leave any
+        // real community they were in.
+        for (var community : communityRepository.findByDemoContentTrue()) {
+            postRepository.detachFromCommunity(community.getId());
+            communityMemberRepository.deleteByCommunityId(community.getId());
+            communityRepository.delete(community);
+        }
+        for (User user : users) {
+            communityMemberRepository.deleteByUserId(user.getId());
+        }
 
         for (Project project : projects) {
             bidRepository.deleteByProjectId(project.getId());

@@ -125,6 +125,15 @@ public class Post extends BaseEntity {
     @Column(columnDefinition = "TEXT")
     private String embedding;
 
+    // Phase 2 (Discuss) - the community a discussion was posted in (null = general Discuss), and
+    // why a community moderator removed it (status is CLOSED then). See V15.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "community_id")
+    private com.vikisol.arena.communities.entity.Community community;
+
+    @Column(length = 200)
+    private String removedReason;
+
     public boolean isJoinable() {
         return intentType == PostIntentType.ACTIVITY || intentType == PostIntentType.ASK;
     }

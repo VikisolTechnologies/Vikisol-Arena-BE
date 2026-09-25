@@ -56,6 +56,8 @@ public class PostService {
 
     // How many of the newest live posts search looks through - see SearchText on why in-memory.
     private static final int SEARCH_WINDOW = 2000;
+    // Discuss thread lists rank ("top") within the newest this-many threads.
+    private static final int DISCUSS_WINDOW = 500;
 
     private final PostRepository postRepository;
     private final PostJoinRequestRepository postJoinRequestRepository;
@@ -75,6 +77,8 @@ public class PostService {
     private final PostCommentRepository postCommentRepository;
     private final ModerationItemRepository moderationItemRepository;
     private final CloudinaryService cloudinaryService;
+    private final com.vikisol.arena.communities.repository.CommunityRepository communityRepository;
+    private final com.vikisol.arena.communities.repository.CommunityMemberRepository communityMemberRepository;
 
     @Transactional(readOnly = true)
     public List<PostResponse> getFeed(UUID viewingUserId, int page, int size) {
@@ -147,6 +151,65 @@ public class PostService {
         // (see getUserPosts' own comment) rather than a second, more complex counting query.
         return new PagedResponse<>(toResponseList(visible, viewingUserId), page.getNumber(), page.getSize(),
                 page.getTotalElements(), page.getTotalPages(), page.isLast());
+    }
+
+    // Phase 2 (Discuss) - posting into a community: only questions/updates (activities live on
+    // Nearby), never while banned there, and posting joins you if you weren't a member yet.
+    private com.vikisol.arena.communities.entity.Community resolveCommunityForPost(User author, PostIntentType intentType, String communityId) {
+        if (communityId == null || communityId.isBlank()) return null;
+        if (intentType != PostIntentType.ASK && intentType != PostIntentType.UPDATE) {
+            throw new BadRequestException("Only questions and updates can go in a community - activities are shared on Nearby.");
+        }
+        UUID id;
+        try {
+            id = UUID.fromString(communityId.trim());
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException("That community doesn't exist");
+        }
+        var community = communityRepository.findById(id).orElseThrow(() -> new BadRequestException("That community doesn't exist"));
+        var membership = communityMemberRepository.findByCommunityIdAndUserId(id, author.getId());
+        if (membership.isPresent() && membership.get().isBanned()) {
+            throw new BadRequestException("You've been removed from this community, so you can't post in it.");
+        }
+        if (membership.isEmpty()) {
+            communityMemberRepository.save(com.vikisol.arena.communities.entity.CommunityMember.builder()
+                    .community(community).user(author).role(com.vikisol.arena.communities.entity.CommunityRole.MEMBER).build());
+        }
+        return community;
+    }
+
+    /**
+     * Phase 2 (Discuss) thread list - questions and updates, all of Discuss or one community.
+     * sort "top" = highest score first (ties newest first); anything else = newest first. Same
+     * visibility rules as search: followers-only posts only for followers, nothing from blocked users.
+     */
+    @Transactional(readOnly = true)
+    public List<PostResponse> listDiscussions(UUID viewingUserId, UUID communityId, String sort, int page, int size) {
+        List<PostStatus> live = List.of(PostStatus.OPEN, PostStatus.FULL);
+        List<Post> window = communityId == null
+                ? postRepository.findDiscussions(live, List.of(PostIntentType.ASK, PostIntentType.UPDATE), PageRequest.of(0, DISCUSS_WINDOW)).getContent()
+                : postRepository.findByCommunity(communityId, live, PageRequest.of(0, DISCUSS_WINDOW)).getContent();
+        Set<UUID> following = viewingUserId == null ? Set.of()
+                : Set.copyOf(followRepository.findFollowingUserIdsByFollowerUserId(viewingUserId));
+        List<Post> visible = excludeBlocked(window.stream()
+                .filter(p -> p.getAudience() == PostAudience.GLOBAL
+                        || p.getAuthorUser().getId().equals(viewingUserId)
+                        || following.contains(p.getAuthorUser().getId()))
+                .toList(), viewingUserId);
+        if ("top".equals(sort)) {
+            Map<UUID, Long> scores = mapper.batchScores(visible.stream().map(Post::getId).toList());
+            visible = visible.stream()
+                    .sorted(java.util.Comparator.comparingLong((Post p) -> scores.getOrDefault(p.getId(), 0L)).reversed()
+                            .thenComparing(Post::getCreatedAt, java.util.Comparator.reverseOrder()))
+                    .toList();
+        }
+        return toResponseList(page(visible, page, size), viewingUserId);
+    }
+
+    private static <T> List<T> page(List<T> all, int page, int size) {
+        int from = Math.max(0, page) * Math.max(1, size);
+        if (from >= all.size()) return List.of();
+        return all.subList(from, Math.min(all.size(), from + Math.max(1, size)));
     }
 
     // Global search (SearchService) - live posts matching every query word in their title, body,
@@ -236,6 +299,7 @@ public class PostService {
             requireAdult(author);
         }
         cloudinaryService.requireOwnMedia(request.mediaUrls());
+        com.vikisol.arena.communities.entity.Community community = resolveCommunityForPost(author, intentType, request.communityId());
 
         Post.PostBuilder builder = Post.builder()
                 .authorUser(author)
@@ -251,6 +315,7 @@ public class PostService {
                 .endsAt(request.endsAt() == null ? null : Instant.parse(request.endsAt()))
                 .tags(request.tags())
                 .mediaUrls(request.mediaUrls())
+                .community(community)
                 .exactMeetingPoint(request.exactMeetingPoint())
                 .requiredVerificationLevel(request.requiredVerificationLevel() == null || request.requiredVerificationLevel().isBlank()
                         ? null : VerificationLevel.valueOf(request.requiredVerificationLevel().trim().toUpperCase()));

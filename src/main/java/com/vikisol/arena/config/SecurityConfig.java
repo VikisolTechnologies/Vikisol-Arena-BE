@@ -110,6 +110,10 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/companies", "/companies/*", "/companies/*/jobs").permitAll()
                         .requestMatchers(HttpMethod.GET, "/jobs").permitAll()
                         .requestMatchers(HttpMethod.GET, "/search").permitAll()
+                        // Phase 2 (Discuss) - browsing communities and threads is open to guests;
+                        // "/communities/mine" stays authenticated (it's listed first on purpose).
+                        .requestMatchers(HttpMethod.GET, "/communities/mine").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/discuss/threads", "/communities", "/communities/*", "/communities/*/moderators").permitAll()
                         .requestMatchers(HttpMethod.GET, "/feed").permitAll()
                         .requestMatchers(HttpMethod.GET, "/marketplace/projects", "/marketplace/projects/*").permitAll()
                         .requestMatchers(HttpMethod.GET, "/posts/by-user/*").permitAll()

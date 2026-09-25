@@ -56,6 +56,11 @@ public record PostResponse(
         // alive." Straight passthrough of BaseEntity.demoContent - see DemoContentService.
         // No `is` prefix - matches this record's own existing boolean field convention (joinable,
         // mine), which Jackson serializes as-is for records rather than stripping a get/is prefix.
-        boolean demoContent
+        boolean demoContent,
+        // Phase 2 (Discuss) - the community a discussion was posted in (all null = general).
+        String communityId,
+        String communitySlug,
+        String communityName,
+        String communityEmoji
 ) {
 }
