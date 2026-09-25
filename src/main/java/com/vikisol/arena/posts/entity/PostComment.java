@@ -40,4 +40,9 @@ public class PostComment extends BaseEntity {
     @Column(nullable = false)
     @Builder.Default
     private boolean deleted = false;
+
+    // Phase 2 (Discuss) part C - shown under a per-thread alias. See V16.
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean anonymous = false;
 }

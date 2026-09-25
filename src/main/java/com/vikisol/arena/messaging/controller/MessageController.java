@@ -37,8 +37,24 @@ public class MessageController {
     @PostMapping("/conversations")
     public ResponseEntity<ApiResponse<ConversationResponse>> getOrCreateConversation(
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody CreateConversationRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(
-                conversationService.getOrCreate(principal.getId(), UUID.fromString(request.participantUserId()), request.context())));
+        return ResponseEntity.ok(ApiResponse.ok(conversationService.start(principal.getId(), request)));
+    }
+
+    // Phase 2 part C - either person can close a chat (mostly for anonymous ones): no more
+    // messages, and the other person can't open a new anonymous chat with whoever closed it.
+    @PostMapping("/conversations/{id}/close")
+    public ResponseEntity<ApiResponse<ConversationResponse>> close(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(conversationService.close(principal.getId(), id)));
+    }
+
+    public record ReportConversationRequest(@jakarta.validation.constraints.Size(max = 500) String reason) {
+    }
+
+    @PostMapping("/conversations/{id}/report")
+    public ResponseEntity<ApiResponse<Void>> report(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody ReportConversationRequest request) {
+        conversationService.report(principal.getId(), id, request.reason());
+        return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
     @PostMapping("/conversations/{id}/messages")

@@ -58,6 +58,11 @@ public class ModerationItem extends BaseEntity {
     @JoinColumn(name = "post_id")
     private Post post;
 
+    // Phase 2 part C - a reported (usually anonymous) conversation. See V16.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "conversation_id")
+    private com.vikisol.arena.messaging.entity.Conversation conversation;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "reporter_user_id")
     private User reporter;

@@ -134,7 +134,15 @@ public class Post extends BaseEntity {
     @Column(length = 200)
     private String removedReason;
 
+    // Phase 2 (Discuss) part C - shown under an alias instead of the author (see PostMapper).
+    // Questions/updates only. See V16.
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean anonymous = false;
+
+    // An anonymous post can't be "joined": joining creates a Room hosted by the author, which
+    // would reveal who they are.
     public boolean isJoinable() {
-        return intentType == PostIntentType.ACTIVITY || intentType == PostIntentType.ASK;
+        return !anonymous && (intentType == PostIntentType.ACTIVITY || intentType == PostIntentType.ASK);
     }
 }

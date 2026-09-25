@@ -142,7 +142,8 @@ public class FeedRankingService {
     private double score(Post post, Set<UUID> following, float[] interestVector, Map<UUID, Long> reportCounts) {
         double hoursOld = Duration.between(post.getCreatedAt(), Instant.now()).toMinutes() / 60.0;
         double recencyScore = 100.0 * Math.pow(0.5, hoursOld / RECENCY_HALF_LIFE_HOURS);
-        double followBonus = following.contains(post.getAuthorUser().getId()) ? FOLLOW_BONUS : 0.0;
+        // No follow boost for an anonymous post - its ranking for a follower mustn't hint who wrote it.
+        double followBonus = !post.isAnonymous() && following.contains(post.getAuthorUser().getId()) ? FOLLOW_BONUS : 0.0;
         // Proximity term: intentionally still 0 here - proximity is served by PostService's own
         // dedicated nearby/radius search (Map screen), not blended into this general feed score.
         double proximityScore = 0.0;

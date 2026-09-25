@@ -149,6 +149,19 @@ public class PostMapper {
         }
         boolean mine = viewingUserId != null && post.getAuthorUser().getId().equals(viewingUserId);
 
+        // Phase 2 part C: an anonymous post shows its alias to everyone except its author, and
+        // carries nothing that points back at the account (id, company, track record, age).
+        String authorUserId = post.getAuthorUser().getId().toString();
+        long authorAge = Duration.between(post.getAuthorUser().getCreatedAt(), Instant.now()).toDays();
+        if (post.isAnonymous() && !mine) {
+            authorUserId = "";
+            authorName = com.vikisol.arena.common.util.AnonymousAlias.of("post:" + post.getId());
+            authorEmoji = com.vikisol.arena.common.util.AnonymousAlias.EMOJI;
+            authorCompanyId = null;
+            authorJoinCount = 0;
+            authorAge = 0;
+        }
+
         // §4: "exact meeting point revealed only inside the room, only to approved joiners" -
         // mine-or-approved is exactly that gate, using information already resolved by the
         // caller (PostService) rather than this mapper needing its own room-membership query.
@@ -164,10 +177,10 @@ public class PostMapper {
             displayLng = jittered[1];
         }
 
-        long authorAccountAgeDays = Duration.between(post.getAuthorUser().getCreatedAt(), Instant.now()).toDays();
+        long authorAccountAgeDays = authorAge;
 
         return new PostResponse(
-                post.getId().toString(), post.getAuthorUser().getId().toString(), authorName, authorEmoji, authorCompanyId,
+                post.getId().toString(), authorUserId, authorName, authorEmoji, authorCompanyId,
                 post.getIntentType().wireValue(), post.getTitle(), post.getBody(), post.getLocationText(),
                 post.getAudience().wireValue(), post.getVisibility().wireValue(),
                 post.getCapacity(), post.getSpotsFilled(), post.getStatus().wireValue(),
@@ -185,7 +198,8 @@ public class PostMapper {
                 post.getCommunity() == null ? null : post.getCommunity().getId().toString(),
                 post.getCommunity() == null ? null : post.getCommunity().getSlug(),
                 post.getCommunity() == null ? null : post.getCommunity().getName(),
-                post.getCommunity() == null ? null : post.getCommunity().getEmoji()
+                post.getCommunity() == null ? null : post.getCommunity().getEmoji(),
+                post.isAnonymous()
         );
     }
 

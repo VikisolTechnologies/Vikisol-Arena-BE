@@ -39,6 +39,9 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     @Query("update Post p set p.community = null where p.community.id = :communityId")
     void detachFromCommunity(@Param("communityId") UUID communityId);
 
+    // Phase 2 part C rate limit - anonymous posts by one author since a moment.
+    long countByAuthorUserIdAndAnonymousTrueAndCreatedAtAfter(UUID authorUserId, Instant since);
+
     interface CommunityPostCount {
         UUID getCommunityId();
 

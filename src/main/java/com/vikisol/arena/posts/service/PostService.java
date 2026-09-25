@@ -143,6 +143,8 @@ public class PostService {
         var page = postRepository.findByAuthorUserIdOrderByCreatedAtDesc(targetUserId, pageable);
         var visible = page.getContent().stream()
                 .filter(p -> p.getStatus() != PostStatus.CANCELLED)
+                // An anonymous post never appears on its author's profile for anyone else.
+                .filter(p -> isSelf || !p.isAnonymous())
                 .filter(p -> isSelf || p.getAudience() == PostAudience.GLOBAL
                         || (p.getAudience() == PostAudience.FOLLOWERS && viewerFollowsTarget))
                 .toList();
@@ -176,6 +178,28 @@ public class PostService {
                     .community(community).user(author).role(com.vikisol.arena.communities.entity.CommunityRole.MEMBER).build());
         }
         return community;
+    }
+
+    // Phase 2 part C - anonymous posting rules: Discuss only (questions/updates), never followers-
+    // only (that audience would itself say who posted), not in a community that turned it off,
+    // and at most MAX_ANONYMOUS_POSTS_PER_DAY.
+    static final int MAX_ANONYMOUS_POSTS_PER_DAY = 5;
+
+    private void requireAnonymousAllowed(User author, PostIntentType intentType,
+                                         com.vikisol.arena.communities.entity.Community community, String audience) {
+        if (intentType != PostIntentType.ASK && intentType != PostIntentType.UPDATE) {
+            throw new BadRequestException("Only questions and updates can be posted anonymously.");
+        }
+        if (audience != null && audience.trim().equalsIgnoreCase("followers")) {
+            throw new BadRequestException("Anonymous posts are visible to everyone - followers-only would give away who posted.");
+        }
+        if (community != null && !community.isAllowAnonymous()) {
+            throw new BadRequestException(community.getName() + " doesn't allow anonymous posts.");
+        }
+        long recent = postRepository.countByAuthorUserIdAndAnonymousTrueAndCreatedAtAfter(author.getId(), Instant.now().minus(java.time.Duration.ofDays(1)));
+        if (recent >= MAX_ANONYMOUS_POSTS_PER_DAY) {
+            throw new BadRequestException("You can post up to " + MAX_ANONYMOUS_POSTS_PER_DAY + " anonymous posts a day - try again tomorrow, or post under your name.");
+        }
     }
 
     /**
@@ -230,9 +254,11 @@ public class PostService {
                 .filter(p -> p.getAudience() == PostAudience.GLOBAL
                         || p.getAuthorUser().getId().equals(viewingUserId)
                         || following.contains(p.getAuthorUser().getId()))
+                // An anonymous post is never found by its author's name.
                 .map(p -> new Hit(p, SearchText.score(terms, p.getTitle(), SearchText.haystack(
-                        p.getBody(), p.getLocationText(), p.getAuthorUser().getName(),
-                        p.getAuthorCompany() == null ? null : p.getAuthorCompany().getCompanyName()))))
+                        p.getBody(), p.getLocationText(),
+                        p.isAnonymous() ? null : p.getAuthorUser().getName(),
+                        p.isAnonymous() || p.getAuthorCompany() == null ? null : p.getAuthorCompany().getCompanyName()))))
                 .filter(h -> h.score() > 0)
                 .sorted(java.util.Comparator.comparingInt(Hit::score).reversed())
                 .map(Hit::post)
@@ -300,6 +326,8 @@ public class PostService {
         }
         cloudinaryService.requireOwnMedia(request.mediaUrls());
         com.vikisol.arena.communities.entity.Community community = resolveCommunityForPost(author, intentType, request.communityId());
+        boolean anonymous = Boolean.TRUE.equals(request.anonymous());
+        if (anonymous) requireAnonymousAllowed(author, intentType, community, request.audience());
 
         Post.PostBuilder builder = Post.builder()
                 .authorUser(author)
@@ -316,6 +344,7 @@ public class PostService {
                 .tags(request.tags())
                 .mediaUrls(request.mediaUrls())
                 .community(community)
+                .anonymous(anonymous)
                 .exactMeetingPoint(request.exactMeetingPoint())
                 .requiredVerificationLevel(request.requiredVerificationLevel() == null || request.requiredVerificationLevel().isBlank()
                         ? null : VerificationLevel.valueOf(request.requiredVerificationLevel().trim().toUpperCase()));

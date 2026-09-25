@@ -181,14 +181,16 @@ public class PostController {
     // its comment thread too, same as the post itself.
     @PreAuthorize("permitAll()")
     @GetMapping("/{id}/comments")
-    public ResponseEntity<ApiResponse<List<PostCommentResponse>>> getComments(@PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(postCommentService.getComments(id)));
+    public ResponseEntity<ApiResponse<List<PostCommentResponse>>> getComments(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(postCommentService.getComments(id, principal == null ? null : principal.getId())));
     }
 
     @PostMapping("/{id}/comments")
     public ResponseEntity<ApiResponse<PostCommentResponse>> addComment(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody CreateCommentRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(postCommentService.addComment(principal.getId(), id, request.content(), request.parentCommentId())));
+        return ResponseEntity.ok(ApiResponse.ok(postCommentService.addComment(principal.getId(), id, request.content(), request.parentCommentId(),
+                Boolean.TRUE.equals(request.anonymous()))));
     }
 
     @DeleteMapping("/{id}/comments/{commentId}")

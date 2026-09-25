@@ -61,6 +61,9 @@ public record PostResponse(
         String communityId,
         String communitySlug,
         String communityName,
-        String communityEmoji
+        String communityEmoji,
+        // Phase 2 part C - true when the post is anonymous. For everyone but the author,
+        // authorUserId is then blank and authorName/authorEmoji are the alias.
+        boolean anonymous
 ) {
 }

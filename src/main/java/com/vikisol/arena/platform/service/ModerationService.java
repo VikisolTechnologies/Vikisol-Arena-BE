@@ -53,6 +53,7 @@ public class ModerationService {
     private final PostRepository postRepository;
     private final UserRepository userRepository;
     private final AuditService auditService;
+    private final com.vikisol.arena.messaging.repository.ThreadMessageRepository threadMessageRepository;
 
     @Transactional
     public void autoFlag(JobPosting posting) {
@@ -117,6 +118,19 @@ public class ModerationService {
                 .build());
     }
 
+    // Phase 2 part C - the abuse path for (usually anonymous) chats. The conversation is passed
+    // in by ConversationService, which has already checked the reporter is part of it.
+    @Transactional
+    public void fileConversationReport(User reporter, com.vikisol.arena.messaging.entity.Conversation conversation, String reason) {
+        moderationItemRepository.save(ModerationItem.builder()
+                .contentType(ModerationContentType.CONVERSATION)
+                .conversation(conversation)
+                .reporter(reporter)
+                .reason(reason)
+                .status(ModerationStatus.PENDING)
+                .build());
+    }
+
     @Transactional(readOnly = true)
     public PagedResponse<ModerationItemResponse> listQueue(String statusWire, Pageable pageable) {
         ModerationStatus status = (statusWire == null || statusWire.isBlank())
@@ -172,6 +186,13 @@ public class ModerationService {
                 post.setStatus(PostStatus.CANCELLED);
                 postRepository.save(post);
             }
+            case CONVERSATION -> {
+                // Closes the chat for both sides, recorded as closed by the reporter - so the
+                // reported person also can't open a new anonymous chat with them.
+                var conversation = item.getConversation();
+                conversation.setClosedAt(Instant.now());
+                conversation.setClosedBy(item.getReporter());
+            }
         }
     }
 
@@ -194,6 +215,20 @@ public class ModerationService {
                 yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
                         null, post.getBody(), null, null, reporterName,
                         item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), post.getId().toString());
+            }
+            case CONVERSATION -> {
+                // Admins see the real accounts and the latest messages - anonymity is a display
+                // rule for participants, not for moderation.
+                var c = item.getConversation();
+                var recent = threadMessageRepository.findTop100ByConversationIdOrderByCreatedAtDesc(c.getId()).stream()
+                        .limit(6)
+                        .map(m -> m.getSender().getName() + ": " + m.getContent())
+                        .toList();
+                String summary = "Chat between " + c.getUserA().getName() + " and " + c.getUserB().getName()
+                        + (recent.isEmpty() ? "" : " - latest: " + String.join(" | ", recent.reversed()));
+                yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
+                        null, summary, null, null, reporterName,
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null);
             }
             case JOB_POSTING -> {
                 JobPosting p = item.getJobPosting();

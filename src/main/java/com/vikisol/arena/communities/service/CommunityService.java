@@ -193,6 +193,28 @@ public class CommunityService {
         return toMemberResponse(target, profilesFor(List.of(targetUserId)));
     }
 
+    /**
+     * Owner/moderator: ban whoever wrote a post in this community, without learning who they are
+     * (works the same for anonymous and named posts; returns nothing that identifies them).
+     */
+    @Transactional
+    public void banPostAuthor(String slug, UUID modId, UUID postId) {
+        Community community = require(slug);
+        Post post = postRepository.findById(postId).orElseThrow(() -> new ResourceNotFoundException("Post not found"));
+        if (post.getCommunity() == null || !post.getCommunity().getId().equals(community.getId())) {
+            throw new BadRequestException("That post isn't in this community.");
+        }
+        CommunityRole actor = roleOf(community, modId);
+        if (actor == null || !actor.canModerate()) throw new AccessDeniedException("Only moderators can ban members");
+        try {
+            ban(slug, modId, post.getAuthorUser().getId(), true);
+        } catch (BadRequestException | AccessDeniedException e) {
+            // ban()'s specific reasons ("the owner can't be banned", "you can't ban yourself",
+            // "only the owner can ban a moderator") would each reveal who an anonymous author is.
+            throw new BadRequestException("This author can't be banned from here - remove the post instead, or report it.");
+        }
+    }
+
     /** Owner/moderator: take a post down from their community. It stays for the author's records as CLOSED. */
     @Transactional
     public void removePost(String slug, UUID modId, UUID postId, String reason) {

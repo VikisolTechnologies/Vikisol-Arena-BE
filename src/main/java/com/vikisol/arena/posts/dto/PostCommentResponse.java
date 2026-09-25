@@ -12,6 +12,11 @@ public record PostCommentResponse(
         // Phase 2 (Discuss) threads: the comment this answers (null = top-level), and whether
         // it was deleted while still having replies (content is blank then).
         String parentCommentId,
-        boolean deleted
+        boolean deleted,
+        // Phase 2 part C. anonymous: shown under an alias (authorUserId is then null for
+        // everyone but the writer). op: written by the post's author. mine: written by the viewer.
+        boolean anonymous,
+        boolean op,
+        boolean mine
 ) {
 }

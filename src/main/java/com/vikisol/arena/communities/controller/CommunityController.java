@@ -107,6 +107,14 @@ public class CommunityController {
         return ResponseEntity.ok(ApiResponse.ok(communityService.ban(slug, principal.getId(), userId, Boolean.TRUE.equals(request.value()))));
     }
 
+    // Owner/moderator: ban a post's author (anonymous or not) without being told who they are.
+    @PostMapping("/communities/{slug}/posts/{postId}/ban-author")
+    public ResponseEntity<ApiResponse<Void>> banPostAuthor(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable String slug, @PathVariable UUID postId) {
+        communityService.banPostAuthor(slug, principal.getId(), postId);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
     // Owner/moderator: take a post down from the community, with an optional reason.
     @PostMapping("/communities/{slug}/posts/{postId}/remove")
     public ResponseEntity<ApiResponse<Void>> removePost(

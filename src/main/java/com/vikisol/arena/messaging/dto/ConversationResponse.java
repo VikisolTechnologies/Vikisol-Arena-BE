@@ -10,6 +10,12 @@ public record ConversationResponse(
         String participantEmoji,
         String context,
         String lastMessageAt,
-        boolean unread
+        boolean unread,
+        // Phase 2 part C. anonymous: the other person is hidden (participantId is then blank and
+        // the name is an alias). meAnonymous: you are hidden from them. closed: no more messages.
+        boolean anonymous,
+        boolean meAnonymous,
+        boolean closed,
+        String postId
 ) {
 }

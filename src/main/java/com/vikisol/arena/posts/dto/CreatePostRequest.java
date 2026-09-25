@@ -27,7 +27,9 @@ public record CreatePostRequest(
         String exactMeetingPoint,
         String requiredVerificationLevel,
         // Phase 2 (Discuss) - post a question/update into this community (id); null = general.
-        String communityId
+        String communityId,
+        // Phase 2 part C - show under an alias instead of the author's name (questions/updates only).
+        Boolean anonymous
 ) {
     public CreatePostRequest {
         if (tags == null) tags = List.of();

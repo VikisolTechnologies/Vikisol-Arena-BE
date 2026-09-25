@@ -35,4 +35,30 @@ public class Conversation extends BaseEntity {
 
     private Instant lastReadAtA;
     private Instant lastReadAtB;
+
+    // Phase 2 part C - anonymous chats. Each side can be hidden from the other; see V16 and
+    // ConversationService. The post it started from (if any), and who closed it (if closed).
+    // Explicit names: the naming strategy would otherwise map anonymousA -> "anonymousa" (the
+    // same thing that made lastReadAtA "last_read_ata").
+    @Column(name = "anonymous_a", nullable = false)
+    @Builder.Default
+    private boolean anonymousA = false;
+
+    @Column(name = "anonymous_b", nullable = false)
+    @Builder.Default
+    private boolean anonymousB = false;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "post_id")
+    private com.vikisol.arena.posts.entity.Post post;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "closed_by_user_id")
+    private User closedBy;
+
+    private Instant closedAt;
+
+    public boolean isAnonymous() {
+        return anonymousA || anonymousB;
+    }
 }

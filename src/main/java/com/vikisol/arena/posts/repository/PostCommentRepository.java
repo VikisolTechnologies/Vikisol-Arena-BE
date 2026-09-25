@@ -31,6 +31,9 @@ public interface PostCommentRepository extends JpaRepository<PostComment, UUID> 
 
     boolean existsByParentCommentId(UUID parentCommentId);
 
+    // Phase 2 part C rate limit - anonymous replies by one author since a moment.
+    long countByAuthorUserIdAndAnonymousTrueAndCreatedAtAfter(UUID authorUserId, java.time.Instant since);
+
     // Batched comment-count warm-up for a feed/trending window - one query for the whole page
     // instead of one per post, same shape as every other batch-count method in this codebase
     // (TalentSearchService.batchUnlockedCandidateIds, etc).
