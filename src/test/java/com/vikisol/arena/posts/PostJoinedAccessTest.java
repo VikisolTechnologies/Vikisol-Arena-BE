@@ -27,6 +27,7 @@ import java.time.LocalDate;
 import java.util.UUID;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -81,6 +82,38 @@ class PostJoinedAccessTest extends EmbeddedPostgresAppTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content").isEmpty())
                 .andExpect(jsonPath("$.data.totalElements").value(0));
+    }
+
+    @Test
+    void onlyTheOwnerCanResolveANeed() throws Exception {
+        User owner = user();
+        User other = user();
+        Post ask = posts.save(Post.builder()
+                .authorUser(owner)
+                .intentType(PostIntentType.ASK)
+                .body("Need a hand")
+                .visibility(PostVisibility.PUBLIC)
+                .build());
+
+        mvc.perform(put("/posts/" + ask.getId() + "/status").header("Authorization", "Bearer " + token(other)))
+                .andExpect(status().isForbidden());
+        mvc.perform(put("/posts/" + ask.getId() + "/status").header("Authorization", "Bearer " + token(owner)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.status").value("closed"));
+    }
+
+    @Test
+    void aNonNeedCannotBeMarkedResolved() throws Exception {
+        User owner = user();
+        Post activity = posts.save(Post.builder()
+                .authorUser(owner)
+                .intentType(PostIntentType.ACTIVITY)
+                .body("Evening game")
+                .visibility(PostVisibility.PUBLIC)
+                .build());
+
+        mvc.perform(put("/posts/" + activity.getId() + "/status").header("Authorization", "Bearer " + token(owner)))
+                .andExpect(status().isBadRequest());
     }
 
     private User user() {
