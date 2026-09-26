@@ -50,7 +50,7 @@ public class SearchService {
                 all || t.equals("activities")
                         ? postService.search(viewingUserId, terms, p -> p.getIntentType() == PostIntentType.ACTIVITY, limit) : List.of(),
                 all || t.equals("discussions")
-                        ? postService.search(viewingUserId, terms, p -> p.getIntentType() == PostIntentType.ASK || p.getIntentType() == PostIntentType.UPDATE, limit) : List.of(),
+                        ? postService.search(viewingUserId, terms, p -> p.getIntentType().isDiscussion(), limit) : List.of(),
                 all || t.equals("jobs") ? jobs(terms, limit, viewingUserId) : List.of(),
                 all || t.equals("projects") ? projects(terms, limit, viewingUserId) : List.of(),
                 all || t.equals("companies") ? companies(terms, limit, viewingUserId) : List.of());

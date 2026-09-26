@@ -8,9 +8,13 @@ package com.vikisol.arena.posts.entity;
 // here between hires") and it has no pre-existing backing entity either, same as
 // ACTIVITY/ASK/UPDATE - see DECISIONS.md and PostService.createCompanyPost.
 public enum PostIntentType {
-    ACTIVITY, ASK, UPDATE, COMPANY;
+    ACTIVITY, ASK, UPDATE, COMPANY, OFFER;
 
     public String wireValue() {
         return name().toLowerCase();
+    }
+
+    public boolean isDiscussion() {
+        return this == ASK || this == UPDATE || this == OFFER;
     }
 }

@@ -184,7 +184,7 @@ public class PostService {
     // Nearby), never while banned there, and posting joins you if you weren't a member yet.
     private com.vikisol.arena.communities.entity.Community resolveCommunityForPost(User author, PostIntentType intentType, String communityId) {
         if (communityId == null || communityId.isBlank()) return null;
-        if (intentType != PostIntentType.ASK && intentType != PostIntentType.UPDATE) {
+        if (!intentType.isDiscussion()) {
             throw new BadRequestException("Only questions and updates can go in a community - activities are shared on Nearby.");
         }
         UUID id;
@@ -212,7 +212,7 @@ public class PostService {
 
     private void requireAnonymousAllowed(User author, PostIntentType intentType,
                                          com.vikisol.arena.communities.entity.Community community, String audience) {
-        if (intentType != PostIntentType.ASK && intentType != PostIntentType.UPDATE) {
+        if (!intentType.isDiscussion()) {
             throw new BadRequestException("Only questions and updates can be posted anonymously.");
         }
         if (audience != null && audience.trim().equalsIgnoreCase("followers")) {
@@ -236,7 +236,7 @@ public class PostService {
     public List<PostResponse> listDiscussions(UUID viewingUserId, UUID communityId, String sort, int page, int size) {
         List<PostStatus> live = List.of(PostStatus.OPEN, PostStatus.FULL);
         List<Post> window = communityId == null
-                ? postRepository.findDiscussions(live, List.of(PostIntentType.ASK, PostIntentType.UPDATE), PageRequest.of(0, DISCUSS_WINDOW)).getContent()
+                ? postRepository.findDiscussions(live, List.of(PostIntentType.ASK, PostIntentType.UPDATE, PostIntentType.OFFER), PageRequest.of(0, DISCUSS_WINDOW)).getContent()
                 : postRepository.findByCommunity(communityId, live, PageRequest.of(0, DISCUSS_WINDOW)).getContent();
         Set<UUID> following = viewingUserId == null ? Set.of()
                 : Set.copyOf(followRepository.findFollowingUserIdsByFollowerUserId(viewingUserId));

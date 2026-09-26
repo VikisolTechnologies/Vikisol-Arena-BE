@@ -74,6 +74,14 @@ class PostJoinSafetyTest extends EmbeddedPostgresAppTest {
         assertThat(service.closeAsResolved(owner.getId(), ask.getId()).status()).isEqualTo("closed");
     }
 
+    @Test void anOfferIsStoredAsAnOffer() {
+        var author = user();
+        var created = service.create(author.getId(), new com.vikisol.arena.posts.dto.CreatePostRequest(
+                "offer", "A spare table", "I can help you move it", null, "global", "public",
+                null, null, null, java.util.List.of(), java.util.List.of(), null, null, null, null, null, false));
+        assertThat(created.intentType()).isEqualTo("offer");
+    }
+
     @Test void leavingFreesAFullActivityAndAllowsRejoining() {
         var host = user();
         var activity = post(host, 1);

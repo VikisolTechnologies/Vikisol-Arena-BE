@@ -36,6 +36,15 @@ class JennyArenaWriteBodyContractTest {
     }
 
     @Test
+    void offerBodyStillBinds() throws Exception {
+        CreatePostRequest request = mapper.readValue(
+                "{\"intentType\":\"offer\",\"title\":\"A spare table\",\"body\":\"I can help you move it\",\"audience\":\"global\",\"visibility\":\"public\",\"tags\":[],\"mediaUrls\":[]}",
+                CreatePostRequest.class);
+        assertThat(request.intentType()).isEqualTo("offer");
+        assertThat(request.body()).isEqualTo("I can help you move it");
+    }
+
+    @Test
     void createProjectBodyStillBinds() throws Exception {
         String json = """
                 {"title":"Need a site","description":"A small site","budgetMin":10000,"budgetMax":40000,"durationWeeks":3,"skills":["design"]}

@@ -7,7 +7,6 @@ import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.follows.service.BlockService;
 import com.vikisol.arena.posts.dto.PostCommentResponse;
 import com.vikisol.arena.posts.entity.Post;
-import com.vikisol.arena.posts.entity.PostIntentType;
 import com.vikisol.arena.posts.entity.PostComment;
 import com.vikisol.arena.posts.repository.PostCommentRepository;
 import com.vikisol.arena.posts.repository.PostRepository;
@@ -101,7 +100,7 @@ public class PostCommentService {
     // Phase 2 part C - anonymous replies: Discuss threads only (questions/updates), not in a
     // community that turned anonymity off, at most MAX_ANONYMOUS_REPLIES_PER_DAY.
     private void requireAnonymousReplyAllowed(UUID userId, Post post) {
-        if (post.getIntentType() != PostIntentType.ASK && post.getIntentType() != PostIntentType.UPDATE) {
+        if (!post.getIntentType().isDiscussion()) {
             throw new BadRequestException("Anonymous replies are for Discuss threads.");
         }
         if (post.getCommunity() != null && !post.getCommunity().isAllowAnonymous()) {
