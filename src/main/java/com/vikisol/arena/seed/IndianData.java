@@ -53,16 +53,16 @@ public final class IndianData {
     }
 
     public static final List<CompanySeed> COMPANIES = List.of(
-            new CompanySeed("Techolution", "🟢"),
-            new CompanySeed("Swiggy", "🟠"),
-            new CompanySeed("Microsoft", "🔷"),
-            new CompanySeed("Innova Solutions", "🔵"),
-            new CompanySeed("Paytm", "🟦"),
-            new CompanySeed("Zoho", "🟥"),
-            new CompanySeed("Freshworks", "🟩"),
-            new CompanySeed("Practo", "🩺"),
-            new CompanySeed("Delhivery", "📦"),
-            new CompanySeed("Razorpay", "⚡"));
+            new CompanySeed("Northwind Desk", "🟢"),
+            new CompanySeed("Harbour Route", "🟠"),
+            new CompanySeed("Lumen Works", "🔷"),
+            new CompanySeed("Paperkite Labs", "🔵"),
+            new CompanySeed("Mintline", "🟦"),
+            new CompanySeed("Cedar Ledger", "🟥"),
+            new CompanySeed("Fieldnote", "🟩"),
+            new CompanySeed("Clinic Lane", "🩺"),
+            new CompanySeed("Parcel North", "📦"),
+            new CompanySeed("Clearstack", "⚡"));
 
     public static final List<String> AVATAR_EMOJIS = List.of(
             "🧑🏽", "👩🏽", "🧔🏽", "👨🏻",

@@ -49,13 +49,17 @@ Health check: `http://localhost:8081/api/v1/actuator/health`
 
 ### 3. Demo logins (created by the seeder)
 
-| Role | Email | Password |
-|---|---|---|
-| Talent | `demo.talent@vikisol.dev` | `Demo@12345` |
-| Enterprise | `demo.enterprise@vikisol.dev` | `Demo@12345` |
+Set `ARENA_DEMO_PASSWORD` before a local seed. The value is not stored in this repo and is not
+printed at startup. `SEED_ENABLED=false` skips creating demo accounts.
 
-Plus 9 more seeded companies and 39 more seeded candidates (all password `Demo@12345`, emails
-`candidate{N}@example.com`) so search/browse/pipeline screens aren't empty.
+| Role | Email |
+|---|---|
+| Talent | `demo.talent@vikisol.dev` |
+| Enterprise | `demo.enterprise@vikisol.dev` |
+
+Plus 9 more seeded companies and 39 more seeded candidates (emails `candidate{N}@example.com`).
+The old platform-admin demo address is disabled. A real platform admin comes from
+`PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD`, and must turn on two-factor authentication.
 
 ### Config / env vars
 

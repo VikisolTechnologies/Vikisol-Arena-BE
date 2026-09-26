@@ -44,26 +44,28 @@ public class LandingService {
 
     @Transactional(readOnly = true)
     public LandingStatsResponse getStats() {
-        long openToWork = candidateProfileRepository.countByConsent_SearchableByEnterprisesTrue();
+        long openToWork = candidateProfileRepository.countByConsent_SearchableByEnterprisesTrueAndDemoContentFalse();
         List<IndustryStat> byIndustry = Arrays.stream(Industry.values())
                 .map(i -> new IndustryStat(i.wireValue(),
-                        candidateProfileRepository.countByIndustryAndConsent_SearchableByEnterprisesTrue(i)))
+                        candidateProfileRepository.countByIndustryAndConsent_SearchableByEnterprisesTrueAndDemoContentFalse(i)))
                 .filter(stat -> stat.count() > 0)
                 .toList();
-        long openProjects = projectRepository.countByStatus(ProjectStatus.OPEN);
+        long openProjects = projectRepository.countByStatusAndDemoContentFalse(ProjectStatus.OPEN);
         return new LandingStatsResponse(openToWork, byIndustry, openProjects);
     }
 
     @Transactional(readOnly = true)
     public ProjectResponse getFeaturedProject() {
-        var pool = projectRepository.findByStatus(ProjectStatus.OPEN,
+        var pool = projectRepository.findByStatusAndDemoContentFalse(ProjectStatus.OPEN,
                 PageRequest.of(0, FEATURED_CANDIDATE_POOL, Sort.by(Sort.Direction.DESC, "createdAt")));
         if (pool.isEmpty()) return null;
 
         Project best = null;
         List<Bid> bestBids = List.of();
         for (Project candidate : pool.getContent()) {
-            List<Bid> bids = bidRepository.findByProjectIdOrderByAmountDesc(candidate.getId());
+            List<Bid> bids = bidRepository.findByProjectIdOrderByAmountDesc(candidate.getId()).stream()
+                    .filter(bid -> !bid.isDemoContent())
+                    .toList();
             if (best == null || bids.size() > bestBids.size()) {
                 best = candidate;
                 bestBids = bids;

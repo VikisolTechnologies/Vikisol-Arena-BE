@@ -59,6 +59,9 @@ public class AuthService {
     // the account actually has totpEnabled=true, so non-admin roles are never forced to enroll.
     private static final Set<Role> MFA_ELIGIBLE_ROLES = Set.of(Role.COMPANY_ADMIN, Role.PLATFORM_ADMIN);
 
+    @Value("${app.security.platform-admin-2fa-required:true}")
+    private boolean platformAdmin2faRequired;
+
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
@@ -601,6 +604,9 @@ public class AuthService {
         if (!user.isTotpEnabled() || !totpService.verifyCode(user.getTotpSecret(), code)) {
             throw new BadRequestException("Incorrect verification code");
         }
+        if (platformAdmin2faRequired && user.getRole() == Role.PLATFORM_ADMIN) {
+            throw new BadRequestException("Platform admin two-factor authentication stays on");
+        }
         user.setTotpEnabled(false);
         user.setTotpSecret(null);
         userRepository.save(user);
@@ -616,7 +622,7 @@ public class AuthService {
         // CandidateProfile.id/User.id mismatch item (see PublicCandidateProfileResponse's
         // matching fix in CandidateProfileService.getPublicProfile).
         String candidateId = user.getRole() == Role.TALENT ? user.getId().toString() : null;
-        return SessionResponse.of(user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), null);
+        return SessionResponse.of(user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), null, false, user.isTotpEnabled());
     }
 
     private void recordFailedAttempt(User user) {
@@ -633,7 +639,12 @@ public class AuthService {
         String candidateId = user.getRole() == Role.TALENT ? user.getId().toString() : null;
         String accessToken = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
         String refreshToken = refreshTokenService.issue(user.getId());
-        SessionResponse session = SessionResponse.of(user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), accessToken);
+        boolean enrollmentRequired = platformAdmin2faRequired
+                && user.getRole() == Role.PLATFORM_ADMIN
+                && !user.isTotpEnabled();
+        SessionResponse session = SessionResponse.of(
+                user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), accessToken,
+                enrollmentRequired, user.isTotpEnabled());
         return new SignInOutcome.Success(session, refreshToken);
     }
 
