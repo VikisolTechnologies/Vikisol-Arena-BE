@@ -106,6 +106,15 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.getMyPosts(principal.getId(), pageable)));
     }
 
+    @GetMapping("/joined")
+    public ResponseEntity<ApiResponse<PagedResponse<PostResponse>>> getJoined(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        return ResponseEntity.ok(ApiResponse.ok(postService.getJoined(principal.getId(), pageable)));
+    }
+
     // PART 6 SAVE - kept under /posts (where every other post-interaction endpoint already
     // lives) rather than the spec's literal /me/saved, same "documented small path deviation"
     // precedent as this codebase's other spec reconciliations (see DECISIONS.md).

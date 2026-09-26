@@ -59,6 +59,10 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     @EntityGraph(attributePaths = "authorUser")
     Page<Post> findByAuthorUserIdOrderByCreatedAtDesc(UUID authorUserId, Pageable pageable);
 
+    @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
+    @Query("select p from Post p where p.id in (select j.post.id from PostJoinRequest j where j.user.id = :userId and j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED)")
+    Page<Post> findApprovedJoinsByUserId(@Param("userId") UUID userId, Pageable pageable);
+
     // Company page's own post history (post-spec reconciliation - §3.5/§6 company posting).
     @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
     Page<Post> findByAuthorCompanyIdOrderByCreatedAtDesc(UUID authorCompanyId, Pageable pageable);

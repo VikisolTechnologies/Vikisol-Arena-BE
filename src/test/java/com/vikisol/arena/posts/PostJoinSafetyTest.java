@@ -50,6 +50,21 @@ class PostJoinSafetyTest extends EmbeddedPostgresAppTest {
         assertThat(owned.getSpotsFilled()).isZero();
     }
 
+    @Test void joinedPostsBelongOnlyToTheCaller() {
+        var host = user();
+        var activity = posts.save(Post.builder().authorUser(host).intentType(PostIntentType.ACTIVITY)
+                .body("Evening game").visibility(PostVisibility.PUBLIC).build());
+        var member = user();
+        var someoneElse = user();
+        joins.save(PostJoinRequest.builder().post(activity).user(member).status(PostJoinStatus.APPROVED).build());
+
+        assertThat(service.getJoined(member.getId(), org.springframework.data.domain.PageRequest.of(0, 20)).content())
+                .extracting(com.vikisol.arena.posts.dto.PostResponse::id)
+                .contains(activity.getId().toString());
+        assertThat(service.getJoined(someoneElse.getId(), org.springframework.data.domain.PageRequest.of(0, 20)).content())
+                .isEmpty();
+    }
+
     @Test void leavingFreesAFullActivityAndAllowsRejoining() {
         var host = user();
         var activity = post(host, 1);

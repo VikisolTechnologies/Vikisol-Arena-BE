@@ -131,6 +131,12 @@ public class PostService {
                 p -> mapper.toResponse(p, userId, myJoinStatus(p, userId), roomIdFor(p), authorProfiles));
     }
 
+    @Transactional(readOnly = true)
+    public PagedResponse<PostResponse> getJoined(UUID userId, Pageable pageable) {
+        var page = postRepository.findApprovedJoinsByUserId(userId, pageable);
+        return PagedResponse.of(page, p -> mapper.toResponse(p, userId, myJoinStatus(p, userId), roomIdFor(p)));
+    }
+
     // Profile-revamp "activity" tab (Phase C) - any user's own OPEN/FULL/CLOSED posts, respecting
     // each post's own audience gate the same way the feed itself would: GLOBAL always visible,
     // FOLLOWERS only visible to the target's own followers (or the target themself), CANCELLED
