@@ -84,6 +84,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/auth/invitations/*").permitAll()
                         .requestMatchers("/actuator/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/version").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/sentry-wiring").permitAll()
                         // Logged-out marketing homepage's real stats/featured-bid card
                         // (LandingController) - deliberately read-only and pre-aggregated so it
                         // can't be used to enumerate individual users/projects.
