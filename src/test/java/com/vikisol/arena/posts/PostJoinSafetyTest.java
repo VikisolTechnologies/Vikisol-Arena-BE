@@ -65,6 +65,15 @@ class PostJoinSafetyTest extends EmbeddedPostgresAppTest {
                 .isEmpty();
     }
 
+    @Test void onlyTheOwnerCanResolveANeed() {
+        var owner = user();
+        var other = user();
+        var ask = posts.save(Post.builder().authorUser(owner).intentType(PostIntentType.ASK).body("Need a hand").build());
+        assertThatThrownBy(() -> service.closeAsResolved(other.getId(), ask.getId()))
+                .isInstanceOf(org.springframework.security.access.AccessDeniedException.class);
+        assertThat(service.closeAsResolved(owner.getId(), ask.getId()).status()).isEqualTo("closed");
+    }
+
     @Test void leavingFreesAFullActivityAndAllowsRejoining() {
         var host = user();
         var activity = post(host, 1);

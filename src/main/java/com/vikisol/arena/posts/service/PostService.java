@@ -137,6 +137,25 @@ public class PostService {
         return PagedResponse.of(page, p -> mapper.toResponse(p, userId, myJoinStatus(p, userId), roomIdFor(p)));
     }
 
+    @Transactional
+    public PostResponse closeAsResolved(UUID userId, UUID postId) {
+        Post post = requireLockedPost(postId);
+        if (!post.getAuthorUser().getId().equals(userId)) {
+            throw new AccessDeniedException("Not your post");
+        }
+        if (post.getIntentType() != PostIntentType.ASK) {
+            throw new BadRequestException("Only a need can be marked resolved");
+        }
+        if (post.getStatus() != PostStatus.CLOSED) {
+            if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL) {
+                throw new BadRequestException("This need is already " + post.getStatus().wireValue());
+            }
+            post.setStatus(PostStatus.CLOSED);
+            postRepository.save(post);
+        }
+        return mapper.toResponse(post, userId, myJoinStatus(post, userId), roomIdFor(post));
+    }
+
     // Profile-revamp "activity" tab (Phase C) - any user's own OPEN/FULL/CLOSED posts, respecting
     // each post's own audience gate the same way the feed itself would: GLOBAL always visible,
     // FOLLOWERS only visible to the target's own followers (or the target themself), CANCELLED

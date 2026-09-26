@@ -115,6 +115,12 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.getJoined(principal.getId(), pageable)));
     }
 
+    @PutMapping("/{id}/status")
+    public ResponseEntity<ApiResponse<PostResponse>> close(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.closeAsResolved(principal.getId(), id)));
+    }
+
     // PART 6 SAVE - kept under /posts (where every other post-interaction endpoint already
     // lives) rather than the spec's literal /me/saved, same "documented small path deviation"
     // precedent as this codebase's other spec reconciliations (see DECISIONS.md).
