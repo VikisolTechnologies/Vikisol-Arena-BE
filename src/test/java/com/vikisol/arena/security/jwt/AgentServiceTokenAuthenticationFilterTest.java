@@ -87,11 +87,14 @@ class AgentServiceTokenAuthenticationFilterTest {
         when(verifier.verify("a-real-looking-token"))
                 .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.searchJobs")));
 
+        when(response.getWriter()).thenReturn(new java.io.PrintWriter(new java.io.StringWriter()));
+
         filter.doFilter(request, response, chain);
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
         verify(userRepository, never()).findById(any());
-        verify(chain).doFilter(request, response);
+        verify(response).setStatus(HttpServletResponse.SC_FORBIDDEN);
+        verify(chain, never()).doFilter(request, response);
     }
 
     @Test
@@ -174,11 +177,14 @@ class AgentServiceTokenAuthenticationFilterTest {
         when(request.getServletPath()).thenReturn("/applications");
         when(verifier.verify("a-real-looking-token"))
                 .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.searchJobs")));
+        when(response.getWriter()).thenReturn(new java.io.PrintWriter(new java.io.StringWriter()));
 
         filter.doFilter(request, response, chain);
 
         verify(auditService).record(isNull(), eq(userId), eq(AuditActions.AGENT_ACTION_DENIED), eq("POST /applications"), any());
         verify(userRepository, never()).findById(any());
+        verify(response).setStatus(HttpServletResponse.SC_FORBIDDEN);
+        verify(chain, never()).doFilter(request, response);
     }
 
     @Test

@@ -82,8 +82,9 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
             AgentServiceTokenVerifier.VerifiedClaims claims = tryVerify(token);
 
             if (claims != null) {
-                String endpointKey = request.getMethod() + " " + request.getServletPath();
-                String requiredScope = requiredScopeFor(request.getMethod(), request.getServletPath());
+                String path = requestPath(request);
+                String endpointKey = request.getMethod() + " " + path;
+                String requiredScope = requiredScopeFor(request.getMethod(), path);
                 if (requiredScope != null && claims.scope().contains(requiredScope)) {
                     var user = userRepository.findById(claims.userId());
                     if (user.isPresent()) {
@@ -101,25 +102,44 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
                     } else {
                         log.warn("Agent service token named a user id that no longer exists: {}", claims.userId());
                     }
+                } else if (requiredScope != null) {
+                    log.warn("Agent service token presented for {} but its scope did not authorize it", endpointKey);
+                    // A verified token for a mapped write, missing the scope that write requires,
+                    // is a real denial. Stop here with 403. Falling through used to become 401
+                    // from the unauthenticated entry point, which hid the scope failure.
+                    auditService.record(null, claims.userId(), AuditActions.AGENT_ACTION_DENIED, endpointKey,
+                            "missing required scope: " + requiredScope);
+                    response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                    response.setContentType("application/json");
+                    response.getWriter().write("{\"success\":false,\"message\":\"Access denied\"}");
+                    return;
                 } else {
                     log.warn("Agent service token presented for {} but its scope did not authorize it", endpointKey);
-                    // M9: recorded even though authentication never proceeds — claims.userId()
-                    // came from a signature-verified token, so it's a real (if unauthorized)
-                    // actor, and a denied agent action is exactly the kind of event this
-                    // milestone's own acceptance criteria names ("scope violations" and "tenant
-                    // mismatches"/probing). Covers both a real scope mismatch (requiredScope !=
-                    // null) and a validly-signed token presented against an endpoint this table
-                    // never mapped at all (requiredScope == null) — the latter is worth recording
-                    // too: a real round-trip credential being tried somewhere unexpected.
-                    // record()'s own try/catch (see AuditService) means an unresolvable user id
-                    // here fails silently into a log warning, never blocking the request.
+                    // No mapping means this is not one of Jenny's writes (search, nearby, and the
+                    // other reads). Record the probe and let the rest of the chain decide.
+                    // Forcing 403 here would break those reads, which send the same bearer.
                     auditService.record(null, claims.userId(), AuditActions.AGENT_ACTION_DENIED, endpointKey,
-                            requiredScope == null ? "no scope mapping for this endpoint" : "missing required scope: " + requiredScope);
+                            "no scope mapping for this endpoint");
                 }
             }
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    // MockMvc leaves servletPath blank and puts the path on the request URI. A real
+    // deployment puts /api/v1 on the context path and /posts on the servlet path.
+    // Strip the context path so both resolve to the same key the scope table uses.
+    static String requestPath(HttpServletRequest request) {
+        String path = request.getServletPath();
+        if (path == null || path.isEmpty()) {
+            path = request.getRequestURI();
+            String context = request.getContextPath();
+            if (context != null && !context.isEmpty() && path.startsWith(context)) {
+                path = path.substring(context.length());
+            }
+        }
+        return path == null || path.isEmpty() ? "/" : path;
     }
 
     private String getTokenFromRequest(HttpServletRequest request) {
