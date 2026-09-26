@@ -237,6 +237,48 @@ Write `docs/ARENA-VNEXT-REPORT.md`:
 
 Update `docs/PROGRESS.md`, then stop.
 
+### STEP 9 — Communication layer (after the founder approves the preview; decided by the architect 26 Sep 2026)
+Goal: help the loop complete (response → conversation → outcome). **Retention, not revenue.**
+1. **Write `docs/ARENA-MESSAGING-ARCHITECTURE.md` first, and don't code before the architect reviews it.** Audit what exists and design how to extend it:
+   - DMs `/messages/[id]` and rooms `/rooms`, membership, REST polling;
+   - notifications, unread, block/report, media;
+   - Jenny's access to conversations.
+
+   Cover all of the following:
+   - gaps;
+   - keep / extend / replace;
+   - data and API changes;
+   - an authorization matrix;
+   - privacy and moderation;
+   - mobile flow mockups;
+   - notifications;
+   - attachment and voice-note storage;
+   - the meeting-link experiment;
+   - native-audio feasibility and cost;
+   - migration;
+   - tests;
+   - metrics;
+   - estimated work;
+   - risks.
+
+   **Extend the existing Room/message models. Never build a second messaging system.**
+2. **Phase 1, reliability (part of launch readiness):**
+   - reliable unread counts and notifications;
+   - mute, leave, block (both directions), report (a durable moderation record);
+   - room access updates correctly on leave, removal, block or suspension;
+   - honest loading, empty, offline and failure states;
+   - good phone UX.
+3. **Meeting-link experiment:** an optional private meeting/audio link on an activity (an approved external provider such as Google Meet), revealed only to approved participants, using the same gate as the meeting point. Track registrations, attendance, repeat attendance and outcomes. **No native audio or video.**
+4. **Later, only with launch data:**
+   - replies, reactions, mentions, pinned host announcements;
+   - images, safe documents, voice notes (with size and duration limits);
+   - approval-based community rooms and moderators.
+5. **Rules:**
+   - Jenny sees a conversation only after an explicit user action, with minimum context and a visible privacy indicator.
+   - Private messages are never used for training and never sent to cloud models silently.
+   - No fake messages or rooms.
+   - Metrics are counted without storing message content.
+
 ---
 
 ## Known founder-only items (log them, don't wait on them)
