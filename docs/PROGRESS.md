@@ -4,7 +4,7 @@ Updated 26 Sep 2026. Resume from here. Do not redo the cleanup.
 
 ## Current step
 
-STEP 3 of `docs/ARENA-MISSION.md` is green on `feature/arena-jenny-contract` and is being merged to `main`.
+STEP 3 of `docs/ARENA-MISSION.md` is on `main` at `ab6dcc6`. The contract tests passed before the fast-forward.
 
 Frontend VNext continues on `feature/arena-vnext` in the worktree `~/Developer/arena-fe-vnext`. Do not merge that pull request.
 
