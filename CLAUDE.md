@@ -1,29 +1,25 @@
 # CLAUDE.md — Vikisol Arena
 
-Read these before doing anything:
-1. `docs/VIKISOL-MASTER-CONTEXT.md`: what Vikisol, Arena and JennySol are, the founder's rules, and the open decisions.
-2. `docs/AGENT-COLLABORATION-PROTOCOL.md`: repository ownership, safe synchronization, independent review and release gates.
-3. `docs/ARENA-MISSION.md`: the current mission and its steps.
-4. The frontend repository's `docs/PROGRESS.md` and `docs/ARENA-CURRENT-STATE.md`: the shared Arena status and audit.
+## Which documents are instructions (authority order)
+1. `docs/VIKISOL-MASTER-CONTEXT.md`: the ecosystem, the founder's rules, decisions.
+2. `docs/ARENA-MISSION.md`: the active mission and sequence.
+3. `docs/ARENA-VNEXT-MOBILE-JENNY-BLUEPRINT.md`: the VNext design, navigation, Jenny contract status, branches and deployment.
+4. `docs/PROGRESS.md`: where the last agent stopped. Resume from it; don't restart.
+5. `docs/missions/*.md`: one bounded mission at a time.
 
-Older root-level `.md` plans and reports are history, not instructions. If they disagree with the four files above, the four files win.
+Also follow `docs/AGENT-COLLABORATION-PROTOCOL.md` (how agents work together) and `docs/reviews/` (the architect's verdicts; the newest one governs its SHA).
+
+**Everything else is historical evidence, not instructions.** That includes root-level `*.md` plans and reports (ARENA-MASTER-ARCHITECTURE, PRODUCT_BIBLE, ROUTES, COMPLETION-REPORT and so on) and older docs. Where they disagree with the files above, the files above win.
 
 ## The short version
-- **Arena is a living network, not a job board:** NEED → RESPONSE → CONVERSATION → OUTCOME → IDENTITY.
-- **Target nav:** Feed, Discover, Map, Agent (Jenny, ambient), Work (outcomes), + Create, Profile.
-- **Brand:** the live near-black `#09090b` + orange `#ff6b35` / `#ff8a5b`.
-- **Stack:**
-  - frontend: Next.js (App Router) + TypeScript + Tailwind + shadcn, on Vercel. See `AGENTS.md` for Next.js version notes.
-  - backend: `Vikisol-Arena-BE`, Spring Boot 3.3 / Java 21, on Railway (`arena-staging` / `arena-api`), with Postgres + Redis.
-- **Jenny:** reached only through the JennySol gateway (`~/Developer/jennysol-ai/docs/JENNY-ARENA-CONTRACT.md`). There is no AI logic in Arena, and Jenny never gets database access. Never change the shape of the Arena endpoints the gateway calls.
+- **Arena** is a living network: NEED → RESPONSE → CONVERSATION → OUTCOME → IDENTITY.
+- **Mobile bottom bar:** Feed · Discover · (+) · Work · You. Map is a List/Map mode inside Discover. Jenny is contextual, never a primary tab. Inbox is in the signed-in header.
+- **Brand:** near-black graphite + orange.
+- **Stack:** frontend on Next.js + TypeScript + Tailwind + shadcn (Vercel; see `AGENTS.md`); backend `Vikisol-Arena-BE` on Spring Boot 3.3 / Java 21 (Railway `arena-api`).
+- **Jenny:** only through the JennySol gateway; the v1 contract is live and must not break. The demo flag is **`demoContent`**.
 - **Rules:**
-  - simple, cheap, free;
-  - minimal code, one shared component library;
-  - every visible button works;
-  - mobile first;
-  - honest empty states and no fake activity;
-  - feature branches, commit and push often;
-  - never force-push `main`;
+  - feature branches only;
   - never commit secrets;
   - never touch Vikisol One;
-  - the new UI reaches production only after the founder approves a preview.
+  - no fake data;
+  - VNext goes only to the protected preview until the founder approves.
