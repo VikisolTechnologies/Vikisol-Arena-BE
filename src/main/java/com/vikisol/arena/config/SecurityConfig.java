@@ -120,13 +120,15 @@ public class SecurityConfig {
                         // ARENA-STABILIZE.md Phase 2, G9 - shared post links must work
                         // logged-out too. Same "specific-before-wildcard" ordering as above:
                         // "/posts/*" (single Ant segment) would also match the literal
-                        // "/posts/mine"/"/posts/saved" GET endpoints - list those explicitly
-                        // first so the wildcard below only ever reaches an actual post id.
+                        // "/posts/mine"/"/posts/saved"/"/posts/joined" GET endpoints - list
+                        // those explicitly first so the wildcard below only ever reaches an
+                        // actual post id. "/posts/joined" is the caller's own joins; leaving
+                        // it on the permitAll wildcard reached getJoined with a null principal.
                         // feed/trending/nearby used to be forced authenticated here too, but
                         // that's what blocked guest browsing of Home/Map - each already degrades
                         // to anonymous-safe defaults (no follow-boost, no "mine" flags), same as
                         // every other permitAll GET on this list.
-                        .requestMatchers(HttpMethod.GET, "/posts/mine", "/posts/saved").authenticated()
+                        .requestMatchers(HttpMethod.GET, "/posts/mine", "/posts/saved", "/posts/joined").authenticated()
                         .requestMatchers(HttpMethod.GET, "/posts/*", "/posts/*/comments").permitAll()
                         .anyRequest().authenticated()
                 )
