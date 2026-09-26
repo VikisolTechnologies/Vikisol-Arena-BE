@@ -13,6 +13,7 @@ Frontend VNext continues on `feature/arena-vnext` in the worktree `~/Developer/a
 - STEP 1 cleanup is on frontend `main` at `5a1b52d`. `https://arena.vikisol.in/version` returned that commit. The isolated mobile paint budget held at 2.5s. The budget was not loosened.
 - STEP 2: company-admin 2FA was never a forced enrollment. Auth was not changed. See `docs/DECISIONS.md` in this repo and `docs/SECURITY-FINDINGS.md` in the frontend repo.
 - STEP 3: Jenny write bodies stay locked in `JennyArenaWriteBodyContractTest`. `JennyArenaWriteScopeContractTest` calls `POST /posts` with a service token that lacks `arena.createPost` and expects 403, and with a token for a company admin and expects 403.
+- Sentry: `18f2dfcc8978170ff0cbd24b3ae2ef0c90eef296` scrubs events before send. `sendDefaultPii` is false. The DSN is only a Railway variable on `arena-api`. A test event id was `ee93af79ba5a4153a4f8abc6b6b5e90a`. Details are in the frontend `docs/PROGRESS.md`. The DSN is not in git.
 
 ## Next
 
