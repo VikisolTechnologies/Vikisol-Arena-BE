@@ -130,6 +130,15 @@ app:
   seed:
     enabled: ${SEED_ENABLED:true}
 
+  # Real platform admin. Both blank means no account is created. Never the retired demo address.
+  platform-admin:
+    email: ${PLATFORM_ADMIN_EMAIL:}
+    password: ${PLATFORM_ADMIN_PASSWORD:}
+
+  security:
+    # Company admin stays optional. Platform admin must enroll before /admin APIs answer.
+    platform-admin-2fa-required: ${ADMIN_2FA_REQUIRED:true}
+
   # ARENA-WEB-AND-SEED.md Part 4 - the on-demand, labeled, removable demo-content overlay
   # (DemoContentService/DemoContentController), distinct from the `app.seed` bootstrap above.
   # Off by default, unlike app.seed.enabled - "Never enabled in the production environment" is

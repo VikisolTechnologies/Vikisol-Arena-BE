@@ -3,10 +3,12 @@ package com.vikisol.arena.config;
 import com.vikisol.arena.security.jwt.AgentServiceTokenAuthenticationFilter;
 import com.vikisol.arena.security.jwt.JwtAuthenticationEntryPoint;
 import com.vikisol.arena.security.jwt.JwtAuthenticationFilter;
+import com.vikisol.arena.security.mfa.PlatformAdminMfaFilter;
 import com.vikisol.arena.security.ratelimit.RateLimitFilter;
 import com.vikisol.arena.security.service.CustomUserDetailsService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -34,6 +36,7 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final AgentServiceTokenAuthenticationFilter agentServiceTokenAuthenticationFilter;
     private final RateLimitFilter rateLimitFilter;
+    private final PlatformAdminMfaFilter platformAdminMfaFilter;
     private final CustomUserDetailsService userDetailsService;
 
     @Value("${app.cors.allowed-origins:http://localhost:3000}")
@@ -141,7 +144,8 @@ public class SecurityConfig {
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 // After JWT auth so an authenticated bucket can key by user id, not just IP -
                 // see RateLimitFilter's own comment.
-                .addFilterAfter(rateLimitFilter, JwtAuthenticationFilter.class);
+                .addFilterAfter(rateLimitFilter, JwtAuthenticationFilter.class)
+                .addFilterAfter(platformAdminMfaFilter, JwtAuthenticationFilter.class);
 
         return http.build();
     }
@@ -162,5 +166,12 @@ public class SecurityConfig {
     @Bean
     public PasswordEncoder passwordEncoder() {
         return new BCryptPasswordEncoder();
+    }
+
+    @Bean
+    public FilterRegistrationBean<PlatformAdminMfaFilter> platformAdminMfaFilterRegistration(PlatformAdminMfaFilter filter) {
+        FilterRegistrationBean<PlatformAdminMfaFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
     }
 }

@@ -19,6 +19,11 @@ public interface ProjectRepository extends JpaRepository<Project, UUID> {
 
     long countByStatus(ProjectStatus status);
 
+    long countByStatusAndDemoContentFalse(ProjectStatus status);
+
+    @EntityGraph(attributePaths = "postedByUser")
+    Page<Project> findByStatusAndDemoContentFalse(ProjectStatus status, Pageable pageable);
+
     // DemoContentService - see PostRepository.findByDemoContentTrue()'s own comment.
     List<Project> findByDemoContentTrue();
 }

@@ -62,6 +62,7 @@ public record FeedItemResponse(
         Integer budgetMin,
         Integer budgetMax,
         Integer durationWeeks,
-        Long bidCount
+        Long bidCount,
+        boolean demoContent
 ) {
 }

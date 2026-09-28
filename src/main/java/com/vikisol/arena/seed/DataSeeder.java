@@ -96,9 +96,9 @@ public class DataSeeder implements ApplicationRunner {
 
     public static final String DEMO_TALENT_EMAIL = "demo.talent@vikisol.dev";
     public static final String DEMO_ENTERPRISE_EMAIL = "demo.enterprise@vikisol.dev";
-    public static final String DEMO_PASSWORD = "Demo@12345";
 
     private final UserRepository userRepository;
+    private final DemoPassword demoPassword;
     private final CandidateProfileRepository candidateProfileRepository;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final MembershipRepository membershipRepository;
@@ -148,14 +148,9 @@ public class DataSeeder implements ApplicationRunner {
         seedEnterpriseEngagement(companies.get(0), candidates);
         seedDemoActivityAndNotifications(candidates.get(0));
         seedPostsRoomsAndFollows(candidates);
-        seedPlatformAdmin();
 
-        log.info("Seed complete: {} companies, {} candidates, {} postings", companies.size(), candidates.size(), postings.size());
-        log.info("Demo talent login: {} / {}", DEMO_TALENT_EMAIL, DEMO_PASSWORD);
-        log.info("Demo company_admin login: {} / {}", DEMO_ENTERPRISE_EMAIL, DEMO_PASSWORD);
-        log.info("Demo recruiter login: {} / {}", DEMO_RECRUITER_EMAIL, DEMO_PASSWORD);
-        log.info("Demo hiring_manager login: {} / {}", DEMO_HIRING_MANAGER_EMAIL, DEMO_PASSWORD);
-        log.info("Platform admin login: {} / {}", PLATFORM_ADMIN_EMAIL, DEMO_PASSWORD);
+        log.info("Seed complete: {} companies, {} candidates, {} postings. Demo password is ARENA_DEMO_PASSWORD and is not logged.",
+                companies.size(), candidates.size(), postings.size());
     }
 
     public static final String DEMO_RECRUITER_EMAIL = "demo.recruiter@vikisol.dev";
@@ -169,7 +164,7 @@ public class DataSeeder implements ApplicationRunner {
             boolean isDemo = i == 0;
             User user = userRepository.save(User.builder()
                     .email(isDemo ? DEMO_ENTERPRISE_EMAIL : ("hr@" + seed.name().toLowerCase().replaceAll("[^a-z]", "") + ".example.com"))
-                    .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                    .passwordHash(passwordEncoder.encode(demoPassword.required()))
                     .name(seed.name() + " Talent Team")
                     .role(Role.COMPANY_ADMIN)
                     .handle(HandleGenerator.generate(seed.name() + " Talent Team", userRepository::existsByHandle))
@@ -212,7 +207,7 @@ public class DataSeeder implements ApplicationRunner {
     private void seedDemoRecruiterAndHiringManager(User admin, EnterpriseProfile tenant) {
         if (userRepository.findByEmailIgnoreCase(DEMO_RECRUITER_EMAIL).isEmpty()) {
             User recruiter = userRepository.save(User.builder()
-                    .email(DEMO_RECRUITER_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                    .email(DEMO_RECRUITER_EMAIL).passwordHash(passwordEncoder.encode(demoPassword.required()))
                     .name("Priyanka Rao").role(Role.RECRUITER)
                     .handle(HandleGenerator.generate("Priyanka Rao", userRepository::existsByHandle)).build());
             membershipRepository.save(Membership.builder()
@@ -222,23 +217,13 @@ public class DataSeeder implements ApplicationRunner {
 
         if (userRepository.findByEmailIgnoreCase(DEMO_HIRING_MANAGER_EMAIL).isEmpty()) {
             User hiringManager = userRepository.save(User.builder()
-                    .email(DEMO_HIRING_MANAGER_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                    .email(DEMO_HIRING_MANAGER_EMAIL).passwordHash(passwordEncoder.encode(demoPassword.required()))
                     .name("Karthik Iyer").role(Role.HIRING_MANAGER)
                     .handle(HandleGenerator.generate("Karthik Iyer", userRepository::existsByHandle)).build());
             membershipRepository.save(Membership.builder()
                     .user(hiringManager).tenant(tenant).status(MembershipStatus.ACTIVE)
                     .invitedBy(admin).joinedAt(hiringManager.getCreatedAt()).build());
         }
-    }
-
-    // PA7: exactly one seeded platform admin account, credentials documented in the README - no
-    // tenant, no EnterpriseProfile, /admin resolves nothing tenant-scoped for this user.
-    private void seedPlatformAdmin() {
-        if (userRepository.findByEmailIgnoreCase(PLATFORM_ADMIN_EMAIL).isPresent()) return;
-        userRepository.save(User.builder()
-                .email(PLATFORM_ADMIN_EMAIL).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
-                .name("Vikisol Platform Admin").role(Role.PLATFORM_ADMIN)
-                .handle(HandleGenerator.generate("Vikisol Platform Admin", userRepository::existsByHandle)).build());
     }
 
     private List<CandidateProfile> seedCandidates() {
@@ -257,7 +242,7 @@ public class DataSeeder implements ApplicationRunner {
             boolean isMinorDemo = i == 1;
             User.UserBuilder userBuilder = User.builder()
                     .email(isDemo ? DEMO_TALENT_EMAIL : ("candidate" + i + "@example.com"))
-                    .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                    .passwordHash(passwordEncoder.encode(demoPassword.required()))
                     .name(name)
                     .role(Role.TALENT)
                     .handle(HandleGenerator.generate(name, userRepository::existsByHandle))

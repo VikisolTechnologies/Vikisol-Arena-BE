@@ -5,16 +5,16 @@
 // (not a sustained flood) since this runs against the actual live production instance, not an
 // isolated staging copy - the goal is finding the trend/breaking point, not causing an outage.
 const BASE = "https://api-arena.vikisol.in/api/v1";
-// RateLimitFilter keys authenticated requests by user id (identityFor(): "user:" + principal
-// getId()), not by token - many tokens for the same account all share one bucket. Using all 5
-// seeded demo accounts round-robin is the most real headroom available without touching
-// production rate-limit config (which we're not doing - see writeup).
+const password = process.env.ARENA_DEMO_PASSWORD;
+if (!password) {
+  console.error("Set ARENA_DEMO_PASSWORD. This script does not store a password.");
+  process.exit(2);
+}
 const ACCOUNTS = [
-  { email: "demo.talent@vikisol.dev", password: "Demo@12345" },
-  { email: "demo.enterprise@vikisol.dev", password: "Demo@12345" },
-  { email: "demo.recruiter@vikisol.dev", password: "Demo@12345" },
-  { email: "demo.hiringmanager@vikisol.dev", password: "Demo@12345" },
-  { email: "admin@vikisol.dev", password: "Demo@12345" },
+  { email: "demo.talent@vikisol.dev", password },
+  { email: "demo.enterprise@vikisol.dev", password },
+  { email: "demo.recruiter@vikisol.dev", password },
+  { email: "demo.hiringmanager@vikisol.dev", password },
 ];
 
 function percentile(sorted, p) {

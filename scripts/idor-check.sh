@@ -48,9 +48,18 @@ except Exception:
 }
 
 echo "== Signing in as two distinct tenants + platform_admin =="
-TENANT_A_TOKEN=$(signin "demo.enterprise@vikisol.dev" "Demo@12345")
-TENANT_B_TOKEN=$(signin "hr@razorpay.example.com" "Demo@12345")
-PA_TOKEN=$(signin "admin@vikisol.dev" "Demo@12345")
+if [ -z "${ARENA_DEMO_PASSWORD:-}" ]; then
+  echo "Set ARENA_DEMO_PASSWORD. This script does not store a password."
+  exit 2
+fi
+TENANT_A_TOKEN=$(signin "demo.enterprise@vikisol.dev" "$ARENA_DEMO_PASSWORD")
+TENANT_B_TOKEN=$(signin "hr@razorpay.example.com" "$ARENA_DEMO_PASSWORD")
+PA_EMAIL="${PLATFORM_ADMIN_EMAIL:-}"
+if [ -z "$PA_EMAIL" ] || [ -z "${PLATFORM_ADMIN_PASSWORD:-}" ]; then
+  echo "Set PLATFORM_ADMIN_EMAIL and PLATFORM_ADMIN_PASSWORD. The demo platform admin is disabled."
+  exit 2
+fi
+PA_TOKEN=$(signin "$PA_EMAIL" "$PLATFORM_ADMIN_PASSWORD")
 
 if [ -z "$TENANT_A_TOKEN" ] || [ -z "$TENANT_B_TOKEN" ]; then
   echo "Could not sign in as both tenants - aborting (check demo seed data / server is running)."

@@ -18,6 +18,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -48,6 +49,10 @@ public class RoleMigration implements ApplicationRunner {
     private final MembershipRepository membershipRepository;
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final DemoPassword demoPassword;
+
+    @Value("${app.seed.enabled:true}")
+    private boolean seedEnabled;
 
     @Override
     @Transactional
@@ -65,7 +70,9 @@ public class RoleMigration implements ApplicationRunner {
             log.info("RoleMigration: renamed {} ENTERPRISE user(s) to COMPANY_ADMIN", renamed);
         }
         backfillMemberships();
-        backfillDemoAccounts();
+        if (seedEnabled) {
+            backfillDemoAccounts();
+        }
     }
 
     private void backfillMemberships() {
@@ -95,7 +102,7 @@ public class RoleMigration implements ApplicationRunner {
 
             if (userRepository.findByEmailIgnoreCase(DataSeeder.DEMO_RECRUITER_EMAIL).isEmpty()) {
                 User recruiter = userRepository.save(User.builder()
-                        .email(DataSeeder.DEMO_RECRUITER_EMAIL).passwordHash(passwordEncoder.encode(DataSeeder.DEMO_PASSWORD))
+                        .email(DataSeeder.DEMO_RECRUITER_EMAIL).passwordHash(passwordEncoder.encode(demoPassword.required()))
                         .name("Priyanka Rao").role(Role.RECRUITER)
                         .handle(HandleGenerator.generate("Priyanka Rao", userRepository::existsByHandle)).build());
                 membershipRepository.save(Membership.builder()
@@ -106,7 +113,7 @@ public class RoleMigration implements ApplicationRunner {
 
             if (userRepository.findByEmailIgnoreCase(DataSeeder.DEMO_HIRING_MANAGER_EMAIL).isEmpty()) {
                 User hiringManager = userRepository.save(User.builder()
-                        .email(DataSeeder.DEMO_HIRING_MANAGER_EMAIL).passwordHash(passwordEncoder.encode(DataSeeder.DEMO_PASSWORD))
+                        .email(DataSeeder.DEMO_HIRING_MANAGER_EMAIL).passwordHash(passwordEncoder.encode(demoPassword.required()))
                         .name("Karthik Iyer").role(Role.HIRING_MANAGER)
                         .handle(HandleGenerator.generate("Karthik Iyer", userRepository::existsByHandle)).build());
                 membershipRepository.save(Membership.builder()
@@ -115,13 +122,5 @@ public class RoleMigration implements ApplicationRunner {
                 log.info("RoleMigration: seeded demo hiring manager {}", DataSeeder.DEMO_HIRING_MANAGER_EMAIL);
             }
         });
-
-        if (userRepository.findByEmailIgnoreCase(DataSeeder.PLATFORM_ADMIN_EMAIL).isEmpty()) {
-            userRepository.save(User.builder()
-                    .email(DataSeeder.PLATFORM_ADMIN_EMAIL).passwordHash(passwordEncoder.encode(DataSeeder.DEMO_PASSWORD))
-                    .name("Vikisol Platform Admin").role(Role.PLATFORM_ADMIN)
-                    .handle(HandleGenerator.generate("Vikisol Platform Admin", userRepository::existsByHandle)).build());
-            log.info("RoleMigration: seeded platform admin {}", DataSeeder.PLATFORM_ADMIN_EMAIL);
-        }
     }
 }

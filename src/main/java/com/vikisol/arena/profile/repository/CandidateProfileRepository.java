@@ -67,7 +67,11 @@ public interface CandidateProfileRepository extends JpaRepository<CandidateProfi
     // sees always matches what an enterprise's Talent Universe search could actually reach.
     long countByConsent_SearchableByEnterprisesTrue();
 
+    long countByConsent_SearchableByEnterprisesTrueAndDemoContentFalse();
+
     long countByIndustryAndConsent_SearchableByEnterprisesTrue(Industry industry);
+
+    long countByIndustryAndConsent_SearchableByEnterprisesTrueAndDemoContentFalse(Industry industry);
 
     // DemoContentService - see PostRepository.findByDemoContentTrue()'s own comment.
     @EntityGraph(attributePaths = "user")

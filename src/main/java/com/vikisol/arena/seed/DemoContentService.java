@@ -148,14 +148,11 @@ public class DemoContentService {
     private final ShortlistEntryRepository shortlistEntryRepository;
     private final UnlockedCandidateRepository unlockedCandidateRepository;
     private final PasswordEncoder passwordEncoder;
+    private final DemoPassword demoPassword;
     private final AuthService authService;
     private final TeamService teamService;
     private final ConversationService conversationService;
 
-    // ARENA-FINISH-IT.md §1.1 - "one shared, simple, documented password... these are throwaway
-    // demo logins, not secrets." Satisfies both SignUpRequest's 6-char and
-    // AcceptInvitationRequest's 8-char minimums.
-    public static final String DEMO_PASSWORD = "ArenaDemo2026!";
     private static final String EMAIL_DOMAIN = "demo.arena.test";
 
     private record Neighborhood(String name, double lat, double lng) {}
@@ -221,7 +218,7 @@ public class DemoContentService {
         for (int i = 1; i <= 40; i++) {
             String name = IndianData.fullName();
             String email = String.format("user%02d@%s", i, EMAIL_DOMAIN);
-            authService.signUp(new SignUpRequest(name, email, DEMO_PASSWORD, "talent"), false);
+            authService.signUp(new SignUpRequest(name, email, demoPassword.required(), "talent"), false);
             User user = withDemoFlag(userRepository.findByEmailIgnoreCase(email).orElseThrow());
             userRepository.save(user);
 
@@ -300,7 +297,7 @@ public class DemoContentService {
             CompanySeed seed = realSeeds.get(i);
             String email = String.format("user%02d@%s", 41 + i, EMAIL_DOMAIN);
             String adminName = seed.name() + " Talent Team";
-            authService.signUp(new SignUpRequest(adminName, email, DEMO_PASSWORD, "company_admin"), false);
+            authService.signUp(new SignUpRequest(adminName, email, demoPassword.required(), "company_admin"), false);
             User admin = userRepository.findByEmailIgnoreCase(email).orElseThrow();
             admin.setDemoContent(true);
             userRepository.save(admin);
@@ -333,7 +330,7 @@ public class DemoContentService {
             IndianData.CompanySeed seed = IndianData.COMPANIES.get(i);
             User user = withDemoFlag(User.builder()
                     .email(String.format("company-backing-%d.%s@%s", i, System.nanoTime(), EMAIL_DOMAIN))
-                    .passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                    .passwordHash(passwordEncoder.encode(demoPassword.required()))
                     .name(seed.name() + " Talent Team")
                     .role(Role.COMPANY_ADMIN)
                     .handle(com.vikisol.arena.common.util.HandleGenerator.generate(seed.name() + " Talent Team", userRepository::existsByHandle))
@@ -378,7 +375,7 @@ public class DemoContentService {
             invitation.setDemoContent(true);
             invitationRepository.save(invitation);
 
-            User user = teamService.acceptInvitation(invitation.getToken(), invitee.name(), DEMO_PASSWORD);
+            User user = teamService.acceptInvitation(invitation.getToken(), invitee.name(), demoPassword.required());
             user.setDemoContent(true);
             userRepository.save(user);
             Membership membership = membershipRepository.findByUserId(user.getId()).orElseThrow();
@@ -396,7 +393,7 @@ public class DemoContentService {
     private User seedPlatformAdminAccount() {
         String email = String.format("user50@%s", EMAIL_DOMAIN);
         User user = withDemoFlag(User.builder()
-                .email(email).passwordHash(passwordEncoder.encode(DEMO_PASSWORD))
+                .email(email).passwordHash(passwordEncoder.encode(demoPassword.required()))
                 .name("Demo Platform Admin").role(Role.PLATFORM_ADMIN)
                 .handle(com.vikisol.arena.common.util.HandleGenerator.generate("Demo Platform Admin", userRepository::existsByHandle))
                 .build());

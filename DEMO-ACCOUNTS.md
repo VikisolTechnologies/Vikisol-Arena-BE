@@ -6,7 +6,7 @@ removed completely by `DELETE /admin/demo-content`. Every account is flagged `de
 at the database level and is disabled entirely when `ARENA_SEED_MODE` is off - the seed endpoints
 don't exist as routes without it, so there is no path that creates these accounts by accident.
 
-**Shared password for all 50: `ArenaDemo2026!`**
+The shared password is `ARENA_DEMO_PASSWORD`. It is not written in this file.
 
 Demo accounts cannot initiate anything involving money - no payment or payout path in this
 product accepts a `demoContent` account as either payer or payee (that gate lives in the real

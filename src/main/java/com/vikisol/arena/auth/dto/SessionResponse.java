@@ -12,13 +12,20 @@ public record SessionResponse(
         String email,
         String token,
         boolean mfaRequired,
-        String mfaPendingToken
+        String mfaPendingToken,
+        boolean mfaEnrollmentRequired,
+        boolean totpEnabled
 ) {
     public static SessionResponse of(String role, String candidateId, String name, String email, String token) {
-        return new SessionResponse(role, candidateId, name, email, token, false, null);
+        return of(role, candidateId, name, email, token, false, false);
+    }
+
+    public static SessionResponse of(String role, String candidateId, String name, String email, String token,
+                                     boolean mfaEnrollmentRequired, boolean totpEnabled) {
+        return new SessionResponse(role, candidateId, name, email, token, false, null, mfaEnrollmentRequired, totpEnabled);
     }
 
     public static SessionResponse mfaRequired(String pendingToken) {
-        return new SessionResponse(null, null, null, null, null, true, pendingToken);
+        return new SessionResponse(null, null, null, null, null, true, pendingToken, false, false);
     }
 }
