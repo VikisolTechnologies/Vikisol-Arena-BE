@@ -1,26 +1,28 @@
 # Progress
 
-Updated 26 Sep 2026. Resume from here. Do not redo the cleanup.
+Updated 28 Sep 2026. Resume from here.
+
+## P0 release (production)
+
+28 Sep 2026. Audit P0-1 and P0-2 are on `main` at `8ebccb6` (merge of `a504ef0`). Railway `arena-api` deployment `35679797` is SUCCESS and Online.
+
+- Production env: `SEED_ENABLED=false`; platform-admin credentials set on a non-demo address; demo password env set and not a retired public value; admin 2FA uses the app default `true`.
+- Boot lockdown rotated published demo passwords, marked seeded rows, disabled the demo platform admin, and excluded demo from public landing counts.
+- `GET /api/v1/public/landing-stats` returns honest non-demo counts. Actuator health is UP.
+- Frontend production is `4225f9e`. VNext PR #1 was not merged.
 
 ## Current step
 
-STEP 3 of `docs/ARENA-MISSION.md` is on `main` at `ab6dcc6`. The contract tests passed before the fast-forward.
-
-Frontend VNext continues on `feature/arena-vnext` in the worktree `~/Developer/arena-fe-vnext`. Do not merge that pull request.
+No further P0 work. Frontend continues under Claude Code. Do not merge the VNext pull request.
 
 ## Done
 
+- P0 production release (this section).
 - STEP 1 cleanup is on frontend `main` at `5a1b52d`. `https://arena.vikisol.in/version` returned that commit. The isolated mobile paint budget held at 2.5s. The budget was not loosened.
 - STEP 2: company-admin 2FA was never a forced enrollment. Auth was not changed. See `docs/DECISIONS.md` in this repo and `docs/SECURITY-FINDINGS.md` in the frontend repo.
 - STEP 3: Jenny write bodies stay locked in `JennyArenaWriteBodyContractTest`. `JennyArenaWriteScopeContractTest` calls `POST /posts` with a service token that lacks `arena.createPost` and expects 403, and with a token for a company admin and expects 403.
-- Sentry: `18f2dfcc8978170ff0cbd24b3ae2ef0c90eef296` scrubs events before send. `sendDefaultPii` is false. The DSN is only a Railway variable on `arena-api`. A test event id was `ee93af79ba5a4153a4f8abc6b6b5e90a`. Details are in the frontend `docs/PROGRESS.md`. The DSN is not in git.
+- Sentry: `18f2dfcc8978170ff0cbd24b3ae2ef0c90eef296` scrubs events before send. `sendDefaultPii` is false. The DSN is only a Railway variable on `arena-api`.
 
 ## Next
 
-Continue the frontend mission from `docs/PROGRESS.md` on `feature/arena-vnext`: blueprint, mockups, private preview, report. Do not restart the shell.
-
-## Open
-
-- First JS on `/home` is still over 200KB gzipped. Do not hide the number.
-- Sentry must allow `arena.vikisol.in`. Ignore Sentry's own 403 until then.
-- The GitHub token cannot update `.github/workflows/e2e.yml` (no workflow scope).
+Claude Code owns Arena frontend. Leave VNext unmerged and off production until founder approval.
