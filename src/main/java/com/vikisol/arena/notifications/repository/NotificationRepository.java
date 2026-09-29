@@ -13,6 +13,10 @@ import java.util.UUID;
 public interface NotificationRepository extends JpaRepository<Notification, UUID> {
     Page<Notification> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 
+    // Row 16: the list without snoozed ones (until their time comes).
+    @Query("select n from Notification n where n.user.id = :userId and (n.snoozedUntil is null or n.snoozedUntil <= :now) order by n.createdAt desc, n.id desc")
+    Page<Notification> findVisible(@Param("userId") UUID userId, @Param("now") java.time.Instant now, Pageable pageable);
+
     // Bulk "mark all read" in one statement, rather than the frontend firing N PUT
     // /notifications/{id}/read requests for a "mark all read" action.
     @Modifying

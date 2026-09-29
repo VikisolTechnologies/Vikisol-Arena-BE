@@ -49,13 +49,13 @@ public class MessageController {
         return ResponseEntity.ok(ApiResponse.ok(conversationService.close(principal.getId(), id)));
     }
 
-    public record ReportConversationRequest(@jakarta.validation.constraints.Size(max = 500) String reason) {
+    public record ReportConversationRequest(@jakarta.validation.constraints.Size(max = 500) String reason, java.util.List<String> evidenceUrls) {
     }
 
     @PostMapping("/conversations/{id}/report")
     public ResponseEntity<ApiResponse<Void>> report(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody ReportConversationRequest request) {
-        conversationService.report(principal.getId(), id, request.reason());
+        conversationService.report(principal.getId(), id, request.reason(), request.evidenceUrls());
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 

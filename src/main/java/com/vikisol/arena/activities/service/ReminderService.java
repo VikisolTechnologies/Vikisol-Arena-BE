@@ -96,7 +96,7 @@ public class ReminderService {
             if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL) continue;
             String when = r.getMinutesBefore() >= 60 ? (r.getMinutesBefore() / 60) + "h" : r.getMinutesBefore() + " min";
             String title = post.getTitle() != null ? post.getTitle() : post.getBody();
-            notificationService.notifySystem(r.getUser(), "Reminder",
+            notificationService.notifyActivity(r.getUser(), "Reminder",
                     "\"" + (title.length() > 60 ? title.substring(0, 60) + "…" : title) + "\" starts in " + when + ".");
         }
     }

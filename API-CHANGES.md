@@ -637,3 +637,44 @@ never blocks anyone.
 The team room's Chat is the project's Room, as before. Files are links in chat; attachments are
 not built (rows 9 and 40, see GAP-MAPPING.md).
 
+## People app: reports, notifications, search, visibility, connect requests, inbox — FE-API-GAPS rows 15, 16, 17, 18, 34, 37; admin disputes (flow §9)
+
+| FE row | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| 15 | `POST /reports/evidence` | signed in | multipart `file` (PNG/JPG/WebP/PDF, ≤10 MB) → `{ url, fileName }` |
+| 15 | `POST /posts/{id}/report`, `POST /rooms/{id}/report`, `POST /messages/conversations/{id}/report` (existing) | | Optional `evidenceUrls` (≤4). Each must be the reporter's own upload from `/reports/evidence`, otherwise 400 |
+| 15 | `GET /admin/moderation` (existing) | platform admin | Items add `evidenceUrls` (signed links) |
+| 16 | `GET /notifications` (existing) | | Items add `category`: `activity`, `need`, `job`, `message`, `safety`, or absent when none fits. Snoozed items are left out until their time |
+| 16 | `POST /notifications/{id}/snooze` | owner | Optional `{ minutes (15–10080, default 60) }` |
+| 16 | `POST /notifications/{id}/dismiss` | owner | The same as `DELETE /notifications/{id}` |
+| 18 | `GET /notifications/preferences`, `PUT /notifications/preferences` | signed in | `{ activity, need, job, message, safety }`. Only the categories sent change. `safety` is always `true`; sending `false` answers 400. A category that's off isn't stored at all |
+| 17 | `GET /search?type=people\|skills&q=&near=lat,lng&radiusKm=` (existing, new types) | signed in | `people: [{ userId, name, avatarEmoji, photoUrl, title, skills (≤5), interests (≤5), distanceKm }]`. `skills` matches skill names only. `near` limits to people within `radiusKm` (default 5, max 50) who share an approximate location. `distanceKm` is whole kilometres between the two approximate locations. Guests get an empty list |
+| 18 | `GET /profile/me/visibility`, `PUT /profile/me/visibility` | talent | `{ profile: "nearby"\|"everyone"\|"hidden" }` (default `everyone`) |
+| 34 | `POST /enterprise/talent/{candidateId}/connect` | recruiter / company admin | `{ jobId? (one of the company's jobs), note (≤300) }` → `{ id, companyId, companyName, companyEmoji, companyVerified, jobId, jobTitle, note, status: "pending", createdAt }`. One per company and person; after a decline, another is refused |
+| 34 | `GET /connect-requests` | talent | The person's requests, newest first, paged with headers |
+| 34 | `POST /connect-requests/{id}/accept` | that person | Opens the chat with the sender and returns its `conversationId` |
+| 34 | `POST /connect-requests/{id}/decline` | that person | |
+| 37 | `GET /messages/conversations` (existing) | | Items add `lastMessagePreview` (≤140 characters; absent before the first message). Fetched in one query for the page |
+| §9 | `GET /admin/disputes?status=open\|accepted\|rejected` | platform admin (2FA) | Attendance disputes, oldest first (default `open`): `[{ attendanceId, joinId, postId, activity, hostId, hostName, userId, name, outcome, hostCheckedInAt, joinerAttended, disputeReason, disputedAt, disputeOpenUntil, status, resolutionNote, resolvedAt }]` |
+| §9 | `PUT /admin/disputes/{attendanceId}/accept` | platform admin | Optional `{ note }`. The person is marked present, and both sides are told |
+| §9 | `PUT /admin/disputes/{attendanceId}/reject` | platform admin | `{ note (≤500) }`, required. The no-show stands and is final. The person gets the note |
+
+**How the pieces behave:**
+- **People search and profile visibility (row 18).**
+  - `everyone`: listed in any signed-in people search.
+  - `nearby`: listed only in searches with `near`, within the radius.
+  - `hidden`: never listed.
+  - Blocked people never appear either way.
+  - Visibility changes people search only. The profile page itself is unchanged.
+- **Messaging (row 34, flow §8 "Messages: only with people who applied or accepted a connect
+  request").**
+  - Someone on a company team can start a new chat with a talent only after that person applied
+    to the company or accepted its connect request. Otherwise the answer is 400.
+  - Chats that already exist carry on.
+- **The trust count.** A no-show an admin upheld (`rejected`) counts as final straight away.
+
+**⚠ Existing behaviour changes:**
+- `POST /messages/conversations` from a recruiter, company admin or hiring manager to a talent who
+  hasn't applied or accepted a connect request now answers 400. Before, any employer could start a
+  chat.
+- The enum `DisputeStatus` (seen as `disputeStatus` in attendance rows) gains `rejected`.

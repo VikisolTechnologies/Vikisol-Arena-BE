@@ -36,13 +36,15 @@ public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest
     // feed/nearby window, same shape as every other batch-count query in PostMapper.
     //
     // G11: a host's no-show only lowers this count once it is final - recorded before
-    // `finalBefore` (72h ago) and not disputed. Until then, or while a dispute is open, it counts
-    // like any other join, so host-recorded attendance can't become reputation unchecked.
+    // `finalBefore` (72h ago) and not disputed, or an Arena admin upheld it (REJECTED dispute).
+    // Until then, or while a dispute is open, it counts like any other join, so host-recorded
+    // attendance can't become reputation unchecked.
     @Query("select j.user.id as userId, count(j) as cnt from PostJoinRequest j " +
             "where j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED " +
             "and (j.outcome is null or j.outcome <> com.vikisol.arena.posts.entity.PostJoinOutcome.NO_SHOW " +
             "  or exists (select a.id from com.vikisol.arena.activities.entity.ActivityAttendance a where a.joinRequest = j " +
-            "    and (a.disputeStatus <> com.vikisol.arena.activities.entity.DisputeStatus.NONE or a.outcomeRecordedAt > :finalBefore))) " +
+            "    and (a.disputeStatus in (com.vikisol.arena.activities.entity.DisputeStatus.OPEN, com.vikisol.arena.activities.entity.DisputeStatus.ACCEPTED) " +
+            "      or (a.disputeStatus = com.vikisol.arena.activities.entity.DisputeStatus.NONE and a.outcomeRecordedAt > :finalBefore)))) " +
             "and j.user.id in :userIds group by j.user.id")
     List<UserJoinCountProjection> countApprovedByUserIdIn(@Param("userIds") List<UUID> userIds,
                                                          @Param("finalBefore") java.time.Instant finalBefore);
@@ -54,7 +56,8 @@ public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest
             "and j.post.intentType = com.vikisol.arena.posts.entity.PostIntentType.ACTIVITY " +
             "and (j.outcome is null or j.outcome <> com.vikisol.arena.posts.entity.PostJoinOutcome.NO_SHOW " +
             "  or exists (select a.id from com.vikisol.arena.activities.entity.ActivityAttendance a where a.joinRequest = j " +
-            "    and (a.disputeStatus <> com.vikisol.arena.activities.entity.DisputeStatus.NONE or a.outcomeRecordedAt > :finalBefore)))")
+            "    and (a.disputeStatus in (com.vikisol.arena.activities.entity.DisputeStatus.OPEN, com.vikisol.arena.activities.entity.DisputeStatus.ACCEPTED) " +
+            "      or (a.disputeStatus = com.vikisol.arena.activities.entity.DisputeStatus.NONE and a.outcomeRecordedAt > :finalBefore))))")
     long countJoinedActivities(@Param("userId") UUID userId, @Param("finalBefore") java.time.Instant finalBefore);
 
     interface UserJoinCountProjection {

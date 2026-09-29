@@ -41,6 +41,19 @@ public interface CandidateProfileRepository extends JpaRepository<CandidateProfi
     // Hibernate paginate in memory (loads the full unbounded result set, then slices it in Java) -
     // worse than the per-row lazy loads this is meant to fix. See the IN-batched fetches below,
     // called once per page after this query returns, for the actual N+1 fix.
+    // Row 17: people search candidates - live accounts not hidden from search, matching the term in
+    // their name, title, skills or interests (skillsOnly: skills alone). Ranked in memory.
+    @Query("""
+            select distinct c from CandidateProfile c left join c.skills s left join c.interests i
+            where c.user.deletedAt is null and c.user.id <> :viewerId
+              and c.profileVisibility <> com.vikisol.arena.profile.entity.CandidateProfile.ProfileVisibility.HIDDEN
+              and (lower(s.name) like concat('%', :term, '%')
+                   or (:skillsOnly = false and (lower(c.name) like concat('%', :term, '%') or lower(c.title) like concat('%', :term, '%')
+                        or lower(i) like concat('%', :term, '%'))))
+            """)
+    List<CandidateProfile> searchPeople(@Param("term") String term, @Param("skillsOnly") boolean skillsOnly,
+                                        @Param("viewerId") UUID viewerId, Pageable pageable);
+
     // ARENA-APP-FLOW §8: talent search shows only people whose career profile is published
     // ("open"), on top of the search consent.
     // ARENA-FIX-EVERYTHING.md Phase 1 fix - this query never excluded an anonymized/erased

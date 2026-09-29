@@ -405,7 +405,7 @@ public class ActivitiesService {
         attendance.setDisputeReason(reason.trim());
         attendance.setDisputedAt(Instant.now());
         attendanceRepository.save(attendance);
-        notificationService.notifySystem(post.getAuthorUser(), "Attendance disputed",
+        notificationService.notifyActivity(post.getAuthorUser(), "Attendance disputed",
                 join.getUser().getName() + " says they were there. Review it on the attendance sheet.");
         return toResponse(post, userId);
     }
@@ -424,7 +424,7 @@ public class ActivitiesService {
         attendanceRepository.save(attendance);
         join.setOutcome(PostJoinOutcome.ATTENDED);
         joinRepository.save(join);
-        notificationService.notifySystem(join.getUser(), "Dispute accepted", "The host agreed: you're marked present.");
+        notificationService.notifyActivity(join.getUser(), "Dispute accepted", "The host agreed: you're marked present.");
         return attendance(hostId, postId);
     }
 
@@ -451,7 +451,7 @@ public class ActivitiesService {
         feedback.setText(blankToNull(request.note()));
         feedback = feedbackRepository.save(feedback);
         if (isNew) {
-            notificationService.notifySystem(to, "Private feedback", from.getName() + " left you private feedback about an activity.");
+            notificationService.notifyActivity(to, "Private feedback", from.getName() + " left you private feedback about an activity.");
         }
         return toFeedback(feedback);
     }

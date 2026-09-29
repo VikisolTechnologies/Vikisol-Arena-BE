@@ -80,4 +80,9 @@ public class ModerationItem extends BaseEntity {
     private User resolvedBy;
 
     private Instant resolvedAt;
+
+    // Row 15 (V37): evidence files the reporter attached (unsigned stored URLs, JSON list).
+    @Column(nullable = false, columnDefinition = "TEXT")
+    @Builder.Default
+    private String evidenceJson = "[]";
 }

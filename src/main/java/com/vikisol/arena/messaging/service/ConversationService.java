@@ -36,6 +36,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ConversationService {
 
+    private final com.vikisol.arena.connect.MessagingPolicy messagingPolicy;
     private final ConversationRepository conversationRepository;
     private final ThreadMessageRepository threadMessageRepository;
     private final UserRepository userRepository;
@@ -57,7 +58,18 @@ public class ConversationService {
                 others.stream().filter(u -> u.getRole() == Role.TALENT).map(User::getId).toList());
         Map<UUID, EnterpriseProfile> tenants = enterpriseProfileService.mapByUserId(
                 others.stream().filter(u -> u.getRole() != Role.TALENT).map(User::getId).toList());
-        return rows.map(c -> toResponse(c, userId, profiles, tenants));
+        Map<UUID, String> previews = previews(rows.stream().map(Conversation::getId).toList());
+        return rows.map(c -> toResponse(c, userId, profiles, tenants, previews));
+    }
+
+    private Map<UUID, String> previews(List<UUID> conversationIds) {
+        if (conversationIds.isEmpty()) return Map.of();
+        Map<UUID, String> out = new java.util.HashMap<>();
+        for (ThreadMessage m : threadMessageRepository.findLatestIn(conversationIds)) {
+            String text = m.getContent() == null ? "" : m.getContent().strip();
+            out.put(m.getConversation().getId(), text.length() > 140 ? text.substring(0, 139) + "…" : text);
+        }
+        return out;
     }
 
     @Transactional(readOnly = true)
@@ -108,6 +120,10 @@ public class ConversationService {
         }
         boolean hideThem = post != null && post.isAnonymous();
         if (!hideMe && !hideThem) {
+            if (!userId.equals(recipientId) && conversationRepository.findBetween(userId, recipientId).isEmpty()
+                    && !messagingPolicy.mayStartChat(requireUser(userId), recipientId)) {
+                throw new BadRequestException("You can message this person once they apply to your company or accept your connect request.");
+            }
             return getOrCreate(userId, recipientId, request.context());
         }
 
@@ -161,10 +177,15 @@ public class ConversationService {
 
     @Transactional
     public void report(UUID userId, UUID conversationId, String reason) {
+        report(userId, conversationId, reason, null);
+    }
+
+    @Transactional
+    public void report(UUID userId, UUID conversationId, String reason, java.util.List<String> evidence) {
         Conversation conversation = requireConversation(conversationId);
         assertParticipant(userId, conversation);
         moderationService.fileConversationReport(requireUser(userId), conversation,
-                reason == null || reason.isBlank() ? "Reported from chat" : reason.trim());
+                reason == null || reason.isBlank() ? "Reported from chat" : reason.trim(), evidence);
     }
 
     private static boolean hiddenFlag(Conversation c, UUID userId) {
@@ -201,7 +222,7 @@ public class ConversationService {
         User recipient = conversation.getUserA().getId().equals(userId) ? conversation.getUserB() : conversation.getUserA();
         // A hidden sender stays hidden in the notification too.
         boolean senderHidden = hiddenFlag(conversation, userId);
-        notificationService.notify(recipient, NotificationType.SYSTEM, "New message",
+        notificationService.notifyNewMessage(recipient,
                 senderHidden ? "Someone sent you an anonymous message." : requireUser(userId).getName() + " sent you a message.");
 
         // Same "only audit the enterprise side" scoping as InterviewService.propose() - a
@@ -231,11 +252,12 @@ public class ConversationService {
                 ? candidateProfileRepository.mapByUserId(List.of(other.getId())) : Map.of();
         Map<UUID, EnterpriseProfile> tenants = other.getRole() == Role.TALENT
                 ? Map.of() : enterpriseProfileService.mapByUserId(List.of(other.getId()));
-        return toResponse(c, viewingUserId, profiles, tenants);
+        return toResponse(c, viewingUserId, profiles, tenants, c.getId() == null ? Map.of() : previews(List.of(c.getId())));
     }
 
     private ConversationResponse toResponse(Conversation c, UUID viewingUserId,
-                                            Map<UUID, CandidateProfile> profiles, Map<UUID, EnterpriseProfile> tenants) {
+                                            Map<UUID, CandidateProfile> profiles, Map<UUID, EnterpriseProfile> tenants,
+                                            Map<UUID, String> previews) {
         boolean viewerIsA = c.getUserA().getId().equals(viewingUserId);
         User other = viewerIsA ? c.getUserB() : c.getUserA();
         Instant lastReadAt = viewerIsA ? c.getLastReadAtA() : c.getLastReadAtB();
@@ -275,7 +297,8 @@ public class ConversationService {
         }
         return new ConversationResponse(c.getId().toString(), participantId, displayName, displayEmoji,
                 c.getContext(), c.getLastMessageAt().toString(), unread,
-                otherHidden, meHidden, c.getClosedAt() != null, c.getPost() == null ? null : c.getPost().getId().toString());
+                otherHidden, meHidden, c.getClosedAt() != null, c.getPost() == null ? null : c.getPost().getId().toString(),
+                previews.get(c.getId()));
     }
 
     private ThreadMessageResponse toResponse(ThreadMessage m, UUID viewingUserId) {

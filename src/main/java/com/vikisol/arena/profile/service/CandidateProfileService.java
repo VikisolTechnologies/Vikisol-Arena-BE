@@ -313,6 +313,25 @@ public class CandidateProfileService {
         return toBasics(candidateProfileRepository.save(profile));
     }
 
+    @Transactional(readOnly = true)
+    public String visibility(UUID userId) {
+        return getEntityForUser(userId).getProfileVisibility().name().toLowerCase(Locale.ROOT);
+    }
+
+    @Transactional
+    public String setVisibility(UUID userId, String value) {
+        CandidateProfile.ProfileVisibility v;
+        try {
+            v = CandidateProfile.ProfileVisibility.valueOf(value == null ? "" : value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException("profile must be one of nearby, everyone, hidden");
+        }
+        CandidateProfile profile = getEntityForUser(userId);
+        profile.setProfileVisibility(v);
+        candidateProfileRepository.save(profile);
+        return v.name().toLowerCase(Locale.ROOT);
+    }
+
     // Gap 3. Images only; the old photo file is removed.
     @Transactional
     public ProfileBasicsResponse uploadPhoto(UUID userId, org.springframework.web.multipart.MultipartFile file) {

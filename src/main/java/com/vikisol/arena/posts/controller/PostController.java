@@ -290,7 +290,7 @@ public class PostController {
     @PostMapping("/{id}/report")
     public ResponseEntity<ApiResponse<Void>> report(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody ReportPostRequest request) {
-        moderationService.filePostReport(principal.getId(), id, request.reason());
+        moderationService.filePostReport(principal.getId(), id, request.reason(), request.evidenceUrls());
         return ResponseEntity.ok(ApiResponse.ok("Report submitted", null));
     }
 }

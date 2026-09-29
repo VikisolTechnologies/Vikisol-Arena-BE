@@ -121,7 +121,7 @@ public class NeedService {
         response.setStatus(ResponseStatus.PENDING);
         response.setDecidedAt(null);
         response = responseRepository.save(response);
-        notificationService.notifySystem(post.getAuthorUser(), post.getIntentType() == PostIntentType.ASK ? "Someone can help" : "Someone's interested",
+        notificationService.notifyNeed(post.getAuthorUser(), post.getIntentType() == PostIntentType.ASK ? "Someone can help" : "Someone's interested",
                 response.getUser().getName() + " responded to \"" + preview(post) + "\".");
         return toResponseView(response, userId, profileOf(response.getUser().getId()), null);
     }
@@ -155,7 +155,7 @@ public class NeedService {
         response.setStatus(ResponseStatus.ACCEPTED);
         response.setDecidedAt(Instant.now());
         responseRepository.save(response);
-        notificationService.notifySystem(response.getUser(), "Accepted",
+        notificationService.notifyNeed(response.getUser(), "Accepted",
                 post.getAuthorUser().getName() + " accepted your response. You can chat now.");
         return toResponseView(response, ownerId, profileOf(response.getUser().getId()), null);
     }
@@ -212,9 +212,9 @@ public class NeedService {
                 post.setStatus(PostStatus.CLOSED);
                 postRepository.save(post);
             }
-            notificationService.notifySystem(other, "It's done", "You both confirmed \"" + preview(post) + "\".");
+            notificationService.notifyNeed(other, "It's done", "You both confirmed \"" + preview(post) + "\".");
         } else {
-            notificationService.notifySystem(other, "Confirm on your side",
+            notificationService.notifyNeed(other, "Confirm on your side",
                     "Did \"" + preview(post) + "\" happen? Confirm it so it counts for both of you.");
         }
         completionRepository.save(completion);

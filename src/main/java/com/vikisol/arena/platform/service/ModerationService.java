@@ -54,6 +54,9 @@ public class ModerationService {
     private final UserRepository userRepository;
     private final AuditService auditService;
     private final com.vikisol.arena.messaging.repository.ThreadMessageRepository threadMessageRepository;
+    private final com.vikisol.arena.common.service.FileStorageService fileStorageService;
+    private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Transactional
     public void autoFlag(JobPosting posting) {
@@ -92,12 +95,18 @@ public class ModerationService {
     // (RoomService already has them in hand) rather than this service re-querying by id.
     @Transactional
     public void fileRoomReport(Room room, User reporter, String reason) {
+        fileRoomReport(room, reporter, reason, List.of());
+    }
+
+    @Transactional
+    public void fileRoomReport(Room room, User reporter, String reason, List<String> evidence) {
         moderationItemRepository.save(ModerationItem.builder()
                 .contentType(ModerationContentType.ROOM)
                 .room(room)
                 .reporter(reporter)
                 .reason(reason)
                 .status(ModerationStatus.PENDING)
+                .evidenceJson(evidenceJson(reporter.getId(), evidence))
                 .build());
     }
 
@@ -106,6 +115,11 @@ public class ModerationService {
     // posts never do; ACTIVITY/ASK posts don't until someone's approved to join).
     @Transactional
     public void filePostReport(UUID reporterUserId, UUID postId, String reason) {
+        filePostReport(reporterUserId, postId, reason, List.of());
+    }
+
+    @Transactional
+    public void filePostReport(UUID reporterUserId, UUID postId, String reason, List<String> evidence) {
         Post post = postRepository.findById(postId)
                 .orElseThrow(() -> new ResourceNotFoundException("Post not found: " + postId));
         User reporter = userRepository.getReferenceById(reporterUserId);
@@ -115,6 +129,7 @@ public class ModerationService {
                 .reporter(reporter)
                 .reason(reason)
                 .status(ModerationStatus.PENDING)
+                .evidenceJson(evidenceJson(reporterUserId, evidence))
                 .build());
     }
 
@@ -122,13 +137,50 @@ public class ModerationService {
     // in by ConversationService, which has already checked the reporter is part of it.
     @Transactional
     public void fileConversationReport(User reporter, com.vikisol.arena.messaging.entity.Conversation conversation, String reason) {
+        fileConversationReport(reporter, conversation, reason, List.of());
+    }
+
+    @Transactional
+    public void fileConversationReport(User reporter, com.vikisol.arena.messaging.entity.Conversation conversation, String reason, List<String> evidence) {
         moderationItemRepository.save(ModerationItem.builder()
                 .contentType(ModerationContentType.CONVERSATION)
                 .conversation(conversation)
                 .reporter(reporter)
                 .reason(reason)
                 .status(ModerationStatus.PENDING)
+                .evidenceJson(evidenceJson(reporter.getId(), evidence))
                 .build());
+    }
+
+    // Row 15: evidence files for a report. Each must be one the reporter uploaded with
+    // POST /reports/evidence; at most 4.
+    public static final String EVIDENCE_MODULE = "report-evidence";
+
+    private String evidenceJson(UUID reporterId, List<String> evidence) {
+        if (evidence == null || evidence.isEmpty()) return "[]";
+        if (evidence.size() > 4) throw new com.vikisol.arena.common.exception.BadRequestException("A report can have at most 4 evidence files");
+        List<String> bare = new java.util.ArrayList<>();
+        for (String url : evidence) {
+            if (!fileStorageService.isStoredUnder(url, EVIDENCE_MODULE, reporterId.toString())) {
+                throw new com.vikisol.arena.common.exception.BadRequestException("Attach evidence with the upload button first");
+            }
+            bare.add(url.contains("?") ? url.substring(0, url.indexOf('?')) : url);
+        }
+        try {
+            return objectMapper.writeValueAsString(bare);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private List<String> evidence(ModerationItem item) {
+        try {
+            List<String> urls = objectMapper.readValue(item.getEvidenceJson() == null ? "[]" : item.getEvidenceJson(),
+                    new com.fasterxml.jackson.core.type.TypeReference<List<String>>() { });
+            return urls.isEmpty() ? null : urls.stream().map(fileSigningService::sign).toList();
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("Invalid stored evidence", e);
+        }
     }
 
     @Transactional(readOnly = true)
@@ -208,13 +260,13 @@ public class ModerationService {
                 Room room = item.getRoom();
                 yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
                         null, room.getPost().getBody(), null, room.getId().toString(), reporterName,
-                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null);
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null, evidence(item));
             }
             case POST -> {
                 Post post = item.getPost();
                 yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
                         null, post.getBody(), null, null, reporterName,
-                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), post.getId().toString());
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), post.getId().toString(), evidence(item));
             }
             case CONVERSATION -> {
                 // Admins see the real accounts and the latest messages - anonymity is a display
@@ -228,13 +280,13 @@ public class ModerationService {
                         + (recent.isEmpty() ? "" : " - latest: " + String.join(" | ", recent.reversed()));
                 yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
                         null, summary, null, null, reporterName,
-                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null);
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null, evidence(item));
             }
             case JOB_POSTING -> {
                 JobPosting p = item.getJobPosting();
                 yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
                         p.getId().toString(), p.getTitle(), p.getEnterprise().getCompanyName(), null, null,
-                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null);
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null, evidence(item));
             }
         };
     }

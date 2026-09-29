@@ -174,7 +174,7 @@ public class BusinessVerificationService {
         v.setReviewedAt(Instant.now());
         repository.save(v);
         auditService.record(v.getTenant().getId(), platformAdminId, AuditActions.BUSINESS_VERIFIED, v.getLegalName(), "domain: " + v.getDomain());
-        notificationService.notifySystem(v.getTenant().getUser(), "Your company is verified",
+        notificationService.notifyJob(v.getTenant().getUser(), "Your company is verified",
                 v.getLegalName() + " now shows the verified badge.");
         return toQueueItem(v);
     }
@@ -190,7 +190,7 @@ public class BusinessVerificationService {
         v.setReviewedAt(Instant.now());
         repository.save(v);
         auditService.record(v.getTenant().getId(), platformAdminId, AuditActions.BUSINESS_REJECTED, v.getLegalName(), note.trim());
-        notificationService.notifySystem(v.getTenant().getUser(), "Company verification wasn't approved",
+        notificationService.notifyJob(v.getTenant().getUser(), "Company verification wasn't approved",
                 "Arena's team said: " + note.trim() + " You can update the details and submit again.");
         return toQueueItem(v);
     }

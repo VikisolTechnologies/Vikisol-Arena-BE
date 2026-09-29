@@ -244,7 +244,7 @@ public class ApplicationService {
         record(saved, ApplicationEvent.Type.STAGE, stage, userRepository.getReferenceById(enterpriseUserId), note);
         notificationService.notifyStageChanged(saved);
         if (note != null) {
-            notificationService.notifySystem(saved.getCandidate().getUser(), "A message from " + saved.getJobPosting().getEnterprise().getCompanyName(), note);
+            notificationService.notifyJob(saved.getCandidate().getUser(), "A message from " + saved.getJobPosting().getEnterprise().getCompanyName(), note);
         }
         auditService.record(actingTenant.getId(), enterpriseUserId, AuditActions.STAGE_MOVED,
                 saved.getCandidate().getName() + " on " + saved.getJobPosting().getTitle(), "stage: " + stage.wireValue());
@@ -274,7 +274,7 @@ public class ApplicationService {
     }
 
     private void notifyCompany(Application application, String title, String body) {
-        notificationService.notifySystem(application.getJobPosting().getEnterprise().getUser(), title, body);
+        notificationService.notifyJob(application.getJobPosting().getEnterprise().getUser(), title, body);
     }
 
     private Application requireOwn(UUID userId, UUID applicationId) {

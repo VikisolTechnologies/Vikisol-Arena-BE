@@ -127,4 +127,13 @@ public class CandidateProfile extends BaseEntity {
     @Column(name = "slot")
     @Builder.Default
     private List<String> availability = new ArrayList<>();
+
+    // Row 18 (V37): who can find this person in people search. EVERYONE: any signed-in search.
+    // NEARBY: only searches near their approximate location. HIDDEN: never listed.
+    public enum ProfileVisibility { NEARBY, EVERYONE, HIDDEN }
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 10)
+    @Builder.Default
+    private ProfileVisibility profileVisibility = ProfileVisibility.EVERYONE;
 }

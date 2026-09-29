@@ -42,4 +42,13 @@ public class ActivityAttendance extends BaseEntity {
     private Boolean joinerAttended;
 
     private Instant joinerConfirmedAt;
+
+    // Flow §9 disputes queue (V37): the admin's note and who decided. A host accepting a dispute
+    // leaves both empty.
+    @Column(length = 500)
+    private String disputeResolutionNote;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "dispute_resolved_by_user_id")
+    private com.vikisol.arena.auth.entity.User disputeResolvedBy;
 }

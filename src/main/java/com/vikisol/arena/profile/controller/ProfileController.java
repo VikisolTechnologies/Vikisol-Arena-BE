@@ -76,6 +76,20 @@ public class ProfileController {
         return ResponseEntity.ok(ApiResponse.ok(profileService.setIntents(principal.getId(), request.intents())));
     }
 
+    // Row 18: who can find you in people search - nearby | everyone | hidden.
+    @GetMapping("/me/visibility")
+    public ResponseEntity<ApiResponse<VisibilityBody>> visibility(@AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.ok(new VisibilityBody(profileService.visibility(principal.getId()))));
+    }
+
+    @PutMapping("/me/visibility")
+    public ResponseEntity<ApiResponse<VisibilityBody>> setVisibility(@AuthenticationPrincipal UserPrincipal principal, @RequestBody VisibilityBody request) {
+        return ResponseEntity.ok(ApiResponse.ok(new VisibilityBody(profileService.setVisibility(principal.getId(), request.profile()))));
+    }
+
+    public record VisibilityBody(String profile) {
+    }
+
     @PutMapping("/me/interests")
     public ResponseEntity<ApiResponse<ProfileBasicsResponse>> setInterests(
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody ProfileListRequest.Interests request) {

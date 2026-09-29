@@ -14,6 +14,12 @@ public interface ThreadMessageRepository extends JpaRepository<ThreadMessage, UU
     // rework of this endpoint's contract.
     List<ThreadMessage> findTop100ByConversationIdOrderByCreatedAtDesc(UUID conversationId);
 
+    // Row 37: the latest message of each conversation on a page, in one query.
+    @org.springframework.data.jpa.repository.Query("""
+            select m from ThreadMessage m where m.conversation.id in :ids
+              and m.createdAt = (select max(m2.createdAt) from ThreadMessage m2 where m2.conversation = m.conversation)""")
+    List<ThreadMessage> findLatestIn(@org.springframework.data.repository.query.Param("ids") java.util.Collection<UUID> ids);
+
     // DemoContentService.removeAll() - real FK gap found live (2026-09-15): ThreadMessage has
     // required FKs on both conversation_id and sender_user_id, and nothing ever cleared these
     // before deleting a demo Conversation/User, so removal 409ed the moment any demo account had

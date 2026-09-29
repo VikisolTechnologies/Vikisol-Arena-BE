@@ -208,6 +208,11 @@ public class RoomService {
 
     @Transactional
     public void report(UUID userId, UUID roomId, String reason) {
+        report(userId, roomId, reason, null);
+    }
+
+    @Transactional
+    public void report(UUID userId, UUID roomId, String reason, java.util.List<String> evidence) {
         Room room = requireRoom(roomId);
         assertRoomMember(userId, room);
         User reporter = requireUser(userId);
@@ -215,7 +220,7 @@ public class RoomService {
         // makes this actionable in the platform-admin queue - ARENA-V2-PRODUCT-ARCHITECTURE.md
         // §4's explicit "wired into the platform-admin moderation queue" requirement.
         roomReportRepository.save(RoomReport.builder().room(room).reporter(reporter).reason(reason).build());
-        moderationService.fileRoomReport(room, reporter, reason);
+        moderationService.fileRoomReport(room, reporter, reason, evidence);
     }
 
     @Transactional

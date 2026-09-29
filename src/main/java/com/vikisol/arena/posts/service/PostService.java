@@ -522,7 +522,7 @@ public class PostService {
         if (startMoved) reminderService.reschedule(post);
         String what = String.join(", ", changed);
         for (PostJoinRequest join : postJoinRequestRepository.findByPostIdAndStatusOrderByCreatedAtAscIdAsc(postId, PostJoinStatus.APPROVED)) {
-            notificationService.notifySystem(join.getUser(), "Changes to something you joined",
+            notificationService.notifyActivity(join.getUser(), "Changes to something you joined",
                     "The host changed the " + what + " of \"" + preview(post) + "\".");
         }
         return mapper.toResponse(post, userId, null, roomIdFor(post));
@@ -715,7 +715,7 @@ public class PostService {
             onJoinApproved(post, joinRequest);
         } else {
             if (joinRequest.getDecisionNote() != null) {
-                notificationService.notifySystem(joinRequest.getUser(), "A note from the host", joinRequest.getDecisionNote());
+                notificationService.notifyActivity(joinRequest.getUser(), "A note from the host", joinRequest.getDecisionNote());
             }
             notificationService.notifyPostJoinDeclined(joinRequest);
         }
@@ -845,7 +845,7 @@ public class PostService {
                 onJoinApproved(post, joinRequest);
             } else {
                 notificationService.notifyPostJoinRequested(post, joinRequest);
-                notificationService.notifySystem(user, "A spot opened up",
+                notificationService.notifyActivity(user, "A spot opened up",
                         "You were next on the waitlist. Your request is now with the host.");
             }
             return;
