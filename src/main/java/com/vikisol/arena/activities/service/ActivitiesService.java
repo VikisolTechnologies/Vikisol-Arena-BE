@@ -12,6 +12,7 @@ import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.common.intake.IntakeAnswers;
 import com.vikisol.arena.common.policy.ProtectedAttributes;
 import com.vikisol.arena.common.service.FileSigningService;
 import com.vikisol.arena.common.service.FileStorageService;
@@ -46,8 +47,6 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ActivitiesService {
 
-    private static final int MAX_TYPE_ANSWERS = 20;
-    private static final int MAX_TEXT_VALUE = 200;
     private static final int MAX_BRING = 15;
     private static final Set<String> COVER_EXTENSIONS = Set.of(".png", ".jpg", ".jpeg", ".webp");
 
@@ -108,7 +107,7 @@ public class ActivitiesService {
             if (r.category() != null || r.subtype() != null) {
                 Category category = r.category() != null ? ActivityCatalogue.parse(Category.class, r.category(), "category") : d.getCategory();
                 String subtype = (r.subtype() != null ? r.subtype() : d.getSubtype());
-                subtype = subtype == null ? null : subtype.trim().toLowerCase(Locale.ROOT);
+                subtype = category == Category.OTHER ? (subtype == null ? null : subtype.trim()) : ActivityCatalogue.normaliseSubtype(subtype);
                 if (category == Category.OTHER) {
                     if (subtype == null || subtype.isBlank()) throw new BadRequestException("Say what kind of activity it is");
                     ProtectedAttributes.reject("the activity type", subtype);
@@ -132,8 +131,8 @@ public class ActivitiesService {
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage());
         }
-        if (r.typeAnswers() != null) d.setTypeAnswersJson(writeJson(cleanTypeAnswers(r.typeAnswers())));
-        if (r.bring() != null) d.setBringJson(writeJson(cleanList(r.bring(), MAX_BRING, 60, "what to bring")));
+        if (r.typeAnswers() != null) d.setTypeAnswersJson(writeJson(IntakeAnswers.clean(r.typeAnswers(), "the activity details")));
+        if (r.bring() != null) d.setBringJson(writeJson(IntakeAnswers.cleanList(r.bring(), MAX_BRING, 60, "what to bring", "the activity details")));
         if (r.accessibility() != null) d.setAccessibility(blankToNull(r.accessibility()));
         if (r.indoor() != null) d.setIndoor(r.indoor());
         if (r.minSize() != null) {
@@ -533,49 +532,6 @@ public class ActivitiesService {
                 attendance == null ? null : attendance.getJoinerAttended(),
                 attendance == null ? null : attendance.getDisputeStatus().wireValue(),
                 disputeOpenUntil, reminderService.mine(viewerId, post.getId()));
-    }
-
-    // Type-specific answers: {key: text | number | yes/no | list of short texts}. Free text is
-    // checked for protected attributes like every other host-written field.
-    private Map<String, Object> cleanTypeAnswers(Map<String, Object> raw) {
-        LinkedHashMap<String, Object> out = new LinkedHashMap<>();
-        for (Map.Entry<String, Object> e : raw.entrySet()) {
-            String key = e.getKey() == null ? "" : e.getKey().trim();
-            if (key.isEmpty() || key.length() > 40 || !key.matches("[A-Za-z][A-Za-z0-9_]*")) {
-                throw new BadRequestException("'" + key + "' isn't a valid answer key");
-            }
-            ProtectedAttributes.reject("the activity details", key.replace('_', ' '));
-            Object v = e.getValue();
-            if (v == null) continue;
-            if (v instanceof String str) {
-                String t = str.trim();
-                if (t.isEmpty()) continue;
-                if (t.length() > MAX_TEXT_VALUE) throw new BadRequestException("'" + key + "' can be at most " + MAX_TEXT_VALUE + " characters");
-                ProtectedAttributes.reject("the activity details", t);
-                out.put(key, t);
-            } else if (v instanceof Number || v instanceof Boolean) {
-                out.put(key, v);
-            } else if (v instanceof List<?> list) {
-                out.put(key, cleanList(list.stream().map(o -> o == null ? "" : o.toString()).toList(), 10, 60, "'" + key + "'"));
-            } else {
-                throw new BadRequestException("'" + key + "' must be text, a number, yes/no or a list");
-            }
-        }
-        if (out.size() > MAX_TYPE_ANSWERS) throw new BadRequestException("Too many details");
-        return out;
-    }
-
-    private static List<String> cleanList(List<String> raw, int maxItems, int maxLength, String label) {
-        List<String> out = new ArrayList<>();
-        for (String item : raw) {
-            String t = item == null ? "" : item.trim();
-            if (t.isEmpty()) continue;
-            if (t.length() > maxLength) throw new BadRequestException("Each item in " + label + " can be at most " + maxLength + " characters");
-            ProtectedAttributes.reject("the activity details", t);
-            if (!out.contains(t)) out.add(t);
-        }
-        if (out.size() > maxItems) throw new BadRequestException(label + " can have at most " + maxItems + " items");
-        return out;
     }
 
     private void saveEmergencyContact(Post post, User user, EmergencyContactInput contact) {

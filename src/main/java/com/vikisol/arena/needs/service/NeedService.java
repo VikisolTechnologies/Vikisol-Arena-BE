@@ -2,7 +2,10 @@ package com.vikisol.arena.needs.service;
 
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.vikisol.arena.common.exception.BadRequestException;
+import com.vikisol.arena.common.intake.IntakeAnswers;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.follows.service.BlockService;
 import com.vikisol.arena.messaging.dto.ConversationResponse;
@@ -48,6 +51,8 @@ public class NeedService {
     private final ConversationRepository conversationRepository;
     private final BlockService blockService;
     private final NotificationService notificationService;
+    private final com.vikisol.arena.posts.service.PostService postService;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Transactional(readOnly = true)
     public NeedView get(UUID postId, UUID viewerId) {
@@ -57,17 +62,43 @@ public class NeedService {
     @Transactional
     public NeedView setDetails(UUID ownerId, UUID postId, DetailsRequest request) {
         Post post = requireOwnedNeed(ownerId, postId);
-        NeedCategory category;
+        boolean offer = post.getIntentType() == PostIntentType.OFFER;
+        NeedDetails details = detailsRepository.findByPostId(postId).orElseGet(() -> NeedDetails.builder().post(post).build());
         try {
-            category = NeedCategory.fromWire(request.category());
+            details.setCategory(NeedCategory.fromWire(request.category()));
+            if (request.urgency() != null) details.setUrgency(NeedIntake.parse(NeedIntake.Urgency.class, request.urgency(), "urgency"));
+            if (request.helpType() != null) {
+                NeedIntake.HelpType help = NeedIntake.parse(NeedIntake.HelpType.class, request.helpType(), "helpType");
+                if (offer && help == NeedIntake.HelpType.COSTS) throw new BadRequestException("An offer is free or a skill exchange");
+                details.setHelpType(help);
+            }
+            if (!offer && (request.days() != null || request.limit() != null || request.proofUrl() != null)) {
+                throw new BadRequestException("Days, limit and proof link are for offers");
+            }
+            if (request.days() != null) {
+                List<String> days = new ArrayList<>();
+                for (String d : request.days()) days.add(NeedIntake.wire(NeedIntake.parse(NeedIntake.OfferDay.class, d, "days")));
+                details.setOfferDaysJson(writeJson(days.stream().filter(Objects::nonNull).distinct().toList()));
+            }
+            if (request.limit() != null) details.setOfferLimit(NeedIntake.parse(NeedIntake.OfferLimit.class, request.limit(), "limit"));
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage());
         }
-        NeedDetails details = detailsRepository.findByPostId(postId).orElseGet(() -> NeedDetails.builder().post(post).build());
-        details.setCategory(category);
+        if (request.answers() != null) details.setAnswersJson(writeJson(IntakeAnswers.clean(request.answers(), "the details")));
+        if (request.proofUrl() != null) details.setProofUrl(request.proofUrl().isBlank() ? null : request.proofUrl().trim());
         details.setPreferredTime(request.preferredTime() == null || request.preferredTime().isBlank() ? null : request.preferredTime().trim());
         detailsRepository.save(details);
         return toView(post, ownerId);
+    }
+
+    // Row 27: a need or offer and its intake in one call (POST /posts with `need`). All or nothing.
+    @Transactional
+    public com.vikisol.arena.posts.dto.PostResponse create(UUID userId, com.vikisol.arena.posts.dto.CreatePostRequest request) {
+        var created = postService.create(userId, request);
+        String type = request.intentType().trim().toUpperCase();
+        if (!type.equals("ASK") && !type.equals("OFFER")) throw new BadRequestException("Need details only go with a need or an offer");
+        setDetails(userId, UUID.fromString(created.id()), request.need());
+        return created;
     }
 
     // G15: offer help on a need, or ask for what an offer gives.
@@ -116,6 +147,9 @@ public class NeedService {
         NeedResponse response = requireResponse(postId, responseId);
         if (response.getStatus() != ResponseStatus.PENDING) throw new BadRequestException("This response has already been answered");
         if (blockService.isBlockedEitherDirection(ownerId, response.getUser().getId())) throw new BadRequestException("You can't accept this response");
+        if (limitReached(post)) {
+            throw new BadRequestException("You've reached the limit you set for this offer. Change it or accept this later.");
+        }
         ConversationResponse chat = conversationService.getOrCreate(ownerId, response.getUser().getId(), "About: " + preview(post));
         response.setConversation(conversationRepository.getReferenceById(UUID.fromString(chat.id())));
         response.setStatus(ResponseStatus.ACCEPTED);
@@ -201,7 +235,7 @@ public class NeedService {
             boolean gave = ask != isOwner;
             NeedDetails d = details.get(post.getId());
             return new OutcomeView(post.getId().toString(), ask ? "need" : "offer",
-                    d == null ? null : d.getCategory().wireValue(), gave ? "gave" : "received", c.getCompletedAt().toString());
+                    d == null ? null : d.getCategory().wireValue(), gave ? "gave" : "received", c.getCompletedAt().toString(), preview(post));
         });
     }
 
@@ -230,9 +264,19 @@ public class NeedService {
                     .orElse(null);
             viewer = new Viewer(post.getAuthorUser().getId().equals(viewerId), mine);
         }
-        return new NeedView(post.getId().toString(), post.getIntentType() == PostIntentType.ASK ? "need" : "offer",
+        boolean offer = post.getIntentType() == PostIntentType.OFFER;
+        OfferView offerView = !offer ? null : new OfferView(
+                details == null ? List.of() : readJson(details.getOfferDaysJson(), new TypeReference<List<String>>() { }),
+                details == null ? null : NeedIntake.wire(details.getOfferLimit()),
+                details == null ? null : details.getProofUrl(),
+                limitReached(post));
+        return new NeedView(post.getId().toString(), offer ? "offer" : "need",
                 details == null ? null : details.getCategory().wireValue(), details == null ? null : details.getPreferredTime(),
-                post.getStatus().wireValue(), count, viewer);
+                post.getStatus().wireValue(), count, viewer,
+                details == null ? null : NeedIntake.wire(details.getUrgency()),
+                details == null ? null : NeedIntake.wire(details.getHelpType()),
+                details == null ? Map.of() : readJson(details.getAnswersJson(), new TypeReference<LinkedHashMap<String, Object>>() { }),
+                offerView);
     }
 
     // Private parts (chat, completion) only for the owner and the responder.
@@ -245,6 +289,30 @@ public class NeedService {
                 profile != null ? profile.getName() : r.getUser().getName(), profile != null ? profile.getAvatarEmoji() : "🧑🏽",
                 r.getMessage(), r.getStatus().wireValue(), r.getCreatedAt().toString(),
                 involved && r.getConversation() != null ? r.getConversation().getId().toString() : null, completionView);
+    }
+
+    private boolean limitReached(Post post) {
+        if (post.getIntentType() != PostIntentType.OFFER) return false;
+        NeedIntake.OfferLimit limit = detailsRepository.findByPostId(post.getId()).map(NeedDetails::getOfferLimit).orElse(null);
+        if (limit == null || limit == NeedIntake.OfferLimit.NO_LIMIT) return false;
+        return responseRepository.countByPostIdAndStatusAndDecidedAtAfter(post.getId(), ResponseStatus.ACCEPTED,
+                Instant.now().minus(limit.window)) >= limit.max;
+    }
+
+    private <T> T readJson(String json, TypeReference<T> type) {
+        try {
+            return objectMapper.readValue(json, type);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException("Invalid stored need details", e);
+        }
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     private CandidateProfile profileOf(UUID userId) {

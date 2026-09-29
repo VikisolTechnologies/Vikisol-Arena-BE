@@ -123,6 +123,7 @@ class NeedFlowTest extends EmbeddedPostgresAppTest {
         // Public outcomes: what and when, never with whom.
         mvc.perform(get("/needs/outcomes/" + helper.getId()))
                 .andExpect(jsonPath("$.data[0].role").value("gave"))
+                .andExpect(jsonPath("$.data[0].title").isNotEmpty())
                 .andExpect(jsonPath("$.data[0].category").value("moving"))
                 .andExpect(jsonPath("$.data[0].userId").doesNotExist());
         mvc.perform(get("/needs/outcomes/" + owner.getId())).andExpect(jsonPath("$.data[0].role").value("received"));

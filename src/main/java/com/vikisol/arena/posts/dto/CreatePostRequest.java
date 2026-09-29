@@ -33,7 +33,9 @@ public record CreatePostRequest(
         // Optional extras (FE-API-GAPS row 23): an activity's structure and up to three host
         // questions, saved with the post in one step. Jenny's createPost never sends them.
         @jakarta.validation.Valid com.vikisol.arena.activities.dto.ActivityDtos.UpdateDetailsRequest activity,
-        List<@jakarta.validation.constraints.Size(max = 200, message = "must be at most 200 characters") String> hostQuestions
+        List<@jakarta.validation.constraints.Size(max = 200, message = "must be at most 200 characters") String> hostQuestions,
+        // Optional extra (row 27): a need's or offer's intake, saved with the post in one step.
+        @jakarta.validation.Valid com.vikisol.arena.needs.dto.NeedDtos.DetailsRequest need
 ) {
     public CreatePostRequest {
         if (tags == null) tags = List.of();
@@ -46,6 +48,6 @@ public record CreatePostRequest(
                              Double lat, Double lng, String exactMeetingPoint, String requiredVerificationLevel, String communityId,
                              Boolean anonymous) {
         this(intentType, title, body, locationText, audience, visibility, capacity, startsAt, endsAt, tags, mediaUrls, lat, lng,
-                exactMeetingPoint, requiredVerificationLevel, communityId, anonymous, null, null);
+                exactMeetingPoint, requiredVerificationLevel, communityId, anonymous, null, null, null);
     }
 }

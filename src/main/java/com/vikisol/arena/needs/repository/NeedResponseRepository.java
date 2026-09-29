@@ -23,6 +23,13 @@ public interface NeedResponseRepository extends JpaRepository<NeedResponse, UUID
 
     long countByPostIdAndStatusNot(UUID postId, ResponseStatus excluded);
 
+    // Row 27: an offer's limit counts requests accepted since the start of its window.
+    long countByPostIdAndStatusAndDecidedAtAfter(UUID postId, ResponseStatus status, java.time.Instant since);
+
+    // Row 38: offers of help on a window of feed needs, oldest first, for counts and faces.
+    @EntityGraph(attributePaths = "user")
+    List<NeedResponse> findByPostIdInAndStatusInOrderByCreatedAtAscIdAsc(java.util.Collection<UUID> postIds, java.util.Collection<ResponseStatus> statuses);
+
     // "My offers": what I responded to, newest first.
     @EntityGraph(attributePaths = "post")
     Page<NeedResponse> findByUserIdOrderByCreatedAtDescIdDesc(UUID userId, Pageable pageable);

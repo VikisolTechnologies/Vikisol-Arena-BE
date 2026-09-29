@@ -143,7 +143,7 @@ only talent can host or join.
 
 | Gap | Endpoint | Who | Body / notes |
 |---|---|---|---|
-| G7 | `GET /activities/kinds` | anyone | `{ category: [subtypes] }` catalogue (flow §3 A1): `sports, fitness, outdoors, learning, arts, games, food, community, other`. `other` has no list and takes a free-text subtype |
+| G7 | `GET /activities/kinds` | anyone | `{ category: [subtypes] }` catalogue (flow §3 A1) with the frontend's ids (`src/lib/activities/taxonomy.ts`), e.g. `table-tennis`, `gym-buddy`: `sports, fitness, outdoors, learning, arts, games, food, community, other`. Underscores are accepted on input. `other` has no list and takes a free-text subtype |
 | G7 | `GET /activities/{id}` | anyone (guest too) | `Activity` below; `viewer` only when signed in |
 | G7 | `PUT /activities/{id}/details` | host | `UpdateDetails` below. `category` and `subtype` are required the first time; every other field is optional and only changes when sent |
 | G13 | `POST /activities/{id}/cover` | host | multipart `file` (PNG/JPG/WebP). Needs `details` first |
@@ -174,9 +174,9 @@ only talent can host or join.
 `UpdateDetails` =
 
 ```
-{ category, subtype (≤40), level: beginner|intermediate|advanced|all,
+{ category, subtype (≤40), level: beginner|intermediate|advanced|all-levels,
   cost: { type: free|shared, perPersonInr (1–100000, required when shared), note (≤200) },
-  typeAnswers: { key: text ≤200 | number | yes/no | list of ≤10 short items } (≤20 keys; the per-subtype
+  typeAnswers: { key: text ≤300 | number | yes/no | list of ≤10 short items } (≤20 keys; the per-subtype
                questions live in the frontend's intake schema),
   bring: [≤15 items, ≤60 chars], accessibility (≤300), indoor, minSize (1–500, ≤ capacity), waitlist,
   repeat: once|weekly, womenOnly, reach: nearby|link }
@@ -274,16 +274,16 @@ answers 404.
 
 | Gap | Endpoint | Who | Body / notes |
 |---|---|---|---|
-| G14 | `GET /needs/categories` | anyone | `["moving","repairs","tech_help","tutoring","errands","pets","rides","cooking","cleaning","gardening","career_advice","creative","other"]` |
-| G14 | `GET /needs/{id}` | anyone (guest too) | `{ postId, kind: "need"\|"offer", category, preferredTime, status, responseCount, viewer: { owner, myResponse } }` |
-| G14 | `PUT /needs/{id}/details` | owner | `{ category, preferredTime? (≤100) }` |
+| G14 | `GET /needs/categories` | anyone | `["moving","tutoring","repairs","tech","pet-care","plant-care","errands","borrow","rides","advice","event-help","other"]` (the flow §4 list with the frontend's ids). The earlier `tech_help`, `pets`, `gardening`, `career_advice` are still accepted on input |
+| G14 | `GET /needs/{id}` | anyone (guest too) | `{ postId, kind: "need"\|"offer", category, preferredTime, status, responseCount, viewer: { owner, myResponse }, urgency, helpType, answers: {…}, offer?: { days, limit, proofUrl, limitReached } }` |
+| G14 | `PUT /needs/{id}/details` | owner | `NeedDetails` below |
 | G15 | `POST /needs/{id}/responses` | talent, not the owner | `{ message (≤500) }`. Refused on an anonymous post (accepting would open a chat that reveals the author), a closed post, a duplicate, or after the owner declined you |
 | G15 | `GET /needs/{id}/responses` | signed in | The owner gets every live response, oldest first; anyone else gets only their own |
 | G15 | `PUT /needs/{id}/responses/{rid}/accept` | owner | Opens the pair's private conversation (the existing one-per-pair DM, `/messages/conversations/{conversationId}`) and returns its `conversationId` |
 | G15 | `PUT /needs/{id}/responses/{rid}/decline` | owner | |
 | G15 | `DELETE /needs/{id}/responses/me` | the responder | Not after completion |
 | G16 | `POST /needs/{id}/responses/{rid}/confirm` | owner or that responder | `{ note? (≤500) }`. It's an outcome only when **both** have confirmed (`completion.completedAt`). The first confirmation asks the other side to confirm. A need closes when completed; an offer stays open for others |
-| G17 | `GET /needs/outcomes/{userId}` | anyone | That person's confirmed outcomes: `[{ postId, kind, category, role: "gave"\|"received", completedAt }]`, newest first, paged with headers. Never names the other person |
+| G17 | `GET /needs/outcomes/{userId}` | anyone | That person's confirmed outcomes: `[{ postId, kind, category, role: "gave"\|"received", completedAt, title }]`, newest first, paged with headers. Never names the other person |
 | G17 | `GET /needs/responses/mine` | signed in | "My offers" for Work: `[{ postId, postTitle, kind, response }]`, newest first, paged with headers |
 
 `response` =
@@ -294,6 +294,28 @@ answers 404.
 ```
 
 `conversationId` and `completion` are only in the response for the owner and that responder.
+
+### Needs & offers per the app flow (FE-API-GAPS rows 11, 12, 13, 27, 38)
+
+`NeedDetails` =
+
+```
+{ category (required), preferredTime? (≤100),
+  urgency?: today|week|flexible, helpType?: free|exchange|costs ("costs" is for needs only),
+  answers?: { key: text ≤300 | number | yes/no | list } (the category's intake answers, ≤20 keys),
+  // offers only (400 on a need):
+  days?: [weekdays|weekends|evenings], limit?: once-a-week|twice-a-week|a-few-times-a-month|no-limit,
+  proofUrl?: http(s) link (≤500) }
+```
+
+| FE row | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| 27 | `POST /posts` (existing) | talent | Optional extra `need: NeedDetails` on an `ask` or `offer` post. The post and its details are created in one transaction. A post can't carry both `need` and `activity` |
+| 27 | `PUT /needs/{id}/responses/{rid}/accept` (existing) | owner | On an offer with a `limit`, accepting beyond it answers 400 ("You've reached the limit you set for this offer…"). The limit counts requests accepted in the last 7 days (`once-a-week` = 1, `twice-a-week` = 2) or 30 days (`a-few-times-a-month` = 3). `offer.limitReached` tells the owner ahead of time |
+| 38 | `GET /feed` (existing) | anyone | Need cards (`itemType: "ask"`) carry `offerCount` (live offers of help: pending or accepted) and `offerAvatars: [{ name, avatarEmoji, photoUrl }]` (up to 3, oldest first). Absent on other item types |
+| 13 | `GET /needs/outcomes/{userId}` | anyone | Adds `title` for the "recent outcomes" list. `interests` are already on `GET /profile/{id}` (gaps 1–5) |
+| 11 | `POST /needs/{id}/responses/{rid}/confirm` (G16) | | The flow's "both people confirm", kept at G16's path. The FE's proposed `POST /posts/{id}/outcome/confirm` isn't added |
+| 12 | `POST /needs/{id}/responses` (G15) | | The offer's message (≤500), kept at G15's path. The FE's proposed `message` on `POST /posts/{id}/joins` isn't added: a need is responded to, not joined |
 
 **Not built:** the Post-a-Need "Share with: nearby people only" scope. Feed, search and Discover
 don't filter by it yet, and storing a privacy promise the API doesn't keep would be dishonest. The

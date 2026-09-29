@@ -33,6 +33,7 @@ public class PostController {
 
     private final PostService postService;
     private final com.vikisol.arena.activities.service.ActivitiesService activitiesService;
+    private final com.vikisol.arena.needs.service.NeedService needService;
     private final PostCommentService postCommentService;
     private final PostReactionService postReactionService;
     private final ModerationService moderationService;
@@ -163,8 +164,10 @@ public class PostController {
     public ResponseEntity<ApiResponse<PostResponse>> create(
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody CreatePostRequest request) {
         boolean withActivity = request.activity() != null || (request.hostQuestions() != null && !request.hostQuestions().isEmpty());
+        if (withActivity && request.need() != null) throw new com.vikisol.arena.common.exception.BadRequestException("A post is an activity or a need, not both");
         return ResponseEntity.ok(ApiResponse.ok("Post published", withActivity
                 ? activitiesService.create(principal.getId(), request)
+                : request.need() != null ? needService.create(principal.getId(), request)
                 : postService.create(principal.getId(), request)));
     }
 

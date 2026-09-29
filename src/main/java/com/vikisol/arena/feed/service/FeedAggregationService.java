@@ -59,6 +59,8 @@ public class FeedAggregationService {
     private final ProjectRepository projectRepository;
     private final BidRepository bidRepository;
     private final FollowRepository followRepository;
+    private final com.vikisol.arena.needs.repository.NeedResponseRepository needResponseRepository;
+    private final com.vikisol.arena.profile.repository.CandidateProfileRepository candidateProfileRepository;
 
     public record ScoredFeedItem(FeedItemResponse item, double score, UUID authorUserId, UUID authorCompanyId) {
     }
@@ -88,7 +90,10 @@ public class FeedAggregationService {
     }
 
     private List<ScoredFeedItem> scoredPosts(UUID viewingUserId) {
-        return postService.getScoredFeed(viewingUserId).stream()
+        var scored = postService.getScoredFeed(viewingUserId);
+        Map<UUID, List<FeedItemResponse.OfferAvatar>> offers = offersOnNeeds(scored.stream()
+                .filter(sp -> "ask".equals(sp.response().intentType())).map(sp -> UUID.fromString(sp.response().id())).toList());
+        return scored.stream()
                 .map(sp -> {
                     var r = sp.response();
                     UUID authorUserId = UUID.fromString(r.authorUserId());
@@ -108,11 +113,31 @@ public class FeedAggregationService {
                             null, null, null, null,
                             null, null, null, null,
                             r.demoContent(),
-                            r.priceInr(), r.authorVerificationLevel(), null, null
+                            r.priceInr(), r.authorVerificationLevel(),
+                            "ask".equals(r.intentType()) ? (long) offers.getOrDefault(UUID.fromString(r.id()), List.of()).size() : null,
+                            "ask".equals(r.intentType()) ? offers.getOrDefault(UUID.fromString(r.id()), List.of()).stream().limit(3).toList() : null
                     );
                     return new ScoredFeedItem(item, sp.score(), authorUserId, authorCompanyId);
                 })
                 .toList();
+    }
+
+    // Row 38: live offers of help (pending or accepted) on the window's needs, oldest first. One
+    // query for the responses and one for the profiles, whatever the window size.
+    private Map<UUID, List<FeedItemResponse.OfferAvatar>> offersOnNeeds(List<UUID> needIds) {
+        if (needIds.isEmpty()) return Map.of();
+        var responses = needResponseRepository.findByPostIdInAndStatusInOrderByCreatedAtAscIdAsc(needIds,
+                List.of(com.vikisol.arena.needs.entity.ResponseStatus.PENDING, com.vikisol.arena.needs.entity.ResponseStatus.ACCEPTED));
+        var profiles = candidateProfileRepository.mapByUserId(responses.stream().map(r -> r.getUser().getId()).toList());
+        Map<UUID, List<FeedItemResponse.OfferAvatar>> out = new java.util.HashMap<>();
+        for (var r : responses) {
+            var profile = profiles.get(r.getUser().getId());
+            out.computeIfAbsent(r.getPost().getId(), k -> new ArrayList<>()).add(new FeedItemResponse.OfferAvatar(
+                    profile != null ? profile.getName() : r.getUser().getName(),
+                    profile != null ? profile.getAvatarEmoji() : "🧑🏽",
+                    profile != null ? profile.getPhotoUrl() : null));
+        }
+        return out;
     }
 
     private List<ScoredFeedItem> scoredJobs(UUID viewingUserId) {

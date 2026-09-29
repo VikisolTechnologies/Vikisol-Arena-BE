@@ -19,8 +19,17 @@ public final class NeedDtos {
             String preferredTime,
             String status,
             long responseCount,
-            Viewer viewer
+            Viewer viewer,
+            // Row 27 (added): the flow §4 intake. offer is only on an offer.
+            String urgency,
+            String helpType,
+            java.util.Map<String, Object> answers,
+            OfferView offer
     ) {
+    }
+
+    // limitReached: the owner has accepted as many requests as their limit allows right now.
+    public record OfferView(java.util.List<String> days, String limit, String proofUrl, boolean limitReached) {
     }
 
     public record Viewer(boolean owner, ResponseView myResponse) {
@@ -51,7 +60,8 @@ public final class NeedDtos {
     }
 
     // One confirmed outcome on someone's public profile: what and when, never with whom.
-    public record OutcomeView(String postId, String kind, String category, String role, String completedAt) {
+    // title (added, row 13): the post's title or the start of its text.
+    public record OutcomeView(String postId, String kind, String category, String role, String completedAt, String title) {
     }
 
     // "My offers" on Work.
@@ -60,8 +70,22 @@ public final class NeedDtos {
 
     public record DetailsRequest(
             @NotBlank(message = "is required") String category,
-            @Size(max = 100, message = "must be at most 100 characters") String preferredTime
+            @Size(max = 100, message = "must be at most 100 characters") String preferredTime,
+            // Row 27 (optional extras): today | week | flexible; free | exchange | costs (needs only);
+            // the category's intake answers.
+            String urgency,
+            String helpType,
+            java.util.Map<String, Object> answers,
+            // Offers only: weekdays | weekends | evenings; once-a-week | twice-a-week |
+            // a-few-times-a-month | no-limit; a portfolio or proof link.
+            @Size(max = 3, message = "can have at most 3 items") java.util.List<String> days,
+            String limit,
+            @Size(max = 500, message = "must be at most 500 characters")
+            @jakarta.validation.constraints.Pattern(regexp = "https?://\\S+", message = "must be an http(s) link") String proofUrl
     ) {
+        public DetailsRequest(String category, String preferredTime) {
+            this(category, preferredTime, null, null, null, null, null, null);
+        }
     }
 
     public record RespondRequest(
