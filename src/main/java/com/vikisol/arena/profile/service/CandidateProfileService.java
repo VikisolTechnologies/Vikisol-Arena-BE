@@ -51,6 +51,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CandidateProfileService {
 
+    private final com.vikisol.arena.privacy.PersonalDataService personalDataService;
     private final CandidateProfileRepository candidateProfileRepository;
     private final CandidateProfileMapper mapper;
     private final ScoringService scoringService;
@@ -63,7 +64,6 @@ public class CandidateProfileService {
     private final JwtTokenProvider jwtTokenProvider;
     private final FollowService followService;
     private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
-    private final com.vikisol.arena.career.repository.CareerProfileRepository careerProfileRepository;
 
     // FE-API-GAPS 1 and 5: the closed vocabularies the onboarding screens send.
     static final Set<String> INTENTS = Set.of("activities", "meet", "ask", "offer", "job", "hire", "projects", "explore");
@@ -182,7 +182,9 @@ public class CandidateProfileService {
     // copy. Deliberately doesn't chase every FK reference across every module (messages,
     // interview notes, marketplace bids) - those are conversations/negotiations involving a
     // second party, not solely-owned personal data, and are a larger scope than this pass covers.
-    @Transactional(readOnly = true)
+    // Not read-only: the DATA_EXPORTED audit row below is written in this transaction (a read-only
+    // one never flushes it).
+    @Transactional
     public CandidateDataExport exportMyData(UUID userId) {
         CandidateProfile profile = getEntityForUser(userId);
         User user = userRepository.findById(userId).orElseThrow();
@@ -193,7 +195,8 @@ public class CandidateProfileService {
                         a.getStage().wireValue(), a.getAppliedAt().toString()))
                 .toList();
         CandidateDataExport export = new CandidateDataExport(
-                user.getEmail(), mapper.toResponse(profile), applications, Instant.now().toString());
+                user.getEmail(), mapper.toResponse(profile), applications, Instant.now().toString(),
+                personalDataService.export(userId));
         auditService.record(null, userId, AuditActions.DATA_EXPORTED, profile.getName());
         return export;
     }
@@ -223,13 +226,17 @@ public class CandidateProfileService {
     private void eraseAccount(UUID userId, String accessToken, String auditReason) {
         CandidateProfile profile = getEntityForUser(userId);
         User user = userRepository.findById(userId).orElseThrow();
+        // Architect item 4 (legal): everything in the tables added for the new app - answers,
+        // feedback, disputes, offers, applications' notes and assessments, requests, the career
+        // layer - goes too. See PersonalDataService for the full list.
+        personalDataService.erase(userId);
 
         if (profile.getPhotoUrl() != null) {
             fileStorageService.delete(profile.getPhotoUrl());
             profile.setPhotoUrl(null);
         }
-        // The career layer (G18-G21) holds pay and job-seeking intent: erased outright.
-        careerProfileRepository.findByUserId(userId).ifPresent(careerProfileRepository::delete);
+        // The career layer (G18-G21) holds pay and job-seeking intent: erased outright, by
+        // PersonalDataService above.
         profile.setIntents(new java.util.ArrayList<>());
         profile.setInterests(new java.util.ArrayList<>());
         profile.setAvailability(new java.util.ArrayList<>());

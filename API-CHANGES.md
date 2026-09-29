@@ -678,3 +678,47 @@ not built (rows 9 and 40, see GAP-MAPPING.md).
   hasn't applied or accepted a connect request now answers 400. Before, any employer could start a
   chat.
 - The enum `DisputeStatus` (seen as `disputeStatus` in attendance rows) gains `rejected`.
+
+## Data export and erasure over the new tables (architect item 4, legal)
+
+**The rule.** Export includes the person's own entries, and erasure deletes them. This covers every
+table added for the new app (V22–V37). `PersonalDataService` lists each one in a single place, and
+`PersonalDataTest` fails if a table added later is neither covered nor explained.
+
+| Endpoint | Who | Notes |
+|---|---|---|
+| `GET /profile/me/export` (existing) | talent | Adds `arena: { section: [rows] }` (below). The DATA_EXPORTED audit row is now really written (it was in a read-only transaction before) |
+| `GET /account/export` | any signed-in account | `{ email, name, role, exportedAt, arena }`: the same sections, for recruiters and hiring managers too |
+| `DELETE /profile/me` (existing) | talent | Now also erases everything below |
+| `DELETE /admin/users/{id}` (existing) | platform admin | Now also works for recruiter and hiring-manager accounts: their own entries are erased, the account is anonymised and signed out. Company admins still can't be erased this way (the company would lose its admin) |
+
+**Export sections.** Each is a list of rows. Timestamps are ISO text.
+
+| Area | Sections |
+|---|---|
+| Activities | `activityQuestionsAsked`, `activityAnswers` (host answers), `activityWaitlist`, `joinNotes`, `hostDecisionNotesWritten`, `attendance` (with dispute text), `activityFeedbackGiven`, `activityFeedbackReceived`, `emergencyContacts`, `reminders` |
+| Needs & offers | `needDetails`, `needResponses` (offer messages), `needCompletionNotes` |
+| Career | `careerProfile` (with pay, extra fields and visibility), `careerLocations` |
+| Jobs | `applications` (cover note, CTC sharing), `screeningAnswers`, `mustHaveEvidence`, `applicationTimeline`, `recruiterNotesWritten`, `assessmentsWritten`, `stageMessagesWritten`, `savedJobs` |
+| Projects | `projectMemberships`, `projectMilestonesAdded`, `projectContributions` |
+| People app | `connectRequestsReceived`, `connectRequestsSent`, `notificationPreferences`, `reportEvidence` |
+
+**What erasure removes:**
+- Everything above that the person wrote.
+- The private records about them:
+  - feedback about them;
+  - their attendance and disputes;
+  - recruiter notes, assessments, stage messages and interview feedback on their applications;
+  - connect requests to them;
+  - their notifications and preferences;
+  - their report evidence files.
+
+**What stays, without a link to them:**
+- Their posts. The existing erasure already keeps posts under "Deleted user".
+- A project's milestone titles (shared team content).
+- A company's connect-request note they sent as a recruiter.
+- Moderation reports' reasons (a safety record); the evidence files are deleted.
+
+**Not built:** the flow's "candidate data deleted 12 months after a role closes" (flow §8
+Settings). It is a destructive scheduled job on production data, and needs the founder's decision
+(see DECISIONS.md).
