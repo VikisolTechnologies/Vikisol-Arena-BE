@@ -2,6 +2,23 @@
 
 Choices made without the founder in the room. Newest first.
 
+## 29 Sep 2026 — Error pages are not re-authenticated; list endpoints cap at 100 rows
+
+Branch `cloud/api-hardening`, not merged. Two security-config lines changed, logged here as the
+mission asks for any auth-adjacent change.
+
+- The servlet ERROR dispatch is `permitAll`. It only renders the status of a request that already
+  failed (`ApiErrorController`, status only, no message or path). Before, a guest request that
+  failed after security had run was re-checked on the error dispatch and came back as 401, hiding
+  the real error. No endpoint's access rule changed.
+- 403s decided by the security filter chain now write `{"success": false, "message": "Access
+  denied"}` instead of an empty body. Who gets a 403 is unchanged.
+
+List endpoints that returned every row (followers, following, blocks, rooms, DM conversations,
+join requests, communities, Jenny chat history) now return the first 100 by default and accept
+`page`/`size`. Their JSON stays a bare array, so neither the frontend nor the Jenny gateway's
+`/communities` read changes shape. Details: `API-CHANGES.md`, `BACKEND-FIXES.md`.
+
 ## 26 Sep 2026 — A service token missing its scope returns 403
 
 Jenny's five writes stay the same JSON. The change is only what Arena answers when a verified service token is not allowed to make the call.
