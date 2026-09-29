@@ -19,7 +19,9 @@ import java.time.Instant;
 @EqualsAndHashCode(callSuper = true)
 public class BusinessVerification extends BaseEntity {
 
-    public enum Status { PENDING, VERIFIED }
+    // Flow §8 B2 / §9: PENDING until an Arena admin approves (VERIFIED) or rejects with a reason
+    // (REJECTED). The work-email code only proves the domain (domainConfirmedAt).
+    public enum Status { PENDING, VERIFIED, REJECTED }
 
     // "Your role" on the company workspace screen: the submitter's job at the company. It is
     // not a permission; permissions are the account role (see TeamRoles).
@@ -66,4 +68,16 @@ public class BusinessVerification extends BaseEntity {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "verified_by_user_id")
     private User verifiedBy;
+
+    // V35: when the code was confirmed, and the admin review.
+    private Instant domainConfirmedAt;
+
+    @Column(length = 500)
+    private String reviewNote;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reviewed_by_user_id")
+    private User reviewedBy;
+
+    private Instant reviewedAt;
 }

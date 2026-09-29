@@ -71,4 +71,20 @@ public class EnterpriseProfile extends BaseEntity {
     @Column(nullable = false, columnDefinition = "varchar(255) not null default 'ACTIVE'")
     @Builder.Default
     private TenantStatus status = TenantStatus.ACTIVE;
+
+    // Row 29 (V35): the company workspace's extra details. GSTIN / CIN are optional and checked by
+    // an Arena admin during verification.
+    private String website;
+
+    @Column(length = 15)
+    private String gstin;
+
+    @Column(length = 21)
+    private String cin;
+
+    @Column(length = 60)
+    private String hqCity;
+
+    @Column(length = 500)
+    private String logoUrl;
 }

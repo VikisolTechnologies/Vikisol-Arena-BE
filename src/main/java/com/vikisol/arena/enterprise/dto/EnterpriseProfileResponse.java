@@ -14,6 +14,15 @@ public record EnterpriseProfileResponse(
         int seatsTotal,
         int unlockCreditsUsed,
         int unlockCreditsTotal,
-        String status
+        String status,
+        // Row 29 (added): the workspace details, and verification: none | pending | verified |
+        // rejected, with the Arena admin's reason on a rejection.
+        String website,
+        String gstin,
+        String cin,
+        String hqCity,
+        String logoUrl,
+        String verification,
+        String verificationNote
 ) {
 }

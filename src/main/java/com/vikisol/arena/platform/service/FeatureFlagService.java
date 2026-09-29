@@ -52,6 +52,12 @@ public class FeatureFlagService {
         return toResponse(flag);
     }
 
+    // Missing flags are off.
+    @Transactional(readOnly = true)
+    public boolean isEnabled(String key) {
+        return featureFlagRepository.findByKey(key).map(FeatureFlag::isEnabled).orElse(false);
+    }
+
     private FeatureFlagResponse toResponse(FeatureFlag f) {
         return new FeatureFlagResponse(f.getId().toString(), f.getKey(), f.getLabel(), f.getDescription(), f.isEnabled());
     }

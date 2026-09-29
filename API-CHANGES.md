@@ -525,12 +525,13 @@ count as "applied" (`GET /applications/exists`).
 | Gap | Endpoint | Who | Body / notes |
 |---|---|---|---|
 | G27 | `POST /enterprise/verification` | company admin | `{ legalName (≤200), website, workEmail, submitterRole }`. `submitterRole` is one of `founder`, `hr`, `talent_acquisition`, `hiring_manager`, `operations`, `other`: the "Your role" dropdown, the submitter's job at the company, not a permission. Sends a 6-digit code to the work email |
-| G27 | `POST /enterprise/verification/confirm` | company admin | `{ code }`. The right code turns the status to `verified` |
-| G27 | `GET /enterprise/verification` | anyone on the company team | `{ status: "not_started"\|"pending"\|"verified", legalName, website, domain, workEmail (masked, "a***@domain"), submitterRole, codeExpiresAt, verifiedAt }` |
-| G27 | `GET /companies/{id}/verification` | anyone (guest too) | `{ verified, domain, verifiedAt }` for the badge. `verified: false` until a code is confirmed |
+| G27 | `POST /enterprise/verification/confirm` | company admin | `{ code }`. The right code proves the domain (`domainConfirmed: true`); the request then waits for an Arena admin (row 29 below) |
+| G27 | `GET /enterprise/verification` | anyone on the company team | `{ status: "none"\|"pending"\|"verified"\|"rejected", legalName, website, domain, workEmail (masked, "a***@domain"), submitterRole, codeExpiresAt, verifiedAt, domainConfirmed, reviewNote }` |
+| G27 | `GET /companies/{id}/verification` | anyone (guest too) | `{ verified, domain, verifiedAt }` for the badge. `verified: false` until an Arena admin approves |
 | G28 | `GET /enterprise/team/roles` | anyone on a company team | `[{ role: "company_admin"\|"recruiter"\|"hiring_manager", label, can: [...] }]`. Each capability mirrors a real API guard, so the Team screen can't promise something the API refuses. Inviting, changing roles, suspending and removing members were already there (`/enterprise/admin/team/*`) and are unchanged |
 
-**What the badge proves: control of the website's domain, nothing more.**
+**What the badge proves:** control of the website's domain, and that an Arena admin reviewed the
+request (row 29 below).
 - The work email must be at the website's domain or one of its subdomains, and not a personal
   mailbox (gmail, outlook, yahoo, …); otherwise 400.
 - The code:
@@ -539,9 +540,42 @@ count as "applied" (`GET /applications/exists`).
   - can be re-sent once a minute;
   - is stored only as a hash and cleared once used.
 - Submitting again (for example with new details) starts over and removes the badge until the new
-  code is confirmed.
+  code is confirmed and an admin approves again.
 - If the email can't be sent, the answer is the usual 503 with "We couldn't send the code right
   now…", and nothing is verified.
+
+### Company verification per the app flow (FE-API-GAPS row 29; flow §8 B2, §9)
+
+The flow's steps:
+1. The work-email code proves the domain.
+2. The request then shows as "Verification pending" until an Arena admin approves or rejects it with
+   a reason.
+
+| FE row | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| 29 | `POST /enterprise/verification` (G27) | company admin | Optional extras `{ gstin?, cin?, hqCity? (≤60) }`. GSTIN and CIN are format-checked (15 and 21 characters) and saved on the company, for the admin to check |
+| 29 | `PUT /enterprise/profile/me` (existing) | recruiter / company admin | Optional extras `{ website?, gstin?, cin?, hqCity? }`; `""` clears one |
+| 29 | `POST /enterprise/profile/me/logo` | company admin | multipart `file` (PNG/JPG/WebP), stored like a profile photo |
+| 29 | `DELETE /enterprise/profile/me/logo` | company admin | |
+| 29 | `GET /enterprise/profile/me` (existing) | | Adds `website`, `gstin`, `cin`, `hqCity`, `logoUrl`, `verification: "none"\|"pending"\|"verified"\|"rejected"` and `verificationNote` (the admin's reason on a rejection) |
+| §9 | `GET /admin/verifications?status=` | platform admin (2FA) | The queue: `[{ id, companyId, companyName, legalName, website, domain, workEmail (in full), submitterRole, gstin, cin, hqCity, status, domainConfirmedAt, reviewNote, reviewedAt }]`, paged with headers. With no `status` it lists requests waiting for review (domain confirmed, oldest first). `verified` or `rejected` lists decided ones |
+| §9 | `PUT /admin/verifications/{id}/approve` | platform admin | Only once the domain is confirmed. Gives the badge and notifies the company admin |
+| §9 | `PUT /admin/verifications/{id}/reject` | platform admin | `{ note (≤500) }`, required. The company sees the reason and can submit again |
+
+**Publishing before verification.**
+- Flow B2 says: "Jobs can be drafted but not published" until the company is verified.
+- This is behind the feature flag **`company_verification_required`**, which is off unless an
+  admin creates and turns it on (`POST /admin/flags`).
+- With the flag on, an unverified company:
+  - can create drafts;
+  - gets 400 when it creates an open job or moves a draft to open or paused ("Your company needs to
+    be verified before jobs go live…").
+- Companies already hiring are never cut off by a deploy.
+
+**⚠ Behaviour change on unreleased G27 endpoints:**
+- The code no longer verifies on its own; an admin approval does.
+- The "not started" status is now `none`, as the flow names it.
+- Rows verified by code alone on this branch keep their badge (V35).
 
 ## Community projects and profile stats — G29 to G32
 

@@ -36,6 +36,8 @@ public class JobPostingService {
     private final JobPostingMapper mapper;
     private final ModerationService moderationService;
     private final com.vikisol.arena.hiring.service.HiringService hiringService;
+    private final com.vikisol.arena.platform.service.FeatureFlagService featureFlagService;
+    private final com.vikisol.arena.business.repository.BusinessVerificationRepository verificationRepository;
     private final com.vikisol.arena.hiring.repository.JobRequirementRepository requirementRepository;
     private final com.vikisol.arena.applications.repository.ApplicationRepository applicationRepository;
 
@@ -73,7 +75,10 @@ public class JobPostingService {
         EnterpriseProfile enterprise = requireEnterprise(userId);
         PostingStatus status = request.status() == null || request.status().isBlank() ? PostingStatus.OPEN : PostingStatus.fromWireValue(request.status());
         if (status != PostingStatus.OPEN && status != PostingStatus.DRAFT) throw new BadRequestException("A new posting is a draft or open");
-        if (status == PostingStatus.OPEN) requireRoomUnderCap(enterprise);
+        if (status == PostingStatus.OPEN) {
+            requirePublishAllowed(enterprise);
+            requireRoomUnderCap(enterprise);
+        }
         if (request.salaryMin() > request.salaryMax()) throw new BadRequestException("The minimum pay can't be more than the maximum");
 
         JobPosting posting = JobPosting.builder()
@@ -168,6 +173,9 @@ public class JobPostingService {
         boolean goingLive = (status == PostingStatus.OPEN || status == PostingStatus.PAUSED)
                 && (posting.getStatus() == PostingStatus.DRAFT || posting.getStatus() == PostingStatus.CLOSED);
         if (goingLive) requireRoomUnderCap(actingTenant);
+        if ((status == PostingStatus.OPEN || status == PostingStatus.PAUSED) && posting.getStatus() == PostingStatus.DRAFT) {
+            requirePublishAllowed(actingTenant);
+        }
         posting.setStatus(status);
         jobPostingRepository.save(posting);
         if (status == PostingStatus.CLOSED) {
@@ -184,6 +192,18 @@ public class JobPostingService {
         if (activeCount >= limit) {
             throw new BadRequestException("Your " + enterprise.getPlan().wireValue() + " plan allows " + limit
                     + " active posting" + (limit == 1 ? "" : "s") + ".");
+        }
+    }
+
+    // Flow §8 B2: "Jobs can be drafted but not published" until an Arena admin verifies the
+    // company. Behind the company_verification_required feature flag (off unless an admin turns
+    // it on), so companies that were hiring before verification existed aren't cut off by a deploy.
+    static final String VERIFICATION_FLAG = "company_verification_required";
+
+    private void requirePublishAllowed(EnterpriseProfile tenant) {
+        if (featureFlagService.isEnabled(VERIFICATION_FLAG) && !verificationRepository.findByTenantId(tenant.getId())
+                .map(v -> v.getStatus() == com.vikisol.arena.business.entity.BusinessVerification.Status.VERIFIED).orElse(false)) {
+            throw new BadRequestException("Your company needs to be verified before jobs go live. You can save this as a draft meanwhile.");
         }
     }
 

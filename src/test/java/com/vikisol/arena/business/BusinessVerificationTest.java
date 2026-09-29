@@ -12,6 +12,7 @@ import com.vikisol.arena.enterprise.repository.MembershipRepository;
 import com.vikisol.arena.integration.provider.EmailMessage;
 import com.vikisol.arena.integration.provider.EmailProvider;
 import com.vikisol.arena.integration.provider.ProviderException;
+import com.vikisol.arena.platform.entity.FeatureFlag;
 import com.vikisol.arena.profile.entity.Industry;
 import com.vikisol.arena.schema.EmbeddedPostgresAppTest;
 import com.vikisol.arena.security.jwt.JwtTokenProvider;
@@ -37,8 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -52,6 +52,7 @@ class BusinessVerificationTest extends EmbeddedPostgresAppTest {
     @Autowired EnterpriseProfileRepository enterprises;
     @Autowired MembershipRepository memberships;
     @Autowired BusinessVerificationRepository verifications;
+    @Autowired com.vikisol.arena.platform.repository.FeatureFlagRepository flags;
     @MockBean TokenDenylistService denylist;
     @MockBean EmailProvider email;
 
@@ -72,8 +73,9 @@ class BusinessVerificationTest extends EmbeddedPostgresAppTest {
     private static final String SUBMIT = "{\"legalName\":\"GreenLeaf Labs Pvt Ltd\",\"website\":\"https://www.greenleaf.example\","
             + "\"workEmail\":\"asha@greenleaf.example\",\"submitterRole\":\"founder\"}";
 
+    // Flow §8 B2 / §9: the code proves the domain; the badge comes only when an Arena admin approves.
     @Test
-    void aConfirmedDomainCodeEarnsThePublicBadge() throws Exception {
+    void aConfirmedDomainThenAnAdminApprovalEarnsThePublicBadge() throws Exception {
         mvc.perform(get("/companies/" + company.getId() + "/verification"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.verified").value(false));
 
@@ -88,9 +90,20 @@ class BusinessVerificationTest extends EmbeddedPostgresAppTest {
         call(admin, post("/enterprise/verification/confirm"), "{\"code\":\"" + wrong + "\"}").andExpect(status().isBadRequest());
         call(recruiter, post("/enterprise/verification/confirm"), "{\"code\":\"" + code + "\"}").andExpect(status().isForbidden());
         call(admin, post("/enterprise/verification/confirm"), "{\"code\":\"" + code + "\"}")
-                .andExpect(jsonPath("$.data.status").value("verified"));
+                .andExpect(jsonPath("$.data.status").value("pending"))
+                .andExpect(jsonPath("$.data.domainConfirmed").value(true));
+        mvc.perform(get("/companies/" + company.getId() + "/verification")).andExpect(jsonPath("$.data.verified").value(false));
+
+        // The Arena admin's queue: approve.
+        String id = verifications.findByTenantId(company.getId()).orElseThrow().getId().toString();
+        call(platformAdmin(), get("/admin/verifications"), null)
+                .andExpect(jsonPath("$.data[0].id").value(id))
+                .andExpect(jsonPath("$.data[0].workEmail").value("asha@greenleaf.example"));
+        call(admin, put("/admin/verifications/" + id + "/approve"), null).andExpect(status().isForbidden());
+        call(platformAdmin(), put("/admin/verifications/" + id + "/approve"), null).andExpect(jsonPath("$.data.status").value("verified"));
 
         call(recruiter, get("/enterprise/verification"), null).andExpect(jsonPath("$.data.status").value("verified"));
+        call(recruiter, get("/enterprise/profile/me"), null).andExpect(jsonPath("$.data.verification").value("verified"));
         mvc.perform(get("/companies/" + company.getId() + "/verification"))
                 .andExpect(jsonPath("$.data.verified").value(true))
                 .andExpect(jsonPath("$.data.domain").value("greenleaf.example"));
@@ -137,6 +150,63 @@ class BusinessVerificationTest extends EmbeddedPostgresAppTest {
     }
 
     @Test
+    void anAdminCanRejectWithAReasonAndOnlyAfterTheDomainIsConfirmed() throws Exception {
+        call(recruiter, get("/enterprise/verification"), null).andExpect(jsonPath("$.data.status").value("none"));
+        call(admin, post("/enterprise/verification"), SUBMIT.replace("}", ",\"gstin\":\"36aabcg1234h1z5\",\"hqCity\":\"Hyderabad\"}"))
+                .andExpect(status().isOk());
+        String id = verifications.findByTenantId(company.getId()).orElseThrow().getId().toString();
+        call(platformAdmin(), get("/admin/verifications"), null).andExpect(jsonPath("$.data.length()").value(0)); // code not confirmed yet
+        call(platformAdmin(), put("/admin/verifications/" + id + "/approve"), null).andExpect(status().isBadRequest());
+        call(admin, post("/enterprise/verification/confirm"), "{\"code\":\"" + sentCode() + "\"}").andExpect(status().isOk());
+        call(platformAdmin(), get("/admin/verifications"), null).andExpect(jsonPath("$.data[0].gstin").value("36AABCG1234H1Z5"));
+        call(platformAdmin(), put("/admin/verifications/" + id + "/reject"), "{}").andExpect(status().isBadRequest());
+        call(platformAdmin(), put("/admin/verifications/" + id + "/reject"), "{\"note\":\"The GSTIN is for a different company\"}")
+                .andExpect(jsonPath("$.data.status").value("rejected"));
+        call(recruiter, get("/enterprise/verification"), null)
+                .andExpect(jsonPath("$.data.status").value("rejected"))
+                .andExpect(jsonPath("$.data.reviewNote").value("The GSTIN is for a different company"));
+        call(admin, get("/enterprise/profile/me"), null)
+                .andExpect(jsonPath("$.data.verificationNote").value("The GSTIN is for a different company"))
+                .andExpect(jsonPath("$.data.hqCity").value("Hyderabad"));
+        mvc.perform(get("/companies/" + company.getId() + "/verification")).andExpect(jsonPath("$.data.verified").value(false));
+        call(admin, post("/enterprise/verification"), SUBMIT.replace("}", ",\"gstin\":\"not-a-gstin\"}")).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void withTheFlagOnJobsStayDraftsUntilTheCompanyIsVerified() throws Exception {
+        String job = "{\"title\":\"Designer\",\"industry\":\"design\",\"location\":\"Hyderabad\",\"employmentType\":\"Full Time\","
+                + "\"salaryMin\":1,\"salaryMax\":2,\"skills\":[],\"description\":\"Design\"";
+        // Flag off (the default): publishing works as before.
+        String first = body(call(admin, post("/enterprise/postings"), job + "}").andExpect(status().isOk()));
+        call(admin, put("/enterprise/postings/" + first + "/status"), "{\"status\":\"closed\"}").andExpect(status().isOk());
+        flags.save(FeatureFlag.builder().key("company_verification_required").label("Verification before publishing").enabled(true).build());
+        call(admin, post("/enterprise/postings"), job + "}").andExpect(status().isBadRequest());
+        String draft = body(call(admin, post("/enterprise/postings"), job + ",\"status\":\"draft\"}").andExpect(status().isOk()));
+        call(admin, put("/enterprise/postings/" + draft + "/status"), "{\"status\":\"open\"}").andExpect(status().isBadRequest());
+        verifications.save(com.vikisol.arena.business.entity.BusinessVerification.builder().tenant(company).legalName("GreenLeaf")
+                .website("https://greenleaf.example").domain("greenleaf.example").workEmail("asha@greenleaf.example")
+                .submitterRole(com.vikisol.arena.business.entity.BusinessVerification.SubmitterRole.FOUNDER)
+                .status(com.vikisol.arena.business.entity.BusinessVerification.Status.VERIFIED).verifiedAt(Instant.now()).build());
+        call(admin, put("/enterprise/postings/" + draft + "/status"), "{\"status\":\"open\"}").andExpect(status().isOk());
+    }
+
+    @Test
+    void theWorkspaceKeepsItsExtraDetails() throws Exception {
+        String base = "{\"companyName\":\"GreenLeaf Labs\",\"logoEmoji\":\"G\",\"industry\":\"design\",\"size\":\"11-50\",\"hiringFor\":[]";
+        call(admin, put("/enterprise/profile/me"), base + ",\"website\":\"https://greenleaf.example\",\"cin\":\"U72900TG2019PTC123456\",\"hqCity\":\"Hyderabad\"}")
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.website").value("https://greenleaf.example"))
+                .andExpect(jsonPath("$.data.cin").value("U72900TG2019PTC123456"))
+                .andExpect(jsonPath("$.data.verification").value("none"));
+        call(admin, put("/enterprise/profile/me"), base + ",\"cin\":\"123\"}").andExpect(status().isBadRequest());
+        call(admin, multipart("/enterprise/profile/me/logo").file(new org.springframework.mock.web.MockMultipartFile("file", "logo.png", "image/png",
+                new byte[]{(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0})), null)
+                .andExpect(jsonPath("$.data.logoUrl").isNotEmpty());
+        call(recruiter, delete("/enterprise/profile/me/logo"), null).andExpect(status().isForbidden());
+        call(admin, delete("/enterprise/profile/me/logo"), null).andExpect(jsonPath("$.data.logoUrl").doesNotExist());
+    }
+
+    @Test
     void teamRolesCatalogueIsForTheTeamOnly() throws Exception {
         call(recruiter, get("/enterprise/team/roles"), null)
                 .andExpect(jsonPath("$.data[0].role").value("company_admin"))
@@ -157,6 +227,16 @@ class BusinessVerificationTest extends EmbeddedPostgresAppTest {
         request.header("Authorization", "Bearer " + tokens.generateToken(as.getId(), as.getEmail(), as.getName(), as.getRole()));
         if (body != null) request.contentType(MediaType.APPLICATION_JSON).content(body);
         return mvc.perform(request);
+    }
+
+    private User platformAdmin() {
+        return users.save(User.builder().email(UUID.randomUUID() + "@test.local").passwordHash("x").name("Staff")
+                .role(Role.PLATFORM_ADMIN).totpEnabled(true).dateOfBirth(LocalDate.of(1990, 1, 1)).build());
+    }
+
+    private String body(ResultActions result) throws Exception {
+        return new com.fasterxml.jackson.databind.ObjectMapper().readTree(result.andReturn().getResponse().getContentAsString())
+                .path("data").path("id").asText();
     }
 
     private User user(Role role) {

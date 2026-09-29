@@ -16,6 +16,8 @@ import com.vikisol.arena.integration.provider.EmailProvider;
 import com.vikisol.arena.integration.provider.ProviderException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -55,6 +57,7 @@ public class BusinessVerificationService {
     private final PasswordEncoder passwordEncoder;
     private final EmailProvider emailProvider;
     private final AuditService auditService;
+    private final com.vikisol.arena.notifications.service.NotificationService notificationService;
 
     // Company admin. Submitting (again) always starts over: new details, new code, not verified.
     @Transactional
@@ -67,6 +70,8 @@ public class BusinessVerificationService {
             throw new BadRequestException("submitterRole must be one of founder, hr, talent_acquisition, hiring_manager, operations, other");
         }
         String domain = domainOf(request.website());
+        String gstin = companyId(request.gstin(), GSTIN, "GSTIN");
+        String cin = companyId(request.cin(), CIN, "CIN");
         String email = request.workEmail().trim().toLowerCase(Locale.ROOT);
         String emailDomain = email.substring(email.indexOf('@') + 1);
         if (FREE_MAIL.contains(emailDomain)) throw new BadRequestException("Use your work email at " + domain + ", not a personal mailbox");
@@ -86,6 +91,15 @@ public class BusinessVerificationService {
         v.setStatus(BusinessVerification.Status.PENDING);
         v.setVerifiedAt(null);
         v.setVerifiedBy(null);
+        v.setDomainConfirmedAt(null);
+        v.setReviewNote(null);
+        v.setReviewedBy(null);
+        v.setReviewedAt(null);
+        tenant.setWebsite(request.website().trim());
+        if (gstin != null) tenant.setGstin(gstin);
+        if (cin != null) tenant.setCin(cin);
+        if (request.hqCity() != null && !request.hqCity().isBlank()) tenant.setHqCity(request.hqCity().trim());
+        enterpriseProfileRepository.save(tenant);
         String code = String.format("%06d", RANDOM.nextInt(1_000_000));
         v.setCodeHash(passwordEncoder.encode(code));
         v.setCodeExpiresAt(Instant.now().plus(CODE_TTL));
@@ -118,14 +132,96 @@ public class BusinessVerificationService {
             repository.save(v);
             throw new BadRequestException("That code isn't right");
         }
-        v.setStatus(BusinessVerification.Status.VERIFIED);
-        v.setVerifiedAt(Instant.now());
-        v.setVerifiedBy(userRepository.getReferenceById(adminId));
+        // Flow §8 B2: the code proves the domain; an Arena admin then reviews the request.
+        v.setDomainConfirmedAt(Instant.now());
         v.setCodeHash(null);
         v.setCodeExpiresAt(null);
         repository.save(v);
-        auditService.record(tenant.getId(), adminId, AuditActions.BUSINESS_VERIFIED, v.getLegalName(), "domain: " + v.getDomain());
+        auditService.record(tenant.getId(), adminId, AuditActions.BUSINESS_DOMAIN_CONFIRMED, v.getLegalName(), "domain: " + v.getDomain());
         return toView(v);
+    }
+
+    // --- flow §9: the Arena admin verification queue ---------------------------------------
+
+    // Default: waiting for review (domain confirmed, not decided). status=verified|rejected
+    // lists decided ones, newest review first.
+    @Transactional(readOnly = true)
+    public Page<QueueItem> queue(String status, Pageable pageable) {
+        Page<BusinessVerification> page;
+        if (status == null || status.isBlank() || status.equalsIgnoreCase("pending")) {
+            page = repository.findByStatusAndDomainConfirmedAtIsNotNullOrderByDomainConfirmedAtAscIdAsc(BusinessVerification.Status.PENDING, pageable);
+        } else {
+            BusinessVerification.Status s;
+            try {
+                s = BusinessVerification.Status.valueOf(status.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException e) {
+                throw new BadRequestException("status must be one of pending, verified, rejected");
+            }
+            page = repository.findByStatusOrderByReviewedAtDescIdDesc(s, pageable);
+        }
+        return page.map(this::toQueueItem);
+    }
+
+    @Transactional
+    public QueueItem approve(UUID platformAdminId, UUID verificationId) {
+        BusinessVerification v = requireVerification(verificationId);
+        if (v.getDomainConfirmedAt() == null) throw new BadRequestException("The company hasn't confirmed its work-email code yet");
+        v.setStatus(BusinessVerification.Status.VERIFIED);
+        v.setVerifiedAt(Instant.now());
+        v.setVerifiedBy(userRepository.getReferenceById(platformAdminId));
+        v.setReviewNote(null);
+        v.setReviewedBy(userRepository.getReferenceById(platformAdminId));
+        v.setReviewedAt(Instant.now());
+        repository.save(v);
+        auditService.record(v.getTenant().getId(), platformAdminId, AuditActions.BUSINESS_VERIFIED, v.getLegalName(), "domain: " + v.getDomain());
+        notificationService.notifySystem(v.getTenant().getUser(), "Your company is verified",
+                v.getLegalName() + " now shows the verified badge.");
+        return toQueueItem(v);
+    }
+
+    @Transactional
+    public QueueItem reject(UUID platformAdminId, UUID verificationId, String note) {
+        BusinessVerification v = requireVerification(verificationId);
+        v.setStatus(BusinessVerification.Status.REJECTED);
+        v.setVerifiedAt(null);
+        v.setVerifiedBy(null);
+        v.setReviewNote(note.trim());
+        v.setReviewedBy(userRepository.getReferenceById(platformAdminId));
+        v.setReviewedAt(Instant.now());
+        repository.save(v);
+        auditService.record(v.getTenant().getId(), platformAdminId, AuditActions.BUSINESS_REJECTED, v.getLegalName(), note.trim());
+        notificationService.notifySystem(v.getTenant().getUser(), "Company verification wasn't approved",
+                "Arena's team said: " + note.trim() + " You can update the details and submit again.");
+        return toQueueItem(v);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isVerified(UUID tenantId) {
+        return repository.findByTenantId(tenantId).map(v -> v.getStatus() == BusinessVerification.Status.VERIFIED).orElse(false);
+    }
+
+    private BusinessVerification requireVerification(UUID id) {
+        return repository.findById(id).orElseThrow(() -> new ResourceNotFoundException("Verification request not found: " + id));
+    }
+
+    private QueueItem toQueueItem(BusinessVerification v) {
+        EnterpriseProfile t = v.getTenant();
+        return new QueueItem(v.getId().toString(), t.getId().toString(), t.getCompanyName(), v.getLegalName(), v.getWebsite(),
+                v.getDomain(), v.getWorkEmail(), v.getSubmitterRole().name().toLowerCase(Locale.ROOT), t.getGstin(), t.getCin(),
+                t.getHqCity(), v.getStatus().name().toLowerCase(Locale.ROOT),
+                v.getDomainConfirmedAt() == null ? null : v.getDomainConfirmedAt().toString(), v.getReviewNote(),
+                v.getReviewedAt() == null ? null : v.getReviewedAt().toString());
+    }
+
+    // GSTIN: 15 characters (state code, PAN, entity, Z, check). CIN: 21 characters.
+    public static final java.util.regex.Pattern GSTIN = java.util.regex.Pattern.compile("[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]");
+    public static final java.util.regex.Pattern CIN = java.util.regex.Pattern.compile("[LU][0-9]{5}[A-Z]{2}[0-9]{4}[A-Z]{3}[0-9]{6}");
+
+    public static String companyId(String value, java.util.regex.Pattern pattern, String label) {
+        if (value == null || value.isBlank()) return null;
+        String v = value.trim().toUpperCase(Locale.ROOT);
+        if (!pattern.matcher(v).matches()) throw new BadRequestException("That " + label + " doesn't look right");
+        return v;
     }
 
     // Anyone on the team can read their own company's status.
@@ -133,7 +229,7 @@ public class BusinessVerificationService {
     public VerificationView mine(UUID memberId) {
         EnterpriseProfile tenant = enterpriseProfileService.getEntityForUser(memberId);
         return repository.findByTenantId(tenant.getId()).map(this::toView)
-                .orElse(new VerificationView("not_started", null, null, null, null, null, null, null));
+                .orElse(new VerificationView("none", null, null, null, null, null, null, null, false, null));
     }
 
     // Public badge on a company page.
@@ -165,7 +261,8 @@ public class BusinessVerificationService {
         return new VerificationView(v.getStatus().name().toLowerCase(Locale.ROOT), v.getLegalName(), v.getWebsite(), v.getDomain(),
                 mask(v.getWorkEmail()), v.getSubmitterRole().name().toLowerCase(Locale.ROOT),
                 v.getStatus() == BusinessVerification.Status.PENDING && v.getCodeExpiresAt() != null ? v.getCodeExpiresAt().toString() : null,
-                v.getVerifiedAt() == null ? null : v.getVerifiedAt().toString());
+                v.getVerifiedAt() == null ? null : v.getVerifiedAt().toString(),
+                v.getDomainConfirmedAt() != null, v.getReviewNote());
     }
 
     private static String mask(String email) {

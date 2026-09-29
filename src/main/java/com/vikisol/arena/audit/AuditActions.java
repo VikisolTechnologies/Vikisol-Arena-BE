@@ -8,6 +8,8 @@ public final class AuditActions {
     public static final String POSTING_CREATED = "posting.created";
     public static final String POSTING_CLOSED = "posting.closed";
     public static final String POSTING_UPDATED = "posting.updated";
+    public static final String BUSINESS_DOMAIN_CONFIRMED = "business.domain_confirmed";
+    public static final String BUSINESS_REJECTED = "business.rejected";
     public static final String CANDIDATE_UNLOCKED = "candidate.unlocked";
     public static final String CREDIT_SPENT = "credit.spent";
     public static final String CREDIT_GRANTED = "credit.granted";
