@@ -28,4 +28,16 @@ public class ScreeningQuestion extends BaseEntity {
     @Column(nullable = false)
     @Builder.Default
     private boolean required = true;
+
+    // Row 20/28 (V34): how the candidate answers. CHOICE picks one of the options.
+    public enum Type { TEXT, YESNO, NUMBER, CHOICE }
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 8)
+    @Builder.Default
+    private Type type = Type.TEXT;
+
+    @Column(nullable = false, columnDefinition = "TEXT")
+    @Builder.Default
+    private String optionsJson = "[]";
 }

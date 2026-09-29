@@ -62,4 +62,24 @@ public class JobPosting extends BaseEntity {
     @Column(nullable = false)
     @Builder.Default
     private PostingStatus status = PostingStatus.OPEN;
+
+    // Rows 28/41 (V34). workMode is kept in step with `remote` (remote == REMOTE).
+    public enum WorkMode { ONSITE, HYBRID, REMOTE }
+
+    public enum ExperienceLevel { ENTRY, MID, SENIOR }
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 10)
+    private WorkMode workMode;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 10)
+    private ExperienceLevel experienceLevel;
+
+    // The last day to apply; applying after it is refused.
+    private java.time.LocalDate deadline;
+
+    public WorkMode effectiveWorkMode() {
+        return workMode != null ? workMode : (remote ? WorkMode.REMOTE : WorkMode.ONSITE);
+    }
 }

@@ -31,6 +31,7 @@ public class CompanyService {
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final JobPostingRepository jobPostingRepository;
     private final JobMapper jobMapper;
+    private final com.vikisol.arena.jobs.service.JobService jobService;
     private final FollowService followService;
 
     @Transactional(readOnly = true)
@@ -48,12 +49,13 @@ public class CompanyService {
     @Transactional(readOnly = true)
     public PagedResponse<JobResponse> getCompanyJobs(UUID companyId, Pageable pageable) {
         EnterpriseProfile company = requireCompany(companyId);
-        var page = jobPostingRepository.findByEnterprise(company, pageable);
-        return PagedResponse.of(page, j -> jobMapper.toResponse(j, null));
+        var page = jobPostingRepository.findByEnterpriseAndStatusNot(company, PostingStatus.DRAFT, pageable);
+        JobMapper.Extras extras = jobService.extrasFor(page.getContent(), null);
+        return PagedResponse.of(page, j -> jobMapper.toResponse(j, null, extras));
     }
 
     private CompanyResponse toResponse(EnterpriseProfile company, UUID viewingUserId) {
-        int openJobCount = (int) jobPostingRepository.countByEnterpriseAndStatusNot(company, PostingStatus.CLOSED);
+        int openJobCount = (int) jobPostingRepository.countByEnterpriseAndStatusIn(company, java.util.List.of(PostingStatus.OPEN, PostingStatus.PAUSED));
         long followerCount = followService.getCompanyFollowerCount(company.getId());
         Boolean viewerFollows = viewingUserId == null ? null : followService.viewerFollowsCompany(viewingUserId, company.getId());
         return new CompanyResponse(company.getId().toString(), company.getCompanyName(), company.getLogoEmoji(),

@@ -465,6 +465,61 @@ Account erasure deletes the career profile.
 - **⚠ Existing enum widened:** `ApplicationStage` gains `hired`, so any client that switches on
   stage should handle it. Nothing sets it except a recruiter choosing it.
 
+### Applications: stages, offers, notes and timeline (architect item 2; FE-API-GAPS rows 20, 21, 30, 31)
+
+**Who sets which stage (architect item 2).**
+- A candidate can only withdraw: `PUT /applications/{id}/stage` accepts only `"withdrawn"` from them.
+  Any other stage answers 403.
+- Only company roles set the other stages, through `PUT /enterprise/applicants/{id}/stage`. They
+  can't set `withdrawn` (400).
+
+| FE row | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| 20 | `POST /applications` (existing) | talent | Optional extras `{ answers?: [{ questionId, value }], coverNote? (≤2000), includeCtc?: boolean }`. The answers are checked against the job's questions before anything is saved. `includeCtc` is the only way pay reaches an employer (see Career). `{ jobId }` alone still works (Jenny's path) |
+| 21 | `DELETE /applications/{id}` (existing) | the applicant | Now keeps the application as `withdrawn` instead of deleting it, so both sides' history stays. Applying again reopens it |
+| 21 | `POST /applications/{id}/offer/accept` | the applicant | Only at `offer`. Moves to `hired` |
+| 21 | `POST /applications/{id}/offer/decline` | the applicant | Only at `offer`. Moves to `withdrawn` |
+| 21 | `PUT /applications/{id}/outcome` | the applicant | `{ showOnProfile }`, only once `hired`. A hire shows on the profile only if chosen (flow §6) |
+| 30 | `GET /applications/{id}/events` | the applicant | `[{ type: "applied"\|"stage"\|"withdrawn"\|"offer_accepted"\|"offer_declined", stage, actorName, message, at }]`, oldest first |
+| 30 | `GET /enterprise/applicants/{id}/events` | the company team | The same timeline |
+| 30 | `GET /enterprise/applicants/{id}/notes` | the company team | `[{ id, text, authorName, createdAt }]`, newest first. Team-private: the candidate never sees them |
+| 30 | `POST /enterprise/applicants/{id}/notes` | the company team | `{ text (≤2000) }` → the notes list |
+| 31 | `PUT /enterprise/applicants/{id}/stage` (existing) | the company team | Optional `message` (≤600). It goes to the candidate in the notification and the email. Moving to `rejected` ("Not selected") without a message sends Arena's kind standard one |
+
+**⚠ Existing enum widened:** `ApplicationStage` gains `withdrawn`. Withdrawn applications don't
+count as "applied" (`GET /applications/exists`).
+
+### Jobs per the app flow (FE-API-GAPS rows 20, 22, 28, 33, 41)
+
+| FE row | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| 28 | `POST /enterprise/postings` (existing) | recruiter / company admin | Optional extras `{ status?: "draft"\|"open", workMode?: onsite\|hybrid\|remote, experienceLevel?: entry\|mid\|senior (the frontend's labels work too), deadline?: YYYY-MM-DD, mustHaves?, niceToHaves?, questions? }`. `workMode` sets `remote`. Pay range stays required, now with min ≤ max |
+| 28 | `PATCH /enterprise/postings/{id}` | same | Any of `title, industry, location, employmentType, workMode, salaryMin, salaryMax, skills, description, experienceLevel, deadline ("" removes), mustHaves, niceToHaves, questions`. Draft or live; not closed. Must-haves and questions follow G22/G23: they can't change once a candidate answered them |
+| 28 | `PUT /enterprise/postings/{id}/status` (existing) | same | Also takes `"draft"`, but only while nobody has applied. Publishing a draft (or reopening a closed posting) counts against the plan's posting limit |
+| 28 | `GET /enterprise/postings`, `GET /enterprise/postings/{id}` | same | Add `workMode`, `experienceLevel`, `deadline` |
+| 20, 28 | `PUT /enterprise/postings/{id}/screening` (G23) | same | Each question also takes `type: text\|yesno\|number\|choice` (default `text`) and, for `choice`, `options` (2–8, ≤80 each) |
+| 20 | `GET /jobs/{id}/questions` | signed in | `[{ id, type, label, options, required }]` (`options` only on `choice`) |
+| 20 | `PUT /applications/{id}/screening` (G24), `POST /applications` | the applicant | Answers must fit the type: `yes`/`no` (also `true`/`false`, stored as `yes`/`no`), a number, or one of the options (case-insensitive; stored as written in the options) |
+| 22, 41 | `POST /jobs/{id}/save`, `DELETE /jobs/{id}/save` | signed in | Private bookmark. Saving twice is fine. A draft can't be saved (404) |
+| 22, 41 | `GET /jobs/saved` | signed in | `[JobResponse]`, newest saved first, paged with headers |
+| 22, 28, 41 | `GET /jobs`, `GET /jobs/{id}`, `GET /companies/{id}/jobs` | | Jobs add `workMode`, `experienceLevel`, `deadline`, `mustHaves: [text]`, `niceToHaves: [text]`, `companyVerified` (G27) and `saved` (absent for a guest) |
+| 33 | `POST /interviews/{id}/feedback` (existing) | recruiter / company admin / assigned hiring manager | Adds `mustHaves: [{ item (≤120), seen: strong\|some\|none, note? (≤500) }]` (≤10). `rating` is now optional (1–5 when sent) |
+
+**How the pieces behave:**
+- **Drafts.** A draft is only for its company team.
+  - `GET /jobs/{id}`, `/requirements` and `/questions` answer 404 to anyone else.
+  - It never appears in `/jobs` or on the company page, and can't be applied to.
+- **Applying.** Only an `open` job takes applications: a paused or closed one answers 400. After the
+  deadline (India time) it also answers 400.
+- **Live postings.** The plan's posting limit and the company page's `openJobCount` count open and
+  paused postings; drafts and closed ones don't.
+
+**⚠ Existing behaviour changes:**
+- `POST /applications` to a paused or closed job used to succeed; it now answers 400.
+- `GET /companies/{id}/jobs` never shows drafts.
+- `InterviewResponse.feedback.rating` is absent when the interviewer gave none (it was `0`).
+- **⚠ Existing enum widened:** `PostingStatus` gains `draft`.
+
 ## Business verification and team roles — G27, G28
 
 | Gap | Endpoint | Who | Body / notes |

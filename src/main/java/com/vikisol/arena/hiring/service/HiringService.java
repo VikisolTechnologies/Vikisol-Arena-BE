@@ -6,6 +6,7 @@ import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.common.intake.IntakeAnswers;
 import com.vikisol.arena.common.policy.ProtectedAttributes;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
@@ -50,6 +51,7 @@ public class HiringService {
     private final EnterpriseProfileService enterpriseProfileService;
     private final CandidateProfileRepository candidateProfileRepository;
     private final UserRepository userRepository;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     // --- G22 / G23: the posting's requirements and questions (employer) --------------------
 
@@ -76,24 +78,65 @@ public class HiringService {
             throw new BadRequestException("Candidates have already answered these questions, so they can't change now");
         }
         questions.forEach(q -> ProtectedAttributes.reject("the question", q.text()));
-        questionRepository.deleteByPostingId(postingId);
-        questionRepository.flush();
+        List<ScreeningQuestion> rows = new ArrayList<>();
         int position = 0;
         for (QuestionInput q : questions) {
-            questionRepository.save(ScreeningQuestion.builder().posting(posting).position(position++)
-                    .text(q.text().trim()).required(!Boolean.FALSE.equals(q.required())).build());
+            ScreeningQuestion.Type type = questionType(q.type());
+            List<String> options = List.of();
+            if (type == ScreeningQuestion.Type.CHOICE) {
+                options = IntakeAnswers.cleanList(q.options() == null ? List.of() : q.options(), 8, 80, "options", "the question");
+                if (options.size() < 2) throw new BadRequestException("A choice question needs at least 2 options");
+            } else if (q.options() != null && !q.options().isEmpty()) {
+                throw new BadRequestException("Only a choice question has options");
+            }
+            rows.add(ScreeningQuestion.builder().posting(posting).position(position++).text(q.text().trim())
+                    .required(!Boolean.FALSE.equals(q.required())).type(type).optionsJson(writeJson(options)).build());
         }
+        questionRepository.deleteByPostingId(postingId);
+        questionRepository.flush();
+        questionRepository.saveAll(rows);
         return requirementsView(postingId);
     }
 
-    // Anyone signed in can read what a job asks for before applying.
+    // Anyone signed in can read what a job asks for before applying. A draft only its team.
     @Transactional(readOnly = true)
-    public JobRequirementsView requirements(UUID postingId) {
-        postingRepository.findById(postingId).orElseThrow(() -> new ResourceNotFoundException("Job not found: " + postingId));
+    public JobRequirementsView requirements(UUID viewerId, UUID postingId) {
+        requireVisiblePosting(viewerId, postingId);
         return requirementsView(postingId);
+    }
+
+    // Row 20: the screening questions in the frontend's field shape.
+    @Transactional(readOnly = true)
+    public List<JobQuestion> questions(UUID viewerId, UUID postingId) {
+        requireVisiblePosting(viewerId, postingId);
+        return questionRepository.findByPostingIdOrderByPositionAsc(postingId).stream()
+                .map(q -> new JobQuestion(q.getId().toString(), q.getType().name().toLowerCase(), q.getText(), options(q), q.isRequired()))
+                .toList();
+    }
+
+    private JobPosting requireVisiblePosting(UUID viewerId, UUID postingId) {
+        JobPosting posting = postingRepository.findById(postingId).orElseThrow(() -> new ResourceNotFoundException("Job not found: " + postingId));
+        if (posting.getStatus() == com.vikisol.arena.jobs.entity.PostingStatus.DRAFT) {
+            boolean team = enterpriseProfileService.findEntityForUser(viewerId)
+                    .map(t -> t.getId().equals(posting.getEnterprise().getId())).orElse(false);
+            if (!team) throw new ResourceNotFoundException("Job not found: " + postingId);
+        }
+        return posting;
     }
 
     // --- G24: the candidate's answers and evidence ----------------------------------------
+
+    // Row 20: answers sent with POST /applications are checked before anything is saved.
+    @Transactional(readOnly = true)
+    public void checkAnswers(UUID postingId, List<AnswerInput> answers) {
+        Map<UUID, ScreeningQuestion> questions = questionRepository.findByPostingIdOrderByPositionAsc(postingId).stream()
+                .collect(Collectors.toMap(ScreeningQuestion::getId, Function.identity()));
+        for (AnswerInput a : answers) {
+            ScreeningQuestion q = questions.get(a.questionId());
+            if (q == null) throw new BadRequestException("One of the answers is for a question this job doesn't ask");
+            if (a.answer() != null && !a.answer().isBlank()) checkAnswer(q, a.answer().trim());
+        }
+    }
 
     @Transactional
     public CandidateScreeningView saveScreening(UUID userId, UUID applicationId, ScreeningAnswersRequest request) {
@@ -112,6 +155,7 @@ public class HiringService {
             ScreeningQuestion q = questions.get(a.questionId());
             if (q == null) throw new BadRequestException("One of the answers is for a question this job doesn't ask");
             String text = a.answer() == null ? "" : a.answer().trim();
+            if (!text.isEmpty()) text = checkAnswer(q, text);
             ApplicationAnswer row = answers.get(q.getId());
             if (text.isEmpty()) {
                 if (row != null) answerRepository.delete(row);
@@ -205,7 +249,8 @@ public class HiringService {
                 all.stream().filter(r -> r.getKind() == JobRequirement.Kind.MUST).map(r -> new Item(r.getId().toString(), r.getText())).toList(),
                 all.stream().filter(r -> r.getKind() == JobRequirement.Kind.NICE).map(r -> new Item(r.getId().toString(), r.getText())).toList(),
                 questionRepository.findByPostingIdOrderByPositionAsc(postingId).stream()
-                        .map(q -> new QuestionView(q.getId().toString(), q.getText(), q.isRequired())).toList());
+                        .map(q -> new QuestionView(q.getId().toString(), q.getText(), q.isRequired(), q.getType().name().toLowerCase(),
+                                q.getType() == ScreeningQuestion.Type.CHOICE ? options(q) : null)).toList());
     }
 
     private CandidateScreeningView candidateView(Application application) {
@@ -285,6 +330,60 @@ public class HiringService {
         }
         if (out.size() > MAX_REQUIREMENTS) throw new BadRequestException("You can list at most " + MAX_REQUIREMENTS + " " + label + "s");
         return List.copyOf(out.values());
+    }
+
+    private static ScreeningQuestion.Type questionType(String value) {
+        if (value == null || value.isBlank()) return ScreeningQuestion.Type.TEXT;
+        String v = value.trim().toUpperCase().replace("-", "").replace("_", "");
+        for (ScreeningQuestion.Type t : ScreeningQuestion.Type.values()) {
+            if (t.name().equals(v)) return t;
+        }
+        throw new BadRequestException("type must be one of text, yesno, number, choice");
+    }
+
+    // The answer has to fit the question: yes/no, a number, or one of the options.
+    private String checkAnswer(ScreeningQuestion q, String text) {
+        switch (q.getType()) {
+            case YESNO -> {
+                String v = text.toLowerCase(Locale.ROOT);
+                if (v.equals("yes") || v.equals("true")) return "yes";
+                if (v.equals("no") || v.equals("false")) return "no";
+                throw new BadRequestException("Please answer yes or no: " + q.getText());
+            }
+            case NUMBER -> {
+                try {
+                    new java.math.BigDecimal(text);
+                    return text;
+                } catch (NumberFormatException e) {
+                    throw new BadRequestException("Please answer with a number: " + q.getText());
+                }
+            }
+            case CHOICE -> {
+                for (String option : options(q)) {
+                    if (option.equalsIgnoreCase(text)) return option;
+                }
+                throw new BadRequestException("Please pick one of the options: " + q.getText());
+            }
+            default -> {
+                return text;
+            }
+        }
+    }
+
+    private List<String> options(ScreeningQuestion q) {
+        try {
+            return objectMapper.readValue(q.getOptionsJson(), new com.fasterxml.jackson.core.type.TypeReference<List<String>>() { });
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("Invalid stored options", e);
+        }
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     // Tenant check, same rule as ApplicantService: anyone on the posting's company team.

@@ -7,6 +7,8 @@ import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.dto.CreatePostingRequest;
 import com.vikisol.arena.enterprise.dto.JobPostingResponse;
+import com.vikisol.arena.enterprise.dto.UpdatePostingRequest;
+import com.vikisol.arena.hiring.dto.HiringDtos;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.entity.Plan;
 import com.vikisol.arena.jobs.entity.EmploymentType;
@@ -33,6 +35,9 @@ public class JobPostingService {
     private final AuditService auditService;
     private final JobPostingMapper mapper;
     private final ModerationService moderationService;
+    private final com.vikisol.arena.hiring.service.HiringService hiringService;
+    private final com.vikisol.arena.hiring.repository.JobRequirementRepository requirementRepository;
+    private final com.vikisol.arena.applications.repository.ApplicationRepository applicationRepository;
 
     @Transactional(readOnly = true)
     public PagedResponse<JobPostingResponse> getMyPostings(UUID userId, Pageable pageable) {
@@ -66,16 +71,10 @@ public class JobPostingService {
     @Transactional
     public JobPostingResponse createPosting(UUID userId, CreatePostingRequest request) {
         EnterpriseProfile enterprise = requireEnterprise(userId);
-
-        // Plan-based active-posting cap - mirrors arena-web's POSTING_LIMITS (plan.ts) and the
-        // check createPosting() does in enterprise.ts before AUDIT.md flagged it as ungated.
-        // "Active" = anything not closed (open or paused); closed postings don't count.
-        int limit = postingLimitFor(enterprise.getPlan());
-        long activeCount = jobPostingRepository.countByEnterpriseAndStatusNot(enterprise, PostingStatus.CLOSED);
-        if (activeCount >= limit) {
-            throw new BadRequestException("Your " + enterprise.getPlan().wireValue() + " plan allows " + limit
-                    + " active posting" + (limit == 1 ? "" : "s") + ".");
-        }
+        PostingStatus status = request.status() == null || request.status().isBlank() ? PostingStatus.OPEN : PostingStatus.fromWireValue(request.status());
+        if (status != PostingStatus.OPEN && status != PostingStatus.DRAFT) throw new BadRequestException("A new posting is a draft or open");
+        if (status == PostingStatus.OPEN) requireRoomUnderCap(enterprise);
+        if (request.salaryMin() > request.salaryMax()) throw new BadRequestException("The minimum pay can't be more than the maximum");
 
         JobPosting posting = JobPosting.builder()
                 .enterprise(enterprise)
@@ -88,11 +87,66 @@ public class JobPostingService {
                 .salaryMax(request.salaryMax())
                 .skills(request.skills())
                 .description(request.description())
-                .status(PostingStatus.OPEN)
+                .status(status)
+                .experienceLevel(experienceLevel(request.experienceLevel()))
+                .deadline(deadline(request.deadline()))
                 .build();
+        if (request.workMode() != null) setWorkMode(posting, request.workMode());
         JobPosting saved = jobPostingRepository.save(posting);
+        if (request.mustHaves() != null || request.niceToHaves() != null) {
+            hiringService.setRequirements(userId, saved.getId(), new HiringDtos.RequirementsRequest(
+                    request.mustHaves() == null ? List.of() : request.mustHaves(), request.niceToHaves()));
+        }
+        if (request.questions() != null) hiringService.setScreening(userId, saved.getId(), request.questions());
         auditService.record(enterprise.getId(), userId, AuditActions.POSTING_CREATED, saved.getTitle());
         moderationService.autoFlag(saved);
+        return mapper.toResponse(saved);
+    }
+
+    // Row 28: edit a draft or a live posting in place, instead of close-and-repost.
+    @Transactional
+    public JobPostingResponse updatePosting(UUID userId, UUID postingId, UpdatePostingRequest r) {
+        JobPosting posting = requirePosting(postingId);
+        EnterpriseProfile actingTenant = requireEnterprise(userId);
+        if (!posting.getEnterprise().getId().equals(actingTenant.getId())) {
+            throw new AccessDeniedException("Not your posting");
+        }
+        if (posting.getStatus() == PostingStatus.CLOSED) throw new BadRequestException("This posting is closed. Reopen it to edit it.");
+        if (r.title() != null) {
+            if (r.title().isBlank()) throw new BadRequestException("title can't be empty");
+            posting.setTitle(r.title().trim());
+        }
+        if (r.industry() != null) posting.setIndustry(Industry.fromWireValue(r.industry()));
+        if (r.location() != null) {
+            if (r.location().isBlank()) throw new BadRequestException("location can't be empty");
+            posting.setLocation(r.location().trim());
+        }
+        if (r.employmentType() != null) posting.setEmploymentType(EmploymentType.fromWireValue(r.employmentType()));
+        if (r.workMode() != null) setWorkMode(posting, r.workMode());
+        if (r.salaryMin() != null) posting.setSalaryMin(r.salaryMin());
+        if (r.salaryMax() != null) posting.setSalaryMax(r.salaryMax());
+        if (posting.getSalaryMin() > posting.getSalaryMax()) throw new BadRequestException("The minimum pay can't be more than the maximum");
+        if (r.skills() != null) {
+            posting.getSkills().clear();
+            posting.getSkills().addAll(r.skills().stream().filter(x -> x != null && !x.isBlank()).map(String::trim).distinct().toList());
+        }
+        boolean descriptionChanged = false;
+        if (r.description() != null) {
+            if (r.description().isBlank()) throw new BadRequestException("description can't be empty");
+            descriptionChanged = !r.description().equals(posting.getDescription());
+            posting.setDescription(r.description());
+        }
+        if (r.experienceLevel() != null) posting.setExperienceLevel(r.experienceLevel().isBlank() ? null : experienceLevel(r.experienceLevel()));
+        if (r.deadline() != null) posting.setDeadline(deadline(r.deadline()));
+        JobPosting saved = jobPostingRepository.save(posting);
+        if (r.mustHaves() != null || r.niceToHaves() != null) {
+            List<String> must = r.mustHaves() != null ? r.mustHaves() : currentRequirements(postingId, com.vikisol.arena.hiring.entity.JobRequirement.Kind.MUST);
+            List<String> nice = r.niceToHaves() != null ? r.niceToHaves() : currentRequirements(postingId, com.vikisol.arena.hiring.entity.JobRequirement.Kind.NICE);
+            hiringService.setRequirements(userId, postingId, new HiringDtos.RequirementsRequest(must, nice));
+        }
+        if (r.questions() != null) hiringService.setScreening(userId, postingId, r.questions());
+        if (descriptionChanged) moderationService.autoFlag(saved);
+        auditService.record(actingTenant.getId(), userId, AuditActions.POSTING_UPDATED, saved.getTitle());
         return mapper.toResponse(saved);
     }
 
@@ -106,11 +160,69 @@ public class JobPostingService {
         if (!posting.getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your posting");
         }
+        // Row 28: back to draft only while nobody has applied; going live counts against the plan.
+        if (status == PostingStatus.DRAFT && posting.getStatus() != PostingStatus.DRAFT
+                && !applicationRepository.findByJobPosting(posting).isEmpty()) {
+            throw new BadRequestException("People have applied, so this posting can't go back to draft. Pause or close it instead.");
+        }
+        boolean goingLive = (status == PostingStatus.OPEN || status == PostingStatus.PAUSED)
+                && (posting.getStatus() == PostingStatus.DRAFT || posting.getStatus() == PostingStatus.CLOSED);
+        if (goingLive) requireRoomUnderCap(actingTenant);
         posting.setStatus(status);
         jobPostingRepository.save(posting);
         if (status == PostingStatus.CLOSED) {
             auditService.record(actingTenant.getId(), userId, AuditActions.POSTING_CLOSED, posting.getTitle());
         }
+    }
+
+    // Plan-based active-posting cap - mirrors arena-web's POSTING_LIMITS (plan.ts) and the check
+    // createPosting() does in enterprise.ts before AUDIT.md flagged it as ungated. "Active" = open
+    // or paused; drafts and closed postings don't count.
+    private void requireRoomUnderCap(EnterpriseProfile enterprise) {
+        int limit = postingLimitFor(enterprise.getPlan());
+        long activeCount = jobPostingRepository.countByEnterpriseAndStatusIn(enterprise, List.of(PostingStatus.OPEN, PostingStatus.PAUSED));
+        if (activeCount >= limit) {
+            throw new BadRequestException("Your " + enterprise.getPlan().wireValue() + " plan allows " + limit
+                    + " active posting" + (limit == 1 ? "" : "s") + ".");
+        }
+    }
+
+    private List<String> currentRequirements(UUID postingId, com.vikisol.arena.hiring.entity.JobRequirement.Kind kind) {
+        return requirementRepository.findByPostingIdOrderByKindAscPositionAsc(postingId).stream()
+                .filter(x -> x.getKind() == kind).map(com.vikisol.arena.hiring.entity.JobRequirement::getText).toList();
+    }
+
+    private static void setWorkMode(JobPosting posting, String value) {
+        JobPosting.WorkMode mode;
+        try {
+            mode = JobPosting.WorkMode.valueOf(value.trim().toUpperCase().replace("-", "").replace("_", ""));
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException("workMode must be one of onsite, hybrid, remote");
+        }
+        posting.setWorkMode(mode);
+        posting.setRemote(mode == JobPosting.WorkMode.REMOTE);
+    }
+
+    // Also takes the frontend's labels ("Entry level (0–2 years)", "Mid level…", "Senior…").
+    private static JobPosting.ExperienceLevel experienceLevel(String value) {
+        if (value == null || value.isBlank()) return null;
+        String v = value.trim().toLowerCase(java.util.Locale.ROOT);
+        if (v.startsWith("entry")) return JobPosting.ExperienceLevel.ENTRY;
+        if (v.startsWith("mid")) return JobPosting.ExperienceLevel.MID;
+        if (v.startsWith("senior")) return JobPosting.ExperienceLevel.SENIOR;
+        throw new BadRequestException("experienceLevel must be one of entry, mid, senior");
+    }
+
+    private static java.time.LocalDate deadline(String value) {
+        if (value == null || value.isBlank()) return null;
+        java.time.LocalDate d;
+        try {
+            d = java.time.LocalDate.parse(value.trim());
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new BadRequestException("deadline must be a date like 2026-10-31");
+        }
+        if (d.isBefore(java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")))) throw new BadRequestException("The deadline can't be in the past");
+        return d;
     }
 
     // Mirrors arena-web's POSTING_LIMITS constant (plan.ts) exactly: free:1, pro:10,

@@ -27,6 +27,13 @@ public interface JobPostingRepository extends JpaRepository<JobPosting, UUID> {
     // limit check in enterprise.ts exactly (`readPostings().filter((p) => p.status !== "closed")`).
     long countByEnterpriseAndStatusNot(EnterpriseProfile enterprise, PostingStatus status);
 
+    // Live postings (open or paused): the plan cap and the company page's count. Drafts and
+    // closed postings don't count.
+    long countByEnterpriseAndStatusIn(EnterpriseProfile enterprise, java.util.Collection<PostingStatus> statuses);
+
+    // The public company page: everything except drafts, which only the team sees.
+    Page<JobPosting> findByEnterpriseAndStatusNot(EnterpriseProfile enterprise, PostingStatus status, Pageable pageable);
+
     long countByStatus(PostingStatus status);
 
     // Batched warm-up for the `skills` @ElementCollection - called once per page of results with

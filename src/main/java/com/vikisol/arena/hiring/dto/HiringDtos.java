@@ -21,10 +21,17 @@ public final class HiringDtos {
     ) {
     }
 
+    // type (rows 20/28, optional, default text): text | yesno | number | choice. A choice
+    // question needs 2-8 options (each ≤80).
     public record QuestionInput(
             @NotBlank(message = "is required") @Size(max = 200, message = "must be at most 200 characters") String text,
-            Boolean required
+            Boolean required,
+            String type,
+            List<String> options
     ) {
+        public QuestionInput(String text, Boolean required) {
+            this(text, required, null, null);
+        }
     }
 
     public record ScreeningRequest(@NotNull(message = "is required") List<@Valid QuestionInput> questions) {
@@ -33,7 +40,12 @@ public final class HiringDtos {
     public record Item(String id, String text) {
     }
 
-    public record QuestionView(String id, String text, boolean required) {
+    // type and options (added, rows 20/28); options only on a choice question.
+    public record QuestionView(String id, String text, boolean required, String type, List<String> options) {
+    }
+
+    // GET /jobs/{id}/questions, in the frontend's field shape (row 20).
+    public record JobQuestion(String id, String type, String label, List<String> options, boolean required) {
     }
 
     // GET /jobs/{id}/requirements - what a candidate sees before applying.

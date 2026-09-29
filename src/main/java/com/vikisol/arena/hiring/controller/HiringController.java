@@ -90,7 +90,14 @@ public class HiringController {
 
     @PreAuthorize("isAuthenticated()")
     @GetMapping("/jobs/{id}/requirements")
-    public ResponseEntity<ApiResponse<JobRequirementsView>> requirements(@PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(hiringService.requirements(id)));
+    public ResponseEntity<ApiResponse<JobRequirementsView>> requirements(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(hiringService.requirements(principal.getId(), id)));
+    }
+
+    // Row 20: the screening questions as form fields: [{ id, type, label, options, required }].
+    @PreAuthorize("isAuthenticated()")
+    @GetMapping("/jobs/{id}/questions")
+    public ResponseEntity<ApiResponse<List<JobQuestion>>> questions(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(hiringService.questions(principal.getId(), id)));
     }
 }

@@ -101,7 +101,19 @@ public class ApplicationService {
             return mapper.toResponse(existing.get());
         }
         JobPosting job = jobPostingRepository.findById(jobId)
+                .filter(j -> j.getStatus() != com.vikisol.arena.jobs.entity.PostingStatus.DRAFT)
                 .orElseThrow(() -> new ResourceNotFoundException("Job not found: " + jobId));
+        // Only an open job takes applications, and not after its deadline (row 28).
+        if (job.getStatus() != com.vikisol.arena.jobs.entity.PostingStatus.OPEN) {
+            throw new BadRequestException("This job isn't taking applications right now");
+        }
+        if (job.getDeadline() != null && java.time.LocalDate.now(java.time.ZoneId.of("Asia/Kolkata")).isAfter(job.getDeadline())) {
+            throw new BadRequestException("Applications for this job closed on " + job.getDeadline());
+        }
+
+        List<HiringDtos.AnswerInput> answerInputs = answers == null ? List.of()
+                : answers.stream().map(a -> new HiringDtos.AnswerInput(a.questionId(), a.value())).toList();
+        hiringService.checkAnswers(jobId, answerInputs);
 
         Application application = existing.orElseGet(() -> Application.builder().candidate(candidate).jobPosting(job).build());
         application.setStage(ApplicationStage.APPLIED);
@@ -110,9 +122,8 @@ public class ApplicationService {
         application.setIncludeCtc(Boolean.TRUE.equals(includeCtc));
         application = applicationRepository.save(application);
         record(application, ApplicationEvent.Type.APPLIED, ApplicationStage.APPLIED, null, null);
-        if (answers != null && !answers.isEmpty()) {
-            hiringService.saveScreening(userId, application.getId(), new HiringDtos.ScreeningAnswersRequest(
-                    answers.stream().map(a -> new HiringDtos.AnswerInput(a.questionId(), a.value())).toList(), null));
+        if (!answerInputs.isEmpty()) {
+            hiringService.saveScreening(userId, application.getId(), new HiringDtos.ScreeningAnswersRequest(answerInputs, null));
         }
 
         notificationService.notifyApplicationSubmitted(candidate, job);

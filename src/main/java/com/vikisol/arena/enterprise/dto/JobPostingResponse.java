@@ -16,6 +16,10 @@ public record JobPostingResponse(
         List<String> skills,
         String description,
         String status,
-        String createdAt
+        String createdAt,
+        // Row 28 (added). Must-haves, nice-to-haves and questions: GET /jobs/{id}/requirements.
+        String workMode,
+        String experienceLevel,
+        String deadline
 ) {
 }

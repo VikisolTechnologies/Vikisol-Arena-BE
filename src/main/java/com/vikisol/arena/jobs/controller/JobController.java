@@ -12,6 +12,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.UUID;
 
 @RestController
@@ -33,6 +34,27 @@ public class JobController {
         var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         UUID viewerId = principal == null ? null : principal.getId();
         return ResponseEntity.ok(ApiResponse.ok(jobService.getOpenJobs(pageable, viewerId)));
+    }
+
+    // Rows 22/41: saved jobs. /jobs/saved is matched before /jobs/{id}.
+    @GetMapping("/saved")
+    public ResponseEntity<ApiResponse<List<JobResponse>>> getSaved(
+            @AuthenticationPrincipal UserPrincipal principal,
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return PageLimits.ok(jobService.getSaved(principal.getId(), PageLimits.of(page, size)));
+    }
+
+    @PostMapping("/{id}/save")
+    public ResponseEntity<ApiResponse<Void>> save(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        jobService.save(principal.getId(), id);
+        return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    @DeleteMapping("/{id}/save")
+    public ResponseEntity<ApiResponse<Void>> unsave(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        jobService.unsave(principal.getId(), id);
+        return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
     @GetMapping("/{id}")

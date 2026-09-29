@@ -58,6 +58,7 @@ public class InterviewService {
     private final ActivityService activityService;
     private final MeetingLinkProvider meetingLinkProvider;
     private final EmailProvider emailProvider;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     // IDOR fix (found via the ARENA-SHIP-IT.md endpoint audit): this previously took no caller
     // identity at all - any authenticated user of any role could read any interview's slots/
@@ -256,6 +257,9 @@ public class InterviewService {
                 .concerns(request.concerns())
                 .recommendation(recommendation)
                 .submittedAt(Instant.now())
+                .mustHavesJson(request.mustHaves() == null ? null : writeJson(request.mustHaves().stream()
+                        .map(m -> new SubmitInterviewFeedbackRequest.MustHaveFeedback(m.item().trim(), m.seen(),
+                                m.note() == null || m.note().isBlank() ? null : m.note().trim())).toList()))
                 .build());
         interview.setStatus(InterviewStatus.COMPLETED);
         interview = interviewRepository.save(interview);
@@ -360,11 +364,29 @@ public class InterviewService {
             return null;
         }
         return new InterviewFeedbackDto(
-                f.getRating() == null ? 0 : f.getRating(),
+                f.getRating(),
                 f.getStrengths(),
                 f.getConcerns(),
                 f.getRecommendation().wireValue(),
-                f.getSubmittedAt() == null ? null : f.getSubmittedAt().toString()
+                f.getSubmittedAt() == null ? null : f.getSubmittedAt().toString(),
+                readMustHaves(f.getMustHavesJson())
         );
+    }
+
+    private java.util.List<SubmitInterviewFeedbackRequest.MustHaveFeedback> readMustHaves(String json) {
+        if (json == null) return null;
+        try {
+            return objectMapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<java.util.List<SubmitInterviewFeedbackRequest.MustHaveFeedback>>() { });
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException("Invalid stored feedback", e);
+        }
+    }
+
+    private String writeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            throw new IllegalStateException(e);
+        }
     }
 }
