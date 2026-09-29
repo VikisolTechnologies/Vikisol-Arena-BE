@@ -287,3 +287,33 @@ fields are absent):
   applicant list was missing that.
 
 Account erasure deletes the career profile.
+
+## Jobs & applications — G22 to G26
+
+**The rules:**
+- Evidence is counted, never scored: "N of M must-haves", with no percentage and no ranking.
+- Every employer endpoint is tenant-checked: anyone on the posting's company team can use it, and
+  nobody else (403).
+- Candidate endpoints only ever touch the caller's own application.
+
+| Gap | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| G22 | `PUT /enterprise/postings/{id}/requirements` | recruiter / company admin | `{ mustHaves: [..], niceToHaves?: [..] }`. Up to 10 each, ≤120 chars, de-duplicated, protected-attribute check. Refused once a candidate has written evidence |
+| G23 | `PUT /enterprise/postings/{id}/screening` | recruiter / company admin | `{ questions: [{ text (≤200), required? }] }`. Up to 5, protected-attribute check. Refused once anyone answered |
+| G22, G23 | `GET /jobs/{id}/requirements` | anyone signed in | `{ mustHaves: [{id,text}], niceToHaves: [{id,text}], screeningQuestions: [{id,text,required}] }` |
+| G24 | `PUT /applications/{id}/screening` | the applicant | `{ answers?: [{ questionId, answer (≤1000) }], evidence?: [{ requirementId, evidence (≤300) }] }`. Only while `applied` or `screening`. An empty answer removes it |
+| G24 | `GET /applications/{id}/screening` | the applicant | `{ answers: [{questionId, question, required, answer}], evidence: [{requirementId, kind, text, candidateEvidence}], requiredUnanswered }`. Never includes the team's assessment |
+| G25 | `GET /enterprise/postings/{id}/funnel` | recruiter / company admin | `{ stages: { applied, screening, interview, offer, hired, rejected }, total }` |
+| G25 | `PUT /enterprise/applicants/{id}/stage` (existing) | recruiter / company admin | Now also accepts `"hired"` |
+| G26 | `GET /enterprise/postings/{id}/evidence` | recruiter / company admin | Candidate-list column: `[{ applicationId, candidateId, name, stage, summary: { mustHaves, withEvidence, met } }]`, newest application first, paged with headers |
+| G26 | `GET /enterprise/applicants/{id}/evidence` | recruiter / company admin | `{ applicationId, stage, checklist: [{ requirementId, kind, text, candidateEvidence, source: "candidate"\|"not_provided", assessment, note }], answers, summary }` |
+| G26 | `PUT /enterprise/applicants/{id}/requirements/{requirementId}` | recruiter / company admin | `{ assessment: "met"\|"partly"\|"not_met"\|"unclear", note? (≤500, team-private) }` |
+
+**Notes:**
+- `withEvidence` counts the must-haves the candidate wrote evidence for.
+- `met` counts the must-haves the team marked `met`.
+- **The Jenny apply path is unchanged.** `POST /applications` still applies with just `{ jobId }`.
+  Screening answers can follow, and `requiredUnanswered` tells the candidate (and the recruiter,
+  through `answers`) what's missing.
+- **⚠ Existing enum widened:** `ApplicationStage` gains `hired`, so any client that switches on
+  stage should handle it. Nothing sets it except a recruiter choosing it.

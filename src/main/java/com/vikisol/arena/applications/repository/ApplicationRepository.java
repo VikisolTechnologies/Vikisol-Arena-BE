@@ -16,6 +16,16 @@ import java.util.UUID;
 public interface ApplicationRepository extends JpaRepository<Application, UUID> {
     Page<Application> findByCandidateId(UUID candidateId, Pageable pageable);
     Page<Application> findByJobPostingId(UUID jobPostingId, Pageable pageable);
+
+    // G25 funnel: applications per stage for one posting.
+    @org.springframework.data.jpa.repository.Query(
+            "select a.stage as stage, count(a) as cnt from Application a where a.jobPosting.id = :postingId group by a.stage")
+    List<StageCount> countByStageForPosting(@org.springframework.data.repository.query.Param("postingId") UUID postingId);
+
+    interface StageCount {
+        com.vikisol.arena.applications.entity.ApplicationStage getStage();
+        long getCnt();
+    }
     Optional<Application> findByCandidateIdAndJobPostingId(UUID candidateId, UUID jobPostingId);
     boolean existsByCandidateIdAndJobPostingId(UUID candidateId, UUID jobPostingId);
     boolean existsByCandidateIdAndJobPostingEnterpriseId(UUID candidateId, UUID enterpriseId);
