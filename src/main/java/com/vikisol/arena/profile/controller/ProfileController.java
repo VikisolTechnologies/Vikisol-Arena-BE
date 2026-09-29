@@ -40,7 +40,8 @@ public class ProfileController {
     }
 
     // Phase C profile revamp - the public/other-user view. {id} is a user id (matches how
-    // Follow/Post already key on user ids everywhere else in this API), not a profile id.
+    // Follow/Post already key on user ids everywhere else in this API); a CandidateProfile id
+    // (what Talent Universe search returns) is also accepted and resolves to the same profile.
     // ARENA-INVENTORY-FIXES.md FIX 1 - overrides the class-level hasRole('TALENT') so a
     // logged-out visitor (or a non-talent role, e.g. a recruiter) can view it; principal is
     // therefore nullable here and profileService.getPublicProfile already treats a null

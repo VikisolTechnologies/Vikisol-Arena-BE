@@ -238,13 +238,18 @@ public class CandidateProfileService {
     }
 
     // ARENA-V2-PRODUCT-ARCHITECTURE.md Phase C profile revamp - the public/other-user view
-    // `/identity` never had at all (see DECISIONS.md). userId here is the PROFILE OWNER's user
-    // id (not the profile id) since that's what Follow/Post already key on everywhere else.
+    // `/identity` never had at all (see DECISIONS.md). The canonical key is the PROFILE OWNER's
+    // user id, since that's what Follow/Post already key on everywhere else. Talent Universe
+    // search, applicants and shortlists hand out the CandidateProfile id instead, so a link built
+    // from those 404'd here - the profile id is accepted as a fallback. The response id is
+    // always the user id either way.
     @Transactional(readOnly = true)
-    public PublicCandidateProfileResponse getPublicProfile(UUID targetUserId, UUID viewingUserId) {
-        CandidateProfile profile = candidateProfileRepository.findByUserId(targetUserId)
+    public PublicCandidateProfileResponse getPublicProfile(UUID userOrProfileId, UUID viewingUserId) {
+        CandidateProfile profile = candidateProfileRepository.findByUserId(userOrProfileId)
+                .or(() -> candidateProfileRepository.findById(userOrProfileId))
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate not found"));
         User user = profile.getUser();
+        UUID targetUserId = user.getId();
         FollowCountsResponse counts = followService.getCounts(targetUserId, viewingUserId);
         String homeCity = profile.getLocationConsent() == LocationConsent.OFF ? null : profile.getHomeCity();
         return new PublicCandidateProfileResponse(
