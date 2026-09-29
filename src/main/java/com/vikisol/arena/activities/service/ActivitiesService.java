@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vikisol.arena.activities.ActivityRules;
 import com.vikisol.arena.activities.dto.ActivityDtos.*;
 import com.vikisol.arena.activities.entity.*;
+import com.vikisol.arena.activities.entity.ActivityCatalogue.*;
 import com.vikisol.arena.activities.repository.*;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
@@ -45,8 +46,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ActivitiesService {
 
-    private static final int MAX_DETAIL_KEYS = 12;
-    private static final int MAX_DETAIL_VALUE = 200;
+    private static final int MAX_TYPE_ANSWERS = 20;
+    private static final int MAX_TEXT_VALUE = 200;
+    private static final int MAX_BRING = 15;
     private static final Set<String> COVER_EXTENSIONS = Set.of(".png", ".jpg", ".jpeg", ".webp");
 
     private final PostRepository postRepository;
@@ -58,6 +60,8 @@ public class ActivitiesService {
     private final ActivityWaitlistRepository waitlistRepository;
     private final ActivityAttendanceRepository attendanceRepository;
     private final ActivityFeedbackRepository feedbackRepository;
+    private final ActivityEmergencyContactRepository emergencyContactRepository;
+    private final ReminderService reminderService;
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
     private final BlockService blockService;
@@ -68,31 +72,82 @@ public class ActivitiesService {
 
     // --- G7/G13: details and cover ---------------------------------------------------------
 
+    // Row 23: POST /posts with `activity` and/or `hostQuestions` creates the post, its details and
+    // its questions in one transaction - all or nothing.
+    @Transactional
+    public com.vikisol.arena.posts.dto.PostResponse create(UUID userId, com.vikisol.arena.posts.dto.CreatePostRequest request) {
+        if (!"activity".equalsIgnoreCase(request.intentType() == null ? "" : request.intentType().trim())) {
+            throw new BadRequestException("Activity details only go with an activity");
+        }
+        com.vikisol.arena.posts.dto.PostResponse created = postService.create(userId, request);
+        UUID postId = UUID.fromString(created.id());
+        if (request.activity() != null) updateDetails(userId, postId, request.activity());
+        if (request.hostQuestions() != null && !request.hostQuestions().isEmpty()) {
+            setQuestions(userId, postId, request.hostQuestions().stream().map(q -> new QuestionInput(q, true)).toList());
+        }
+        return postService.getPost(postId, userId);
+    }
+
     @Transactional(readOnly = true)
     public ActivityResponse get(UUID postId, UUID viewerId) {
         Post post = requireActivity(postId);
         return toResponse(post, viewerId);
     }
 
+    // Flow §3 A1-A4 / row 23. Only the fields sent change; category + subtype the first time.
+    // Price and reach are mirrored onto the post; a women-only label makes it approval-only.
     @Transactional
-    public ActivityResponse updateDetails(UUID hostId, UUID postId, UpdateDetailsRequest request) {
+    public ActivityResponse updateDetails(UUID hostId, UUID postId, UpdateDetailsRequest r) {
         Post post = requireHostedActivity(hostId, postId);
-        ActivityDetails details = detailsRepository.findByPostId(postId).orElse(null);
-        if (details == null) {
-            if (request.kind() == null) throw new BadRequestException("kind is required the first time");
-            details = ActivityDetails.builder().post(post).build();
-        }
-        if (request.kind() != null) {
-            try {
-                details.setKind(ActivityKind.fromWire(request.kind()));
-            } catch (IllegalArgumentException e) {
-                throw new BadRequestException(e.getMessage());
+        ActivityDetails d = detailsRepository.findByPostId(postId).orElse(null);
+        try {
+            if (d == null) {
+                if (r.category() == null || r.subtype() == null) throw new BadRequestException("category and subtype are required the first time");
+                d = ActivityDetails.builder().post(post).build();
             }
+            if (r.category() != null || r.subtype() != null) {
+                Category category = r.category() != null ? ActivityCatalogue.parse(Category.class, r.category(), "category") : d.getCategory();
+                String subtype = (r.subtype() != null ? r.subtype() : d.getSubtype());
+                subtype = subtype == null ? null : subtype.trim().toLowerCase(Locale.ROOT);
+                if (category == Category.OTHER) {
+                    if (subtype == null || subtype.isBlank()) throw new BadRequestException("Say what kind of activity it is");
+                    ProtectedAttributes.reject("the activity type", subtype);
+                } else if (!ActivityCatalogue.SUBTYPES.get(category).contains(subtype)) {
+                    throw new BadRequestException("subtype must be one of " + String.join(", ", ActivityCatalogue.SUBTYPES.get(category)));
+                }
+                d.setCategory(category);
+                d.setSubtype(subtype);
+            }
+            if (r.level() != null) d.setLevel(ActivityCatalogue.parse(Level.class, r.level(), "level"));
+            if (r.cost() != null) {
+                CostType type = ActivityCatalogue.parse(CostType.class, r.cost().type(), "cost.type");
+                if (type == CostType.SHARED && r.cost().perPersonInr() == null) throw new BadRequestException("Say the shared cost per person");
+                d.setCostType(type);
+                d.setPerPersonInr(type == CostType.SHARED ? r.cost().perPersonInr() : null);
+                d.setCostNote(blankToNull(r.cost().note()));
+                ProtectedAttributes.reject("the cost note", d.getCostNote());
+            }
+            if (r.repeat() != null) d.setRepeat(ActivityCatalogue.parse(Repeat.class, r.repeat(), "repeat"));
+            if (r.reach() != null) d.setReach(ActivityCatalogue.parse(Reach.class, r.reach(), "reach"));
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException(e.getMessage());
         }
-        if (request.details() != null) details.setDetailsJson(writeDetails(cleanDetails(details.getKind(), request.details())));
-        else details.setDetailsJson(writeDetails(cleanDetails(details.getKind(), readDetails(details))));
-        if (request.waitlistEnabled() != null) details.setWaitlistEnabled(request.waitlistEnabled());
-        detailsRepository.save(details);
+        if (r.typeAnswers() != null) d.setTypeAnswersJson(writeJson(cleanTypeAnswers(r.typeAnswers())));
+        if (r.bring() != null) d.setBringJson(writeJson(cleanList(r.bring(), MAX_BRING, 60, "what to bring")));
+        if (r.accessibility() != null) d.setAccessibility(blankToNull(r.accessibility()));
+        if (r.indoor() != null) d.setIndoor(r.indoor());
+        if (r.minSize() != null) {
+            if (post.getCapacity() != null && r.minSize() > post.getCapacity()) throw new BadRequestException("The minimum can't be more than the group size");
+            d.setMinSize(r.minSize());
+        }
+        if (r.waitlist() != null) d.setWaitlistEnabled(r.waitlist());
+        if (r.womenOnly() != null) d.setWomenOnly(r.womenOnly());
+        detailsRepository.save(d);
+
+        post.setPriceInr(d.getCostType() == CostType.FREE ? 0 : d.getPerPersonInr());
+        post.setLinkOnly(d.getReach() == Reach.LINK);
+        if (d.isWomenOnly()) post.setVisibility(PostVisibility.APPROVAL);
+        postRepository.save(post);
         return toResponse(post, hostId);
     }
 
@@ -145,10 +200,24 @@ public class ActivitiesService {
 
     // Join with answers. The request itself (capacity, approval, room) is PostService's.
     @Transactional
-    public PostJoinRequestResponse join(UUID userId, UUID postId, List<AnswerInput> answers) {
+    public PostJoinRequestResponse join(UUID userId, UUID postId, JoinRequest request) {
         Post post = requireActivity(postId);
-        saveAnswers(post, requireUser(userId), answers);
-        return postService.requestJoin(userId, postId, true);
+        User user = requireUser(userId);
+        saveAnswers(post, user, request.answers());
+        saveEmergencyContact(post, user, request.emergencyContact());
+        return postService.requestJoin(userId, postId, true, blankToNull(request.note()));
+    }
+
+    // Flow §3 (Trekking): host-only, and only for people who are in.
+    @Transactional(readOnly = true)
+    public List<EmergencyContactResponse> emergencyContacts(UUID hostId, UUID postId) {
+        requireHostedActivity(hostId, postId);
+        Set<UUID> approved = joinRepository.findByPostIdAndStatusOrderByCreatedAtAscIdAsc(postId, PostJoinStatus.APPROVED)
+                .stream().map(j -> j.getUser().getId()).collect(Collectors.toSet());
+        return emergencyContactRepository.findByPostId(postId).stream()
+                .filter(c -> approved.contains(c.getUser().getId()))
+                .map(c -> new EmergencyContactResponse(c.getUser().getId().toString(), c.getUser().getName(), c.getName(), c.getPhone()))
+                .toList();
     }
 
     // Host, or the person who answered.
@@ -164,7 +233,8 @@ public class ActivitiesService {
     // --- G9: waitlist ------------------------------------------------------------------------
 
     @Transactional
-    public ActivityResponse joinWaitlist(UUID userId, UUID postId, List<AnswerInput> answers) {
+    public ActivityResponse joinWaitlist(UUID userId, UUID postId, JoinRequest request) {
+        List<AnswerInput> answers = request == null ? null : request.answers();
         Post post = postRepository.findByIdForUpdate(postId).orElseThrow(() -> notFound(postId));
         requireActivity(post);
         if (isHost(post, userId)) throw new BadRequestException("You're hosting this activity");
@@ -191,6 +261,7 @@ public class ActivitiesService {
         ActivityWaitlistEntry entry = waitlistRepository.findByPostIdAndUserId(postId, userId).orElse(null);
         if (entry != null && entry.getStatus() == WaitlistStatus.WAITING) throw new BadRequestException("You're already on the waitlist");
         saveAnswers(post, user, answers);
+        saveEmergencyContact(post, user, request == null ? null : request.emergencyContact());
         if (entry == null) entry = ActivityWaitlistEntry.builder().post(post).user(user).build();
         entry.setStatus(WaitlistStatus.WAITING);
         entry.setJoinedAt(now);
@@ -247,6 +318,53 @@ public class ActivitiesService {
         return toResponse(post, userId);
     }
 
+    // Flow §3 A12: the host marks who came, from an hour before the start.
+    @Transactional
+    public List<AttendanceRow> hostCheckIn(UUID hostId, UUID postId, UUID joinId) {
+        Post post = requireHostedActivity(hostId, postId);
+        if (post.getStartsAt() != null && Instant.now().isBefore(post.getStartsAt().minus(ActivityRules.CHECK_IN_OPENS_BEFORE))) {
+            throw new BadRequestException("Check-in opens an hour before the start");
+        }
+        PostJoinRequest join = joinRepository.findByIdAndPostId(joinId, postId)
+                .filter(j -> j.getStatus() == PostJoinStatus.APPROVED)
+                .orElseThrow(() -> new BadRequestException("Only people who joined can be checked in"));
+        ActivityAttendance attendance = attendanceFor(join);
+        if (attendance.getCheckedInAt() == null) attendance.setCheckedInAt(Instant.now());
+        if (attendance.getDisputeStatus() == DisputeStatus.OPEN) {
+            attendance.setDisputeStatus(DisputeStatus.ACCEPTED);
+            attendance.setDisputeResolvedAt(Instant.now());
+        }
+        attendance.setOutcomeRecordedAt(Instant.now());
+        attendanceRepository.save(attendance);
+        join.setOutcome(PostJoinOutcome.ATTENDED);
+        joinRepository.save(join);
+        return attendance(hostId, postId);
+    }
+
+    // Flow §3 A13 / row 25: after the activity the joiner confirms. Saying they came when the host
+    // marked them absent opens the 72h dispute (a reason is required).
+    @Transactional
+    public ActivityResponse confirmAttendance(UUID userId, UUID postId, ConfirmAttendanceRequest request) {
+        Post post = requireActivity(postId);
+        if (post.getStartsAt() == null || post.getStartsAt().isAfter(Instant.now())) {
+            throw new BadRequestException("You can confirm once the activity has started");
+        }
+        PostJoinRequest join = joinRepository.findByPostIdAndUserId(postId, userId)
+                .filter(j -> j.getStatus() == PostJoinStatus.APPROVED)
+                .orElseThrow(() -> new BadRequestException("Only people who joined can confirm attendance"));
+        if (request.attended() && join.getOutcome() == PostJoinOutcome.NO_SHOW) {
+            if (request.dispute() == null || request.dispute().isBlank()) {
+                throw new BadRequestException("The host marked you absent. Tell them what happened to dispute it.");
+            }
+            dispute(userId, postId, request.dispute());
+        }
+        ActivityAttendance attendance = attendanceFor(join);
+        attendance.setJoinerAttended(request.attended());
+        attendance.setJoinerConfirmedAt(Instant.now());
+        attendanceRepository.save(attendance);
+        return toResponse(post, userId);
+    }
+
     // --- G11: attendance and the 72h dispute --------------------------------------------------
 
     // Host-only. Attendance is private: nobody else sees who was marked present or absent.
@@ -265,6 +383,7 @@ public class ActivitiesService {
                     a == null || a.getCheckedInAt() == null ? null : a.getCheckedInAt().toString(),
                     j.getOutcome() == null ? null : j.getOutcome().wireValue(),
                     a == null || a.getOutcomeRecordedAt() == null ? null : a.getOutcomeRecordedAt().toString(),
+                    a == null ? null : a.getJoinerAttended(),
                     a == null ? DisputeStatus.NONE.wireValue() : a.getDisputeStatus().wireValue(),
                     a == null ? null : a.getDisputeReason());
         }).toList();
@@ -312,22 +431,25 @@ public class ActivitiesService {
 
     // --- G12: private feedback ---------------------------------------------------------------
 
-    // Host -> someone who joined, or someone who joined -> host. One note per pair, editable.
+    // Flow §3 A14: "Would you join again?" + an optional note. A joiner's feedback goes to the
+    // host; the host names the joiner. One per pair, editable. Private; never a public rating.
     @Transactional
-    public FeedbackResponse giveFeedback(UUID fromId, UUID postId, UUID toId, String text) {
+    public FeedbackResponse giveFeedback(UUID fromId, UUID postId, FeedbackRequest request) {
         Post post = requireActivity(postId);
+        UUID hostId = post.getAuthorUser().getId();
+        UUID toId = request.toUserId() != null ? request.toUserId() : hostId;
         if (fromId.equals(toId)) throw new BadRequestException("You can't leave feedback for yourself");
         if (post.getStartsAt() == null || post.getStartsAt().isAfter(Instant.now())) {
             throw new BadRequestException("Feedback opens once the activity has started");
         }
-        UUID hostId = post.getAuthorUser().getId();
         boolean allowed = (fromId.equals(hostId) && joined(postId, toId)) || (toId.equals(hostId) && joined(postId, fromId));
         if (!allowed) throw new AccessDeniedException("Feedback is only between the host and people who joined");
         User from = requireUser(fromId), to = requireUser(toId);
         ActivityFeedback feedback = feedbackRepository.findByPostIdAndFromUserIdAndToUserId(postId, fromId, toId)
                 .orElseGet(() -> ActivityFeedback.builder().post(post).fromUser(from).toUser(to).build());
         boolean isNew = feedback.getId() == null;
-        feedback.setText(text.trim());
+        feedback.setJoinAgain(request.joinAgain());
+        feedback.setText(blankToNull(request.note()));
         feedback = feedbackRepository.save(feedback);
         if (isNew) {
             notificationService.notifySystem(to, "Private feedback", from.getName() + " left you private feedback about an activity.");
@@ -365,17 +487,27 @@ public class ActivitiesService {
     }
 
     private ActivityResponse toResponse(Post post, UUID viewerId) {
-        ActivityDetails details = detailsRepository.findByPostId(post.getId()).orElse(null);
+        ActivityDetails d = detailsRepository.findByPostId(post.getId()).orElse(null);
         List<QuestionResponse> questions = questionRepository.findByPostIdOrderByPositionAsc(post.getId()).stream()
                 .map(q -> new QuestionResponse(q.getId().toString(), q.getText(), q.isRequired())).toList();
         Integer spotsLeft = post.getCapacity() == null ? null : Math.max(0, post.getCapacity() - post.getSpotsFilled());
         long waiting = waitlistRepository.countByPostIdAndStatus(post.getId(), WaitlistStatus.WAITING);
-        return new ActivityResponse(post.getId().toString(),
-                details == null ? null : details.getKind().wireValue(),
-                details == null ? Map.of() : readDetails(details),
-                details == null ? null : fileSigningService.sign(details.getCoverUrl()),
-                details == null || details.isWaitlistEnabled(),
-                questions, spotsLeft, waiting, viewerId == null ? null : viewerState(post, viewerId, !questions.isEmpty()));
+        ViewerState viewer = viewerId == null ? null : viewerState(post, viewerId, !questions.isEmpty());
+        if (d == null) {
+            return new ActivityResponse(post.getId().toString(), null, null, null, null, Map.of(), List.of(), null, null, null,
+                    true, ActivityCatalogue.wire(Repeat.ONCE), false, ActivityCatalogue.wire(Reach.NEARBY), null, false,
+                    questions, spotsLeft, waiting, viewer);
+        }
+        return new ActivityResponse(post.getId().toString(), ActivityCatalogue.wire(d.getCategory()), d.getSubtype(),
+                ActivityCatalogue.wire(d.getLevel()),
+                new Cost(ActivityCatalogue.wire(d.getCostType()), d.getPerPersonInr(), d.getCostNote()),
+                readJson(d.getTypeAnswersJson(), new TypeReference<LinkedHashMap<String, Object>>() { }),
+                readJson(d.getBringJson(), new TypeReference<List<String>>() { }),
+                d.getAccessibility(), d.getIndoor(), d.getMinSize(), d.isWaitlistEnabled(),
+                ActivityCatalogue.wire(d.getRepeat()), d.isWomenOnly(), ActivityCatalogue.wire(d.getReach()),
+                fileSigningService.sign(d.getCoverUrl()),
+                ActivityCatalogue.NEEDS_EMERGENCY_CONTACT.contains(d.getSubtype()),
+                questions, spotsLeft, waiting, viewer);
     }
 
     private ViewerState viewerState(Post post, UUID viewerId, boolean hasQuestions) {
@@ -398,41 +530,84 @@ public class ActivitiesService {
                 position, answered,
                 attendance == null || attendance.getCheckedInAt() == null ? null : attendance.getCheckedInAt().toString(),
                 join == null || join.getOutcome() == null ? null : join.getOutcome().wireValue(),
+                attendance == null ? null : attendance.getJoinerAttended(),
                 attendance == null ? null : attendance.getDisputeStatus().wireValue(),
-                disputeOpenUntil);
+                disputeOpenUntil, reminderService.mine(viewerId, post.getId()));
     }
 
-    private Map<String, String> cleanDetails(ActivityKind kind, Map<String, String> raw) {
-        LinkedHashMap<String, String> out = new LinkedHashMap<>();
-        for (Map.Entry<String, String> e : raw.entrySet()) {
+    // Type-specific answers: {key: text | number | yes/no | list of short texts}. Free text is
+    // checked for protected attributes like every other host-written field.
+    private Map<String, Object> cleanTypeAnswers(Map<String, Object> raw) {
+        LinkedHashMap<String, Object> out = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> e : raw.entrySet()) {
             String key = e.getKey() == null ? "" : e.getKey().trim();
-            String value = e.getValue() == null ? "" : e.getValue().trim();
-            if (value.isEmpty()) continue;
-            if (!kind.accepts(key)) {
-                throw new BadRequestException("'" + key + "' isn't a detail for a " + kind.wireValue() + " activity");
+            if (key.isEmpty() || key.length() > 40 || !key.matches("[A-Za-z][A-Za-z0-9_]*")) {
+                throw new BadRequestException("'" + key + "' isn't a valid answer key");
             }
-            if (value.length() > MAX_DETAIL_VALUE) throw new BadRequestException("'" + key + "' can be at most " + MAX_DETAIL_VALUE + " characters");
-            ProtectedAttributes.reject("the activity details", value);
-            out.put(key, value);
+            ProtectedAttributes.reject("the activity details", key.replace('_', ' '));
+            Object v = e.getValue();
+            if (v == null) continue;
+            if (v instanceof String str) {
+                String t = str.trim();
+                if (t.isEmpty()) continue;
+                if (t.length() > MAX_TEXT_VALUE) throw new BadRequestException("'" + key + "' can be at most " + MAX_TEXT_VALUE + " characters");
+                ProtectedAttributes.reject("the activity details", t);
+                out.put(key, t);
+            } else if (v instanceof Number || v instanceof Boolean) {
+                out.put(key, v);
+            } else if (v instanceof List<?> list) {
+                out.put(key, cleanList(list.stream().map(o -> o == null ? "" : o.toString()).toList(), 10, 60, "'" + key + "'"));
+            } else {
+                throw new BadRequestException("'" + key + "' must be text, a number, yes/no or a list");
+            }
         }
-        if (out.size() > MAX_DETAIL_KEYS) throw new BadRequestException("Too many details");
+        if (out.size() > MAX_TYPE_ANSWERS) throw new BadRequestException("Too many details");
         return out;
     }
 
-    private Map<String, String> readDetails(ActivityDetails details) {
+    private static List<String> cleanList(List<String> raw, int maxItems, int maxLength, String label) {
+        List<String> out = new ArrayList<>();
+        for (String item : raw) {
+            String t = item == null ? "" : item.trim();
+            if (t.isEmpty()) continue;
+            if (t.length() > maxLength) throw new BadRequestException("Each item in " + label + " can be at most " + maxLength + " characters");
+            ProtectedAttributes.reject("the activity details", t);
+            if (!out.contains(t)) out.add(t);
+        }
+        if (out.size() > maxItems) throw new BadRequestException(label + " can have at most " + maxItems + " items");
+        return out;
+    }
+
+    private void saveEmergencyContact(Post post, User user, EmergencyContactInput contact) {
+        boolean needed = detailsRepository.findByPostId(post.getId())
+                .map(d -> ActivityCatalogue.NEEDS_EMERGENCY_CONTACT.contains(d.getSubtype())).orElse(false);
+        if (!needed) return;
+        if (contact == null) throw new BadRequestException("Add an emergency contact. Only the host sees it, and it's deleted after the trek.");
+        ActivityEmergencyContact row = emergencyContactRepository.findByPostIdAndUserId(post.getId(), user.getId())
+                .orElseGet(() -> ActivityEmergencyContact.builder().post(post).user(user).build());
+        row.setName(contact.name().trim());
+        row.setPhone(contact.phone().trim());
+        emergencyContactRepository.save(row);
+    }
+
+    private <T> T readJson(String json, TypeReference<T> type) {
         try {
-            return objectMapper.readValue(details.getDetailsJson(), new TypeReference<LinkedHashMap<String, String>>() { });
+            return objectMapper.readValue(json, type);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Invalid stored activity details", e);
         }
     }
 
-    private String writeDetails(Map<String, String> details) {
+    private String writeJson(Object value) {
         try {
-            return objectMapper.writeValueAsString(details);
+            return objectMapper.writeValueAsString(value);
         } catch (JsonProcessingException e) {
             throw new IllegalStateException("Could not store activity details", e);
         }
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 
     private ActivityDetails requireDetails(Post post) {
@@ -454,7 +629,7 @@ public class ActivitiesService {
         String activity = post.getTitle() != null ? post.getTitle()
                 : (post.getBody().length() > 60 ? post.getBody().substring(0, 60) + "…" : post.getBody());
         return new FeedbackResponse(f.getId().toString(), post.getId().toString(), activity,
-                f.getFromUser().getId().toString(), f.getFromUser().getName(), f.getText(), f.getCreatedAt().toString());
+                f.getFromUser().getId().toString(), f.getFromUser().getName(), f.getJoinAgain(), f.getText(), f.getCreatedAt().toString());
     }
 
     private Post requireActivity(UUID postId) {

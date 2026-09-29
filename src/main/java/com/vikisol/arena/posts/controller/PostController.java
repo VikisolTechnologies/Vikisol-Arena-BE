@@ -32,6 +32,7 @@ import java.util.UUID;
 public class PostController {
 
     private final PostService postService;
+    private final com.vikisol.arena.activities.service.ActivitiesService activitiesService;
     private final PostCommentService postCommentService;
     private final PostReactionService postReactionService;
     private final ModerationService moderationService;
@@ -148,7 +149,10 @@ public class PostController {
     @PostMapping
     public ResponseEntity<ApiResponse<PostResponse>> create(
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody CreatePostRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok("Post published", postService.create(principal.getId(), request)));
+        boolean withActivity = request.activity() != null || (request.hostQuestions() != null && !request.hostQuestions().isEmpty());
+        return ResponseEntity.ok(ApiResponse.ok("Post published", withActivity
+                ? activitiesService.create(principal.getId(), request)
+                : postService.create(principal.getId(), request)));
     }
 
     @PutMapping("/{id}/cancel")
@@ -181,8 +185,13 @@ public class PostController {
 
     @PutMapping("/{id}/joins/{joinId}/approve")
     public ResponseEntity<ApiResponse<PostJoinRequestResponse>> approveJoin(
-            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, true)));
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId,
+            @Valid @RequestBody(required = false) DecisionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, true, request == null ? null : request.note())));
+    }
+
+    // Row 23 (optional body): the host's note to the joiner with the decision.
+    public record DecisionRequest(@jakarta.validation.constraints.Size(max = 280, message = "must be at most 280 characters") String note) {
     }
 
     @DeleteMapping("/{id}/joins/me")
@@ -202,8 +211,9 @@ public class PostController {
 
     @PutMapping("/{id}/joins/{joinId}/decline")
     public ResponseEntity<ApiResponse<PostJoinRequestResponse>> declineJoin(
-            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, false)));
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId,
+            @Valid @RequestBody(required = false) DecisionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, false, request == null ? null : request.note())));
     }
 
     // ARENA-V2-PRODUCT-ARCHITECTURE.md Phase C - comments/reactions.

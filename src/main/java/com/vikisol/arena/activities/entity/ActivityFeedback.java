@@ -29,6 +29,9 @@ public class ActivityFeedback extends BaseEntity {
     @JoinColumn(name = "to_user_id", nullable = false)
     private User toUser;
 
-    @Column(nullable = false, length = 500)
+    // Flow §3 A14: "Would you join again?" plus an optional note. No stars, never public.
+    private Boolean joinAgain;
+
+    @Column(length = 500)
     private String text;
 }

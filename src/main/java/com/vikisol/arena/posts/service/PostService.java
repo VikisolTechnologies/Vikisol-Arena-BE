@@ -69,6 +69,7 @@ public class PostService {
     private final com.vikisol.arena.activities.repository.ActivityQuestionRepository activityQuestionRepository;
     private final com.vikisol.arena.activities.repository.ActivityWaitlistRepository activityWaitlistRepository;
     private final com.vikisol.arena.activities.repository.ActivityAttendanceRepository activityAttendanceRepository;
+    private final com.vikisol.arena.activities.service.ReminderService reminderService;
     private final PostJoinRequestRepository postJoinRequestRepository;
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
@@ -179,6 +180,8 @@ public class PostService {
                 .filter(p -> p.getStatus() != PostStatus.CANCELLED)
                 // An anonymous post never appears on its author's profile for anyone else.
                 .filter(p -> isSelf || !p.isAnonymous())
+                // A link-only activity isn't listed on the host's profile either.
+                .filter(p -> isSelf || !p.isLinkOnly())
                 .filter(p -> isSelf || p.getAudience() == PostAudience.GLOBAL
                         || (p.getAudience() == PostAudience.FOLLOWERS && viewerFollowsTarget))
                 .toList();
@@ -498,14 +501,14 @@ public class PostService {
 
     @Transactional
     public PostJoinRequestResponse requestJoin(UUID userId, UUID postId) {
-        return requestJoin(userId, postId, false);
+        return requestJoin(userId, postId, false, null);
     }
 
     // ActivitiesService.join saves the answers to the host's questions first, then calls this with
     // answersSaved = true. The plain POST /posts/{id}/joins can't carry answers, so it is refused
     // for an activity whose host asks a required question (G8).
     @Transactional
-    public PostJoinRequestResponse requestJoin(UUID userId, UUID postId, boolean answersSaved) {
+    public PostJoinRequestResponse requestJoin(UUID userId, UUID postId, boolean answersSaved, String note) {
         Post post = requireLockedPost(postId);
         if (!post.isJoinable()) {
             throw new BadRequestException("This post doesn't accept join requests");
@@ -538,6 +541,8 @@ public class PostService {
         PostJoinRequest joinRequest = existing != null ? existing : PostJoinRequest.builder().post(post).user(user).build();
         joinRequest.setStatus(autoApprove ? PostJoinStatus.APPROVED : PostJoinStatus.PENDING);
         joinRequest.setDecidedAt(autoApprove ? Instant.now() : null);
+        joinRequest.setNote(note);
+        joinRequest.setDecisionNote(null);
         joinRequest = postJoinRequestRepository.save(joinRequest);
         // Got in (or asked) directly: any place they held in the queue is used up.
         activityWaitlistRepository.findByPostIdAndUserId(postId, userId)
@@ -558,6 +563,12 @@ public class PostService {
 
     @Transactional
     public PostJoinRequestResponse decideJoin(UUID userId, UUID postId, UUID joinRequestId, boolean approve) {
+        return decideJoin(userId, postId, joinRequestId, approve, null);
+    }
+
+    // Row 23: the host can add a note to the decision; the joiner sees it with the result.
+    @Transactional
+    public PostJoinRequestResponse decideJoin(UUID userId, UUID postId, UUID joinRequestId, boolean approve, String note) {
         Post post = requireLockedPost(postId);
         if (!post.getAuthorUser().getId().equals(userId)) {
             throw new AccessDeniedException("Not your post");
@@ -581,12 +592,16 @@ public class PostService {
         }
 
         joinRequest.setStatus(approve ? PostJoinStatus.APPROVED : PostJoinStatus.DECLINED);
+        joinRequest.setDecisionNote(note == null || note.isBlank() ? null : note.trim());
         joinRequest.setDecidedAt(Instant.now());
         postJoinRequestRepository.save(joinRequest);
 
         if (approve) {
             onJoinApproved(post, joinRequest);
         } else {
+            if (joinRequest.getDecisionNote() != null) {
+                notificationService.notifySystem(joinRequest.getUser(), "A note from the host", joinRequest.getDecisionNote());
+            }
             notificationService.notifyPostJoinDeclined(joinRequest);
         }
         return mapper.toResponse(joinRequest);
@@ -679,6 +694,7 @@ public class PostService {
         postRepository.save(post);
 
         notificationService.notifyPostJoinApproved(joinRequest);
+        if (post.getIntentType() == PostIntentType.ACTIVITY) reminderService.addDefaults(post, joinRequest.getUser());
     }
 
     // G9: a spot opened (someone who had joined left). The first eligible person in the queue
@@ -730,9 +746,14 @@ public class PostService {
         }
     }
 
+    // Every discovery list (feed, trending, discussions, search, nearby) goes through here: no
+    // blocked people, and no link-only activity (row 23 reach "link") unless it's the viewer's own.
     private List<Post> excludeBlocked(List<Post> posts, UUID viewingUserId) {
-        if (viewingUserId == null || posts.isEmpty()) return posts;
-        return posts.stream().filter(p -> !blockService.isBlockedEitherDirection(viewingUserId, p.getAuthorUser().getId())).toList();
+        if (posts.isEmpty()) return posts;
+        List<Post> discoverable = posts.stream()
+                .filter(p -> !p.isLinkOnly() || p.getAuthorUser().getId().equals(viewingUserId)).toList();
+        if (viewingUserId == null) return discoverable;
+        return discoverable.stream().filter(p -> !blockService.isBlockedEitherDirection(viewingUserId, p.getAuthorUser().getId())).toList();
     }
 
     private String myJoinStatus(Post post, UUID viewingUserId) {

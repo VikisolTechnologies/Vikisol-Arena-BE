@@ -37,4 +37,12 @@ public class PostJoinRequest extends BaseEntity {
     @Enumerated(EnumType.STRING)
     @Column(length = 32)
     private PostJoinOutcome outcome;
+
+    // V30, FE-API-GAPS row 23: the joiner's note with the request, and the host's note with the
+    // decision. Seen only by the two of them.
+    @Column(length = 280)
+    private String note;
+
+    @Column(length = 280)
+    private String decisionNote;
 }

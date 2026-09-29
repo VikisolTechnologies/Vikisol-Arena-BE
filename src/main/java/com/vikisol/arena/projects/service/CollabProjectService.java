@@ -90,7 +90,7 @@ public class CollabProjectService {
         } else if (!roles.isEmpty()) {
             throw new BadRequestException("Pick the role you'd like to take");
         }
-        PostJoinRequestResponse joined = postService.requestJoin(userId, postId, true);
+        PostJoinRequestResponse joined = postService.requestJoin(userId, postId, true, null);
         ProjectMember member = memberRepository.findByPostIdAndUserId(postId, userId)
                 .orElseGet(() -> ProjectMember.builder().post(post).user(userRepository.getReferenceById(userId)).build());
         member.setRole(role);

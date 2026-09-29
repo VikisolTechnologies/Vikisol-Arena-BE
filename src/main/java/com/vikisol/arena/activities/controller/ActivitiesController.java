@@ -1,7 +1,7 @@
 package com.vikisol.arena.activities.controller;
 
 import com.vikisol.arena.activities.dto.ActivityDtos.*;
-import com.vikisol.arena.activities.entity.ActivityKind;
+import com.vikisol.arena.activities.entity.ActivityCatalogue;
 import com.vikisol.arena.activities.service.ActivitiesService;
 import com.vikisol.arena.common.dto.ApiResponse;
 import com.vikisol.arena.common.dto.PageLimits;
@@ -32,8 +32,8 @@ public class ActivitiesController {
 
     @PreAuthorize("permitAll()")
     @GetMapping("/kinds")
-    public ResponseEntity<ApiResponse<Map<String, Set<String>>>> kinds() {
-        return ResponseEntity.ok(ApiResponse.ok(ActivityKind.catalogue()));
+    public ResponseEntity<ApiResponse<Map<String, List<String>>>> kinds() {
+        return ResponseEntity.ok(ApiResponse.ok(ActivityCatalogue.catalogue()));
     }
 
     @PreAuthorize("permitAll()")
@@ -44,7 +44,7 @@ public class ActivitiesController {
 
     @PutMapping("/{id}/details")
     public ResponseEntity<ApiResponse<ActivityResponse>> updateDetails(
-            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @RequestBody UpdateDetailsRequest request) {
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody UpdateDetailsRequest request) {
         return ResponseEntity.ok(ApiResponse.ok(activitiesService.updateDetails(principal.getId(), id, request)));
     }
 
@@ -68,7 +68,7 @@ public class ActivitiesController {
     @PostMapping("/{id}/join")
     public ResponseEntity<ApiResponse<PostJoinRequestResponse>> join(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody JoinRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(activitiesService.join(principal.getId(), id, request.answers())));
+        return ResponseEntity.ok(ApiResponse.ok(activitiesService.join(principal.getId(), id, request)));
     }
 
     @GetMapping("/{id}/answers/{userId}")
@@ -80,7 +80,7 @@ public class ActivitiesController {
     @PostMapping("/{id}/waitlist")
     public ResponseEntity<ApiResponse<ActivityResponse>> joinWaitlist(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody(required = false) JoinRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(activitiesService.joinWaitlist(principal.getId(), id, request == null ? null : request.answers())));
+        return ResponseEntity.ok(ApiResponse.ok(activitiesService.joinWaitlist(principal.getId(), id, request)));
     }
 
     @DeleteMapping("/{id}/waitlist")
@@ -118,8 +118,30 @@ public class ActivitiesController {
     @PostMapping("/{id}/feedback")
     public ResponseEntity<ApiResponse<FeedbackResponse>> giveFeedback(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody FeedbackRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(activitiesService.giveFeedback(principal.getId(), id, request.toUserId(), request.text())));
+        return ResponseEntity.ok(ApiResponse.ok(activitiesService.giveFeedback(principal.getId(), id, request)));
     }
+
+    // Flow §3 A12: the host marks who came.
+    @PutMapping("/{id}/attendance/{joinId}/check-in")
+    public ResponseEntity<ApiResponse<List<AttendanceRow>>> hostCheckIn(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId) {
+        return ResponseEntity.ok(ApiResponse.ok(activitiesService.hostCheckIn(principal.getId(), id, joinId)));
+    }
+
+    // Flow §3 A13 / row 25: the joiner confirms (or disputes) attendance.
+    @PostMapping("/{id}/attendance/confirm")
+    public ResponseEntity<ApiResponse<ActivityResponse>> confirmAttendance(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody ConfirmAttendanceRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(activitiesService.confirmAttendance(principal.getId(), id, request)));
+    }
+
+    // Flow §3 (Trekking): host-only, approved joiners only.
+    @GetMapping("/{id}/emergency-contacts")
+    public ResponseEntity<ApiResponse<List<EmergencyContactResponse>>> emergencyContacts(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(activitiesService.emergencyContacts(principal.getId(), id)));
+    }
+
 
     @GetMapping("/feedback/received")
     public ResponseEntity<ApiResponse<List<FeedbackResponse>>> receivedFeedback(

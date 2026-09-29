@@ -37,4 +37,9 @@ public class ActivityAttendance extends BaseEntity {
     private Instant disputedAt;
 
     private Instant disputeResolvedAt;
+
+    // Flow §3 A13 / row 25: the joiner's own confirmation after the activity.
+    private Boolean joinerAttended;
+
+    private Instant joinerConfirmedAt;
 }

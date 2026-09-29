@@ -74,16 +74,17 @@ class ActivityFlowTest extends EmbeddedPostgresAppTest {
     void hostSetsTypedDetailsAndCoverEveryoneCanRead() throws Exception {
         Post run = activity(null, PostVisibility.PUBLIC, Instant.now().plus(2, ChronoUnit.DAYS));
         call(host, put("/activities/" + run.getId() + "/details"),
-                "{\"kind\":\"fitness\",\"details\":{\"distance\":\"5 km\",\"pace\":\"easy\",\"level\":\"All levels\"}}")
+                "{\"category\":\"fitness\",\"subtype\":\"running\",\"level\":\"all\",\"cost\":{\"type\":\"free\"},"
+                        + "\"typeAnswers\":{\"distance\":\"5 km\",\"pace\":\"easy\"}}")
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.kind").value("fitness"))
-                .andExpect(jsonPath("$.data.details.distance").value("5 km"));
-        // A key that isn't for this kind, and protected-attribute wording, are refused.
-        call(host, put("/activities/" + run.getId() + "/details"), "{\"details\":{\"subject\":\"Maths\"}}")
+                .andExpect(jsonPath("$.data.category").value("fitness"))
+                .andExpect(jsonPath("$.data.typeAnswers.distance").value("5 km"));
+        // A subtype that isn't in the category, and protected-attribute wording, are refused.
+        call(host, put("/activities/" + run.getId() + "/details"), "{\"subtype\":\"cricket\"}")
                 .andExpect(status().isBadRequest());
-        call(host, put("/activities/" + run.getId() + "/details"), "{\"details\":{\"level\":\"Women only\"}}")
+        call(host, put("/activities/" + run.getId() + "/details"), "{\"typeAnswers\":{\"pace\":\"Women only\"}}")
                 .andExpect(status().isBadRequest());
-        call(asha, put("/activities/" + run.getId() + "/details"), "{\"kind\":\"sport\"}")
+        call(asha, put("/activities/" + run.getId() + "/details"), "{\"category\":\"sports\",\"subtype\":\"cricket\"}")
                 .andExpect(status().isForbidden());
 
         mvc.perform(multipart("/activities/" + run.getId() + "/cover").file(new MockMultipartFile("file", "c.png", "image/png", PNG))
@@ -97,9 +98,9 @@ class ActivityFlowTest extends EmbeddedPostgresAppTest {
         // A guest reads the activity page; there is no viewer block.
         mvc.perform(get("/activities/" + run.getId()))
                 .andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.details.pace").value("easy"))
+                .andExpect(jsonPath("$.data.typeAnswers.pace").value("easy"))
                 .andExpect(jsonPath("$.data.viewer").doesNotExist());
-        mvc.perform(get("/activities/kinds")).andExpect(status().isOk()).andExpect(jsonPath("$.data.sport").isArray());
+        mvc.perform(get("/activities/kinds")).andExpect(status().isOk()).andExpect(jsonPath("$.data.sports[0]").value("cricket"));
     }
 
     // --- G8 host questions ---
@@ -242,20 +243,20 @@ class ActivityFlowTest extends EmbeddedPostgresAppTest {
         Post meetup = activity(null, PostVisibility.PUBLIC, Instant.now().plus(1, ChronoUnit.HOURS));
         call(asha, post("/posts/" + meetup.getId() + "/joins"), null);
         call(ravi, post("/posts/" + meetup.getId() + "/joins"), null);
-        String toAsha = "{\"toUserId\":\"" + asha.getId() + "\",\"text\":\"Great energy, thanks for coming!\"}";
+        String toAsha = "{\"toUserId\":\"" + asha.getId() + "\",\"joinAgain\":true,\"note\":\"Great energy, thanks for coming!\"}";
         call(host, post("/activities/" + meetup.getId() + "/feedback"), toAsha).andExpect(status().isBadRequest()); // not started
         started(meetup);
 
         call(host, post("/activities/" + meetup.getId() + "/feedback"), toAsha).andExpect(status().isOk());
-        call(asha, post("/activities/" + meetup.getId() + "/feedback"),
-                "{\"toUserId\":\"" + host.getId() + "\",\"text\":\"Well organised\"}").andExpect(status().isOk());
+        call(asha, post("/activities/" + meetup.getId() + "/feedback"), "{\"joinAgain\":true}").andExpect(status().isOk()); // to the host by default
         call(ravi, post("/activities/" + meetup.getId() + "/feedback"), toAsha).andExpect(status().isForbidden());
         call(meera, post("/activities/" + meetup.getId() + "/feedback"),
-                "{\"toUserId\":\"" + host.getId() + "\",\"text\":\"x\"}").andExpect(status().isForbidden());
+                "{\"joinAgain\":false}").andExpect(status().isForbidden());
 
         call(asha, get("/activities/feedback/received"), null)
                 .andExpect(jsonPath("$.data.length()").value(1))
-                .andExpect(jsonPath("$.data[0].text").value("Great energy, thanks for coming!"));
+                .andExpect(jsonPath("$.data[0].joinAgain").value(true))
+                .andExpect(jsonPath("$.data[0].note").value("Great energy, thanks for coming!"));
         call(ravi, get("/activities/feedback/received"), null).andExpect(jsonPath("$.data.length()").value(0));
     }
 

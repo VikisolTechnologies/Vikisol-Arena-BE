@@ -199,7 +199,9 @@ public class PostMapper {
                 post.getCommunity() == null ? null : post.getCommunity().getSlug(),
                 post.getCommunity() == null ? null : post.getCommunity().getName(),
                 post.getCommunity() == null ? null : post.getCommunity().getEmoji(),
-                post.isAnonymous()
+                post.isAnonymous(),
+                post.getPriceInr(),
+                post.isAnonymous() && !mine ? null : post.getAuthorUser().getVerificationLevel().wireValue()
         );
     }
 
@@ -218,7 +220,8 @@ public class PostMapper {
                 joinRequest.getId().toString(), joinRequest.getPost().getId().toString(),
                 joinRequest.getUser().getId().toString(), userName, userEmoji,
                 joinRequest.getStatus().wireValue(), joinRequest.getCreatedAt().toString(),
-                joinRequest.getOutcome() == null ? null : joinRequest.getOutcome().wireValue());
+                joinRequest.getOutcome() == null ? null : joinRequest.getOutcome().wireValue(),
+                joinRequest.getNote(), joinRequest.getDecisionNote());
     }
 
     // Batched: one profile IN-query for the whole list instead of one findByUserId() per request.

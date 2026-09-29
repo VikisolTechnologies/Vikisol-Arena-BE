@@ -140,6 +140,14 @@ public class Post extends BaseEntity {
     @Builder.Default
     private boolean anonymous = false;
 
+    // V30, rows 8 and 23: mirrored from the activity's cost and reach (ActivitiesService is the
+    // only writer) so lists need no extra query. priceInr: 0 = free, n = shared cost per person.
+    private Integer priceInr;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean linkOnly = false;
+
     // An anonymous post can't be "joined": joining creates a Room hosted by the author, which
     // would reveal who they are.
     public boolean isJoinable() {

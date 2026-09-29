@@ -143,30 +143,43 @@ only talent can host or join.
 
 | Gap | Endpoint | Who | Body / notes |
 |---|---|---|---|
-| G7 | `GET /activities/kinds` | anyone | `{ kind: [type-specific keys] }` catalogue for the form |
+| G7 | `GET /activities/kinds` | anyone | `{ category: [subtypes] }` catalogue (flow §3 A1): `sports, fitness, outdoors, learning, arts, games, food, community, other`. `other` has no list and takes a free-text subtype |
 | G7 | `GET /activities/{id}` | anyone (guest too) | `Activity` below; `viewer` only when signed in |
-| G7 | `PUT /activities/{id}/details` | host | `{ kind?, details?: { key: value }, waitlistEnabled? }`. `kind` is required the first time. Keys: common `level, cost, bring, accessibility, language`, plus per kind (`sport`: sport, format, equipment; `fitness`: activity, pace, distance; `study`: subject, format; `meetup`: theme; `workshop`: topic, materials; `collaboration`: skillsNeeded, commitment; `volunteer`: cause, requirements). Values ≤200 chars, up to 12 keys; an empty value removes the key |
+| G7 | `PUT /activities/{id}/details` | host | `UpdateDetails` below. `category` and `subtype` are required the first time; every other field is optional and only changes when sent |
 | G13 | `POST /activities/{id}/cover` | host | multipart `file` (PNG/JPG/WebP). Needs `details` first |
 | G13 | `DELETE /activities/{id}/cover` | host | |
 | G8 | `PUT /activities/{id}/questions` | host | `{ questions: [{ text (≤200), required? (default true) }] }`, at most 3. Refused once anyone has answered |
-| G8 | `POST /activities/{id}/join` | talent | `{ answers: [{ questionId, answer (≤500) }] }` → the same `PostJoinRequest` body as `POST /posts/{id}/joins` |
+| G8 | `POST /activities/{id}/join` | talent | `{ answers?: [{ questionId, answer (≤500) }], note? (≤280), emergencyContact?: { name (≤80), phone } }` → the same `PostJoinRequest` body as `POST /posts/{id}/joins`. `emergencyContact` is required for a trek |
 | G8 | `GET /activities/{id}/answers/{userId}` | host, or that user | `[{ questionId, question, answer }]` |
-| G9 | `POST /activities/{id}/waitlist` | talent | Optional `{ answers }`. Only when the activity is full; 400 "There are still spots" otherwise |
+| G9 | `POST /activities/{id}/waitlist` | talent | Optional `{ answers, note, emergencyContact }` (same as join). Only when the activity is full; 400 "There are still spots" otherwise |
 | G9 | `DELETE /activities/{id}/waitlist` | the waiting person | |
 | G9 | `GET /activities/{id}/waitlist` | host | `[{ userId, name, avatarEmoji, position, joinedAt }]` in queue order |
 | G10 | `POST /activities/{id}/check-in` | someone who joined | Opens 1h before `startsAt` and closes at `endsAt` (or `startsAt` + 6h). Idempotent |
 | G11 | `GET /activities/{id}/attendance` | host | `[{ joinId, userId, name, checkedInAt, outcome, outcomeRecordedAt, disputeStatus, disputeReason }]` |
 | G11 | `POST /activities/{id}/attendance/dispute` | the person marked `no_show` | `{ reason (≤500) }`, within 72h of the host recording it, once |
 | G11 | `PUT /activities/{id}/attendance/{joinId}/accept-dispute` | host | Marks them `attended` |
-| G12 | `POST /activities/{id}/feedback` | host ↔ someone who joined | `{ toUserId, text (≤500) }`, once the activity has started. One note per pair; sending again edits it |
+| G12 | `POST /activities/{id}/feedback` | host ↔ someone who joined | `{ toUserId?, joinAgain (required), note? (≤500) }`, once the activity has started. `toUserId` defaults to the host (the joiner's "Would you join again?"). One per pair; sending again edits it |
 | G12 | `GET /activities/feedback/received` | anyone signed in | Own received feedback, newest first. Paged with `page`/`size` + `X-Total-Count`/`X-Has-More` |
 
 `Activity` =
 
 ```
-{ postId, kind, details: {…}, coverUrl, waitlistEnabled, questions: [{ id, text, required }],
-  spotsLeft, waitlistCount,
-  viewer: { host, joinStatus, waitlistPosition, answered, checkedInAt, outcome, disputeStatus, disputeOpenUntil } }
+{ postId, category, subtype, level, cost: { type: "free"|"shared", perPersonInr, note },
+  typeAnswers: { key: value }, bring: [..], accessibility, indoor, minSize, waitlist, repeat, womenOnly, reach,
+  coverUrl, needsEmergencyContact, questions: [{ id, text, required }], spotsLeft, waitlistCount,
+  viewer: { host, joinStatus, waitlistPosition, answered, checkedInAt, outcome, attendedConfirmed,
+            disputeStatus, disputeOpenUntil, reminders: [minutesBefore] } }
+```
+
+`UpdateDetails` =
+
+```
+{ category, subtype (≤40), level: beginner|intermediate|advanced|all,
+  cost: { type: free|shared, perPersonInr (1–100000, required when shared), note (≤200) },
+  typeAnswers: { key: text ≤200 | number | yes/no | list of ≤10 short items } (≤20 keys; the per-subtype
+               questions live in the frontend's intake schema),
+  bring: [≤15 items, ≤60 chars], accessibility (≤300), indoor, minSize (1–500, ≤ capacity), waitlist,
+  repeat: once|weekly, womenOnly, reach: nearby|link }
 ```
 
 **How the pieces behave:**
@@ -192,6 +205,47 @@ only talent can host or join.
 - **The public join-count trust signal** (on post cards) no longer drops a no-show immediately. A
   no-show counts against someone only once it is final: recorded more than 72h ago and never
   disputed. An open dispute never counts against them.
+
+### Activities per the app flow (FE-API-GAPS rows 7, 8, 10, 23, 25)
+
+| FE row | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| 23 | `POST /posts` (existing) | talent | Optional extras `activity: UpdateDetails` and `hostQuestions: [string ≤200]` (≤3). With either, the post, its details and questions are created in one transaction (all or nothing). Without them `POST /posts` behaves exactly as before |
+| 23 | `PUT /posts/{id}/joins/{joinId}/approve\|decline` (existing) | host | Optional body `{ note? (≤280) }`. It is stored as `decisionNote` on the join; on a decline the joiner gets it as "A note from the host" |
+| 23 | `PostJoinRequest` (response) | | Adds `note` (the joiner's note) and `decisionNote` |
+| 23 | `GET /activities/{id}/emergency-contacts` | host | `[{ userId, name, contactName, contactPhone }]` for approved joiners only. Contacts are deleted a day after the activity ends |
+| 25 | `PUT /activities/{id}/attendance/{joinId}/check-in` | host | Host marks someone present, from 1h before the start. Same effect as outcome `attended` (accepts an open dispute) |
+| 25 | `POST /activities/{id}/attendance/confirm` | someone who joined | `{ attended, dispute? (≤500) }`, once the activity has started. Saying `attended: true` after the host marked `no_show` needs `dispute` text and opens the 72h dispute. Only the host and that person see it |
+| 25 | `POST /activities/{id}/feedback` | | Now `{ toUserId?, joinAgain, note? }` (see G12) |
+| 7 | `POST /posts/{id}/reminder` | host or approved joiner | `{ minutesBefore (5–10080) }` → `[minutesBefore]` the caller now has. Only for a future start. Sent as an in-app notification |
+| 7 | `DELETE /posts/{id}/reminder?minutesBefore=` | same | Without `minutesBefore` it removes all of the caller's reminders for the post |
+| 8 | `PostResponse.priceInr`, `FeedItemResponse.priceInr` | | `0` = free, else the shared cost per person, mirrored from `activity.cost`. `null` when not set |
+| 10 | `PostResponse.authorVerificationLevel`, `FeedItemResponse.authorVerificationLevel` | | The author's verification level (`none`, `phone`, …). `null` on someone else's anonymous post |
+
+**How the pieces behave:**
+- **Default reminders.** Approved joiners get reminders 24h and 2h before the start by default. They
+  can remove them. Editing the start time moves unsent reminders.
+- **Women-only** (`womenOnly: true`). Arena stores no gender, so the backend can't check it.
+  - The activity becomes approval-only (`visibility: "approval"`), and the host decides.
+  - The label is the host's statement to joiners. It is not a filter anyone can search by.
+- **Link-only** (`reach: "link"`). The post is left out of the feed, Discover, the map and other
+  people's profile lists. Anyone with the link still opens it with `GET /posts/{id}`.
+- **Trek emergency contact.** A joiner of a `trekking` activity must give one
+  (`needsEmergencyContact: true` on the activity). Only the host sees it, after approval, and it is
+  deleted a day after the trek.
+
+**⚠ Shape change on `GET /activities/{id}` and `PUT /activities/{id}/details`.** They move from
+`kind` + `details` to the flow doc's structured fields. Neither shipped in production (both are new
+on this branch), and Jenny's gateway doesn't call them.
+
+**Join with answers (Jenny's gateway).**
+- The flow doc sends answers on `POST /posts/{id}/joins`. Arena keeps them on
+  `POST /activities/{id}/join` (architect decision), because that endpoint body is locked for
+  Jenny's gateway.
+- When an activity has questions (`GET /activities/{id}` → `questions` not empty), the gateway must
+  call `POST /activities/{id}/join` with `{ answers: [{ questionId, answer }] }`.
+- `POST /posts/{id}/joins` answers 400 for such an activity when a question is required.
+- Activities without questions still join through `POST /posts/{id}/joins`, unchanged.
 
 ## Needs & offers — G14 to G17
 

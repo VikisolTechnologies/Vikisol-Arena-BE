@@ -29,10 +29,23 @@ public record CreatePostRequest(
         // Phase 2 (Discuss) - post a question/update into this community (id); null = general.
         String communityId,
         // Phase 2 part C - show under an alias instead of the author's name (questions/updates only).
-        Boolean anonymous
+        Boolean anonymous,
+        // Optional extras (FE-API-GAPS row 23): an activity's structure and up to three host
+        // questions, saved with the post in one step. Jenny's createPost never sends them.
+        @jakarta.validation.Valid com.vikisol.arena.activities.dto.ActivityDtos.UpdateDetailsRequest activity,
+        List<@jakarta.validation.constraints.Size(max = 200, message = "must be at most 200 characters") String> hostQuestions
 ) {
     public CreatePostRequest {
         if (tags == null) tags = List.of();
         if (mediaUrls == null) mediaUrls = List.of();
+    }
+
+    // The shape before the row 23 extras, for existing callers.
+    public CreatePostRequest(String intentType, String title, String body, String locationText, String audience, String visibility,
+                             Integer capacity, String startsAt, String endsAt, List<String> tags, List<String> mediaUrls,
+                             Double lat, Double lng, String exactMeetingPoint, String requiredVerificationLevel, String communityId,
+                             Boolean anonymous) {
+        this(intentType, title, body, locationText, audience, visibility, capacity, startsAt, endsAt, tags, mediaUrls, lat, lng,
+                exactMeetingPoint, requiredVerificationLevel, communityId, anonymous, null, null);
     }
 }

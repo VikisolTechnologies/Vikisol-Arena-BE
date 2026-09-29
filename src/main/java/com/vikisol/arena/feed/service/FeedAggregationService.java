@@ -107,7 +107,8 @@ public class FeedAggregationService {
                             r.authorJoinCount(), r.authorAccountAgeDays(),
                             null, null, null, null,
                             null, null, null, null,
-                            r.demoContent()
+                            r.demoContent(),
+                            r.priceInr(), r.authorVerificationLevel(), null, null
                     );
                     return new ScoredFeedItem(item, sp.score(), authorUserId, authorCompanyId);
                 })
@@ -136,7 +137,8 @@ public class FeedAggregationService {
                     null, null,
                     job.getEmploymentType().name().toLowerCase(), job.isRemote(), job.getSalaryMin(), job.getSalaryMax(),
                     null, null, null, null,
-                    job.isDemoContent() || company.isDemoContent()
+                    job.isDemoContent() || company.isDemoContent(),
+                    null, null, null, null
             );
             return new ScoredFeedItem(item, recency + followBonus, null, company.getId());
         }).toList();
@@ -167,7 +169,8 @@ public class FeedAggregationService {
                     null, null, null, null,
                     project.getBudgetMin(), project.getBudgetMax(), project.getDurationWeeks(),
                     bidCounts.getOrDefault(project.getId(), 0L),
-                    project.isDemoContent() || author.isDemoContent()
+                    project.isDemoContent() || author.isDemoContent(),
+                    null, null, null, null
             );
             return new ScoredFeedItem(item, recency + followBonus + DEADLINE_URGENCY_WEIGHT * urgency, author.getId(), null);
         }).toList();
