@@ -247,6 +247,25 @@ on this branch), and Jenny's gateway doesn't call them.
 - `POST /posts/{id}/joins` answers 400 for such an activity when a question is required.
 - Activities without questions still join through `POST /posts/{id}/joins`, unchanged.
 
+### Editing, pausing and cancelling posts (FE-API-GAPS rows 14, 39; flow A10, A11)
+
+| FE row | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| 14, 39 | `PATCH /posts/{id}` | owner | `{ title? (≤200), body? (≤10000), startsAt?, endsAt?, locationText? (≤200), exactMeetingPoint? (≤500), tags? (≤20 × ≤40) }`. Only sent fields change; `""` clears a nullable one (never `body`). Only open, full or paused posts. A new start must be in the future and before the end. People who joined are notified of what changed; reminders follow a new start |
+| 39 | `PUT /posts/{id}/status` (existing) | owner | Optional body `{ status: "paused"\|"open"\|"closed" }`. No body keeps the original behaviour (resolve a need). Pausing is for needs and offers only |
+| A11 | `PUT /posts/{id}/cancel` (existing) | owner | Optional body `{ reason? (≤300) }`. The reason is in the cancellation notification to everyone who joined |
+| | `PostResponse` | | Adds `cancelReason` and `editedAt` |
+
+**What `paused` does:**
+- A paused post is out of feeds, search, the map and other people's profile lists. Its owner still
+  sees it.
+- It takes no new joins or offers. Existing ones are kept.
+- It can be reopened (`open`, or `full` when its capacity is taken) or closed.
+- The stale-post expiry treats it like an open post.
+
+**⚠ Existing enum widened:** `PostStatus` gains `paused`. Clients that switch on a post's `status`
+should handle it.
+
 ## Needs & offers — G14 to G17
 
 `{id}` is an `ASK` (need) or `OFFER` post, created as today with `POST /posts`. A response to a

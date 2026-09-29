@@ -115,7 +115,8 @@ public class NotificationService {
     }
 
     public void notifyPostCancelled(User recipient, Post post) {
-        notify(recipient, NotificationType.SYSTEM, "Activity cancelled", "\"" + preview(post.getBody()) + "\" was cancelled by its host.");
+        notify(recipient, NotificationType.SYSTEM, "Activity cancelled", "\"" + preview(post.getBody()) + "\" was cancelled by its host."
+                + (post.getCancelReason() == null ? "" : " Their reason: " + post.getCancelReason()));
     }
 
     // §4 safety-audit fix: "creator can remove anyone" - the removed person needs to know why

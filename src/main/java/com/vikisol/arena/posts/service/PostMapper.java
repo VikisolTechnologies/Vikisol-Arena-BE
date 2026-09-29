@@ -201,7 +201,9 @@ public class PostMapper {
                 post.getCommunity() == null ? null : post.getCommunity().getEmoji(),
                 post.isAnonymous(),
                 post.getPriceInr(),
-                post.isAnonymous() && !mine ? null : post.getAuthorUser().getVerificationLevel().wireValue()
+                post.isAnonymous() && !mine ? null : post.getAuthorUser().getVerificationLevel().wireValue(),
+                post.getCancelReason(),
+                post.getEditedAt() == null ? null : post.getEditedAt().toString()
         );
     }
 

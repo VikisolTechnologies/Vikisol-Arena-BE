@@ -157,7 +157,7 @@ public class PostService {
             throw new BadRequestException("Only a need can be marked resolved");
         }
         if (post.getStatus() != PostStatus.CLOSED) {
-            if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL) {
+            if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL && post.getStatus() != PostStatus.PAUSED) {
                 throw new BadRequestException("This need is already " + post.getStatus().wireValue());
             }
             post.setStatus(PostStatus.CLOSED);
@@ -178,6 +178,8 @@ public class PostService {
         var page = postRepository.findByAuthorUserIdOrderByCreatedAtDesc(targetUserId, pageable);
         var visible = page.getContent().stream()
                 .filter(p -> p.getStatus() != PostStatus.CANCELLED)
+                // A paused post is hidden from everyone but its owner (row 39).
+                .filter(p -> isSelf || p.getStatus() != PostStatus.PAUSED)
                 // An anonymous post never appears on its author's profile for anyone else.
                 .filter(p -> isSelf || !p.isAnonymous())
                 // A link-only activity isn't listed on the host's profile either.
@@ -457,8 +459,120 @@ public class PostService {
         postRepository.save(post);
     }
 
+    // FE-API-GAPS rows 14/39, flow A10: the owner edits a live post. People who joined are told
+    // what changed, and reminders follow a new start time.
+    @Transactional
+    public PostResponse update(UUID userId, UUID postId, com.vikisol.arena.posts.dto.UpdatePostRequest request) {
+        Post post = requireLockedPost(postId);
+        if (!post.getAuthorUser().getId().equals(userId)) {
+            throw new AccessDeniedException("Not your post");
+        }
+        if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL && post.getStatus() != PostStatus.PAUSED) {
+            throw new BadRequestException("Only a live post can be edited. This one is " + post.getStatus().wireValue());
+        }
+        List<String> changed = new java.util.ArrayList<>();
+        if (request.title() != null && !java.util.Objects.equals(blankToNull(request.title()), post.getTitle())) {
+            post.setTitle(blankToNull(request.title()));
+            changed.add("title");
+        }
+        if (request.body() != null && !request.body().equals(post.getBody())) {
+            if (request.body().isBlank()) throw new BadRequestException("body can't be empty");
+            post.setBody(request.body());
+            changed.add("description");
+        }
+        Instant startsAt = request.startsAt() == null ? post.getStartsAt() : parseInstant(request.startsAt(), "startsAt");
+        Instant endsAt = request.endsAt() == null ? post.getEndsAt() : parseInstant(request.endsAt(), "endsAt");
+        if (startsAt != null && endsAt != null && !endsAt.isAfter(startsAt)) {
+            throw new BadRequestException("The end must be after the start");
+        }
+        boolean startMoved = !java.util.Objects.equals(startsAt, post.getStartsAt());
+        if (startMoved) {
+            if (startsAt != null && !startsAt.isAfter(Instant.now())) throw new BadRequestException("The new start must be in the future");
+            post.setStartsAt(startsAt);
+            changed.add("start time");
+        }
+        if (!java.util.Objects.equals(endsAt, post.getEndsAt())) {
+            post.setEndsAt(endsAt);
+            changed.add("end time");
+        }
+        if (request.locationText() != null && !java.util.Objects.equals(blankToNull(request.locationText()), post.getLocationText())) {
+            post.setLocationText(blankToNull(request.locationText()));
+            changed.add("place");
+        }
+        if (request.exactMeetingPoint() != null && !java.util.Objects.equals(blankToNull(request.exactMeetingPoint()), post.getExactMeetingPoint())) {
+            post.setExactMeetingPoint(blankToNull(request.exactMeetingPoint()));
+            changed.add("meeting point");
+        }
+        if (request.tags() != null) {
+            List<String> tags = request.tags().stream().filter(t -> t != null && !t.isBlank()).map(String::trim).distinct().toList();
+            if (!tags.equals(post.getTags())) {
+                post.getTags().clear();
+                post.getTags().addAll(tags);
+                changed.add("tags");
+            }
+        }
+        if (changed.isEmpty()) return mapper.toResponse(post, userId, null, roomIdFor(post));
+
+        if (changed.contains("description") || changed.contains("tags")) {
+            post.setEmbedding(EmbeddingUtil.encode(embedOrNull(post.getBody() + " " + String.join(" ", post.getTags()))));
+        }
+        post.setEditedAt(Instant.now());
+        post = postRepository.save(post);
+        if (changed.contains("description")) moderationService.autoFlag(post);
+        if (startMoved) reminderService.reschedule(post);
+        String what = String.join(", ", changed);
+        for (PostJoinRequest join : postJoinRequestRepository.findByPostIdAndStatusOrderByCreatedAtAscIdAsc(postId, PostJoinStatus.APPROVED)) {
+            notificationService.notifySystem(join.getUser(), "Changes to something you joined",
+                    "The host changed the " + what + " of \"" + preview(post) + "\".");
+        }
+        return mapper.toResponse(post, userId, null, roomIdFor(post));
+    }
+
+    // FE-API-GAPS row 39: PUT /posts/{id}/status { status }. "paused" hides a need or offer from
+    // feeds and search and stops new offers/joins; "open" brings it back; "closed" (or no body,
+    // the original behaviour) resolves a need.
+    @Transactional
+    public PostResponse setStatus(UUID userId, UUID postId, String status) {
+        if (status == null || status.isBlank() || status.trim().equalsIgnoreCase("closed")) return closeAsResolved(userId, postId);
+        Post post = requireLockedPost(postId);
+        if (!post.getAuthorUser().getId().equals(userId)) {
+            throw new AccessDeniedException("Not your post");
+        }
+        if (post.getIntentType() != PostIntentType.ASK && post.getIntentType() != PostIntentType.OFFER) {
+            throw new BadRequestException("Only a need or an offer can be paused");
+        }
+        switch (status.trim().toLowerCase()) {
+            case "paused" -> {
+                if (post.getStatus() != PostStatus.PAUSED) {
+                    if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL) {
+                        throw new BadRequestException("This post is already " + post.getStatus().wireValue());
+                    }
+                    post.setStatus(PostStatus.PAUSED);
+                }
+            }
+            case "open" -> {
+                if (post.getStatus() == PostStatus.PAUSED) {
+                    boolean full = post.getCapacity() != null && post.getSpotsFilled() >= post.getCapacity();
+                    post.setStatus(full ? PostStatus.FULL : PostStatus.OPEN);
+                } else if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL) {
+                    throw new BadRequestException("This post is already " + post.getStatus().wireValue());
+                }
+            }
+            default -> throw new BadRequestException("status must be one of paused, open, closed");
+        }
+        postRepository.save(post);
+        return mapper.toResponse(post, userId, myJoinStatus(post, userId), roomIdFor(post));
+    }
+
     @Transactional
     public PostResponse cancel(UUID userId, UUID postId) {
+        return cancel(userId, postId, null);
+    }
+
+    // Flow A11: the reason goes to everyone who joined. Optional on the API so existing callers
+    // keep working; the app's cancel sheet requires it.
+    @Transactional
+    public PostResponse cancel(UUID userId, UUID postId, String reason) {
         Post post = requireLockedPost(postId);
         if (!post.getAuthorUser().getId().equals(userId)) {
             throw new AccessDeniedException("Not your post");
@@ -467,6 +581,7 @@ public class PostService {
             throw new BadRequestException("This post is already " + post.getStatus().wireValue());
         }
         post.setStatus(PostStatus.CANCELLED);
+        post.setCancelReason(blankToNull(reason));
         postRepository.save(post);
         roomService.notifyRoomOfCancellation(post);
         return mapper.toResponse(post, userId, null, roomIdFor(post));
@@ -835,6 +950,24 @@ public class PostService {
     // follow the same contract. A post with a null embedding just falls out of similarity-based
     // ranking until the next successful embed, which is a much smaller failure than blocking
     // post creation entirely.
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static Instant parseInstant(String value, String label) {
+        if (value.isBlank()) return null;
+        try {
+            return Instant.parse(value);
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new BadRequestException(label + " must be an ISO-8601 instant");
+        }
+    }
+
+    private static String preview(Post post) {
+        String text = post.getTitle() != null ? post.getTitle() : post.getBody();
+        return text.length() > 60 ? text.substring(0, 60) + "…" : text;
+    }
+
     private float[] embedOrNull(String text) {
         try {
             return embeddingProvider.embed(text);

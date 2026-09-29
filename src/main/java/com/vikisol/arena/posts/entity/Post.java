@@ -134,6 +134,13 @@ public class Post extends BaseEntity {
     @Column(length = 200)
     private String removedReason;
 
+    // Flow A11: the host's reason when they cancel, shown to everyone who had joined. V31.
+    @Column(length = 300)
+    private String cancelReason;
+
+    // Set when the owner edits the post (PATCH /posts/{id}). V31.
+    private Instant editedAt;
+
     // Phase 2 (Discuss) part C - shown under an alias instead of the author (see PostMapper).
     // Questions/updates only. See V16.
     @Column(nullable = false)

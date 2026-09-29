@@ -116,10 +116,23 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.getJoined(principal.getId(), pageable)));
     }
 
+    // No body: resolve a need (the original behaviour). Row 39: { status: paused|open|closed }.
     @PutMapping("/{id}/status")
     public ResponseEntity<ApiResponse<PostResponse>> close(
-            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.closeAsResolved(principal.getId(), id)));
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+            @RequestBody(required = false) StatusRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.setStatus(principal.getId(), id, request == null ? null : request.status())));
+    }
+
+    public record StatusRequest(String status) {
+    }
+
+    // Rows 14/39, flow A10: the owner edits a live post.
+    @PatchMapping("/{id}")
+    public ResponseEntity<ApiResponse<PostResponse>> update(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+            @Valid @RequestBody com.vikisol.arena.posts.dto.UpdatePostRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Post updated", postService.update(principal.getId(), id, request)));
     }
 
     // PART 6 SAVE - kept under /posts (where every other post-interaction endpoint already
@@ -155,10 +168,15 @@ public class PostController {
                 : postService.create(principal.getId(), request)));
     }
 
+    // Flow A11: optional { reason (≤300) }, sent to everyone who joined.
     @PutMapping("/{id}/cancel")
     public ResponseEntity<ApiResponse<PostResponse>> cancel(
-            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.cancel(principal.getId(), id)));
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+            @Valid @RequestBody(required = false) CancelRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.cancel(principal.getId(), id, request == null ? null : request.reason())));
+    }
+
+    public record CancelRequest(@jakarta.validation.constraints.Size(max = 300, message = "must be at most 300 characters") String reason) {
     }
 
     // ARENA-FIX-EVERYTHING.md Phase 1 finding - see PostService.delete()'s own comment for why

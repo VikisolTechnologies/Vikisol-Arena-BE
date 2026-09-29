@@ -69,6 +69,9 @@ public record PostResponse(
         // not set. Row 10 (added): the author's verification level, for a verified-host badge;
         // absent on someone else's anonymous post.
         Integer priceInr,
-        String authorVerificationLevel
+        String authorVerificationLevel,
+        // Rows 14/39, flow A11 (added): the host's cancel reason, and when the owner last edited.
+        String cancelReason,
+        String editedAt
 ) {
 }
