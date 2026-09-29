@@ -1,17 +1,22 @@
 package com.vikisol.arena.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vikisol.arena.common.dto.ApiResponse;
 import com.vikisol.arena.security.jwt.AgentServiceTokenAuthenticationFilter;
 import com.vikisol.arena.security.jwt.JwtAuthenticationEntryPoint;
 import com.vikisol.arena.security.jwt.JwtAuthenticationFilter;
 import com.vikisol.arena.security.mfa.PlatformAdminMfaFilter;
 import com.vikisol.arena.security.ratelimit.RateLimitFilter;
 import com.vikisol.arena.security.service.CustomUserDetailsService;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -38,6 +43,7 @@ public class SecurityConfig {
     private final RateLimitFilter rateLimitFilter;
     private final PlatformAdminMfaFilter platformAdminMfaFilter;
     private final CustomUserDetailsService userDetailsService;
+    private final ObjectMapper objectMapper;
 
     @Value("${app.cors.allowed-origins:http://localhost:3000}")
     private String allowedOrigins;
@@ -67,9 +73,21 @@ public class SecurityConfig {
                                 "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"))
                         .httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).maxAgeInSeconds(31536000))
                 )
-                .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint))
+                // 403s decided by the filter chain use the same ApiResponse body as every other
+                // error (the default handler sent an empty body through /error).
+                .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler((request, response, denied) -> {
+                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                            response.getWriter().write(objectMapper.writeValueAsString(
+                                    new ApiResponse<>(false, "Access denied", null)));
+                        }))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // The /error dispatch only renders the status of a request that already
+                        // failed (ApiErrorController). Guarding it again turned a guest's 500 into
+                        // a misleading 401.
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         // Was a blanket "/auth/**".permitAll() - found live-testing the
                         // signout/denylist flow that this silently let an unauthenticated (or
                         // just-revoked) caller reach /auth/me with a null Authentication,
