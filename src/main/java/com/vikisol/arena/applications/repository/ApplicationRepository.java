@@ -37,6 +37,18 @@ public interface ApplicationRepository extends JpaRepository<Application, UUID> 
     @Query("select distinct a.candidate.id from Application a where a.candidate.id in :candidateIds and a.jobPosting.enterprise.id = :enterpriseId")
     List<UUID> findCandidateIdsWithApplicationToEnterprise(@Param("candidateIds") List<UUID> candidateIds, @Param("enterpriseId") UUID enterpriseId);
 
+    // G21 as reworked by the app flow (§6): pay is shared with an employer only on a live
+    // application to them where the person ticked "include my CTC".
+    @Query("""
+            select count(a) > 0 from Application a where a.candidate.id = :candidateId and a.jobPosting.enterprise.id = :enterpriseId
+              and a.includeCtc = true and a.stage <> com.vikisol.arena.applications.entity.ApplicationStage.WITHDRAWN""")
+    boolean ctcSharedWithEnterprise(@Param("candidateId") UUID candidateId, @Param("enterpriseId") UUID enterpriseId);
+
+    @Query("""
+            select distinct a.candidate.id from Application a where a.candidate.id in :candidateIds and a.jobPosting.enterprise.id = :enterpriseId
+              and a.includeCtc = true and a.stage <> com.vikisol.arena.applications.entity.ApplicationStage.WITHDRAWN""")
+    List<UUID> findCandidateIdsSharingCtcWithEnterprise(@Param("candidateIds") List<UUID> candidateIds, @Param("enterpriseId") UUID enterpriseId);
+
     // DemoContentService.removeAll() - the (unlikely but possible) case of a real candidate
     // applying to a demo job posting during the review window. deleteByJobPostingId is keyed on
     // the FK, not this row's own demoContent flag, so it catches that too.

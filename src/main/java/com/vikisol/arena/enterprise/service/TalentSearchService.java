@@ -3,8 +3,6 @@ package com.vikisol.arena.enterprise.service;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.audit.AuditActions;
 import com.vikisol.arena.audit.AuditService;
-import com.vikisol.arena.career.entity.CareerProfile;
-import com.vikisol.arena.career.repository.CareerProfileRepository;
 import com.vikisol.arena.career.service.CompensationPolicy;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.dto.PagedResponse;
@@ -32,7 +30,6 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 
@@ -56,7 +53,6 @@ public class TalentSearchService {
     private final CandidateProfileMapper candidateProfileMapper;
     private final ScoringService scoringService;
     private final ApplicationRepository applicationRepository;
-    private final CareerProfileRepository careerProfileRepository;
 
     @Transactional(readOnly = true)
     public PagedResponse<TalentSearchResult> search(UUID enterpriseUserId, String text, String industry, boolean remoteOnly, Pageable pageable) {
@@ -75,10 +71,10 @@ public class TalentSearchService {
         batchFetchSkillsAndOpenTo(candidateIds);
         Set<UUID> unlockedIds = batchUnlockedCandidateIds(enterprise.getId(), candidateIds);
         Set<UUID> appliedIds = batchAppliedCandidateIds(enterprise.getId(), candidateIds);
-        Map<UUID, CareerProfile> careers = careerProfileRepository.mapByUserId(
-                page.getContent().stream().map(c -> c.getUser().getId()).toList());
+        Set<UUID> ctcShared = candidateIds.isEmpty() ? Set.of()
+                : new HashSet<>(applicationRepository.findCandidateIdsSharingCtcWithEnterprise(candidateIds, enterprise.getId()));
 
-        return PagedResponse.of(page, c -> toResult(c, unlockedIds, appliedIds, careers));
+        return PagedResponse.of(page, c -> toResult(c, unlockedIds, appliedIds, ctcShared));
     }
 
     private void batchFetchSkillsAndOpenTo(List<UUID> candidateIds) {
@@ -117,7 +113,7 @@ public class TalentSearchService {
         EnterpriseProfile enterprise = requireEnterprise(enterpriseUserId);
         boolean unlocked = unlockedCandidateRepository.existsByEnterpriseIdAndCandidateId(enterprise.getId(), candidate.getId());
         boolean applied = applicationRepository.existsByCandidateIdAndJobPostingEnterpriseId(candidate.getId(), enterprise.getId());
-        boolean pay = CompensationPolicy.employerMaySee(careerProfileRepository.findByUserId(candidate.getUser().getId()).orElse(null), applied, unlocked);
+        boolean pay = CompensationPolicy.employerMaySee(applicationRepository.ctcSharedWithEnterprise(candidate.getId(), enterprise.getId()));
         return redactIfLocked(candidateProfileMapper.toResponse(candidate), unlocked || applied, pay);
     }
 
@@ -169,11 +165,11 @@ public class TalentSearchService {
     // Batched call site (search) - unlocked/applied state precomputed for the whole page, see
     // batchUnlockedCandidateIds/batchAppliedCandidateIds.
     private TalentSearchResult toResult(CandidateProfile candidate, Set<UUID> unlockedIds, Set<UUID> appliedIds,
-                                        Map<UUID, CareerProfile> careers) {
+                                        Set<UUID> ctcShared) {
         boolean unlocked = unlockedIds.contains(candidate.getId());
         boolean applied = appliedIds.contains(candidate.getId());
         int matchPercentage = scoringService.computeMatchPercentage(candidate, Set.of(), null);
-        boolean pay = CompensationPolicy.employerMaySee(careers.get(candidate.getUser().getId()), applied, unlocked);
+        boolean pay = CompensationPolicy.employerMaySee(ctcShared.contains(candidate.getId()));
         return new TalentSearchResult(
                 redactIfLocked(candidateProfileMapper.toResponse(candidate), unlocked || applied, pay), matchPercentage,
                 IndianData.pick(FIT_BLURBS), String.join(", ", candidate.getOpenTo().stream().map(o -> o.wireValue()).toList()),

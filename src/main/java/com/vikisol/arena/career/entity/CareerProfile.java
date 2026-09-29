@@ -61,6 +61,37 @@ public class CareerProfile extends BaseEntity {
     // Null = not published: nobody else sees any of it.
     private Instant publishedAt;
 
+    // Flow §6 extras (row 19), V33. Pay columns follow the same rule as expectedMin/Max: private,
+    // shared only on an application with "include my CTC".
+    @Column(length = 80)
+    private String currentCompany;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 16)
+    private WorkStatus workStatus;
+
+    private java.time.LocalDate lastWorkingDay;
+
+    private Integer experienceMonths;
+
+    @Column(length = 20)
+    private String roleFamily;
+
+    private Integer currentCtcFixed;
+    private Integer currentCtcVariable;
+    private Boolean negotiable;
+
+    // CareerDtos.CareerDetails' list and text fields, as JSON.
+    @Column(nullable = false, columnDefinition = "TEXT")
+    @Builder.Default
+    private String detailsJson = "{}";
+
+    // { field: only_me | employers_i_apply | public }; missing fields use the defaults in
+    // CareerService.
+    @Column(nullable = false, columnDefinition = "TEXT")
+    @Builder.Default
+    private String visibilityJson = "{}";
+
     @ElementCollection
     @CollectionTable(name = "arena_career_locations", joinColumns = @JoinColumn(name = "career_id"))
     @Column(name = "location")

@@ -18,7 +18,75 @@ public final class CareerDtos {
             String noticePeriod,
             String compensationVisibility,
             Integer expectedMin,
-            Integer expectedMax
+            Integer expectedMax,
+            // Flow §6 extras (row 19), all optional. Only the fields sent change; an empty list or
+            // "" clears one.
+            String currentCompany,
+            String status,
+            String lastWorkingDay,
+            Integer experienceMonths,
+            String roleFamily,
+            List<SkillEntry> skills,
+            List<String> sapModules,
+            List<String> certifications,
+            CurrentCtc currentCtc,
+            ExpectedCtc expectedCtc,
+            Boolean negotiable,
+            List<String> desiredRoles,
+            List<String> workModes,
+            Boolean relocate,
+            String shift,
+            List<String> companySizes,
+            List<String> links,
+            Education education,
+            List<String> languages,
+            java.util.Map<String, String> visibility
+    ) {
+        public SetupRequest(String intent, String desiredRole, String experienceLevel, String workMode, List<String> preferredLocations,
+                            String noticePeriod, String compensationVisibility, Integer expectedMin, Integer expectedMax) {
+            this(intent, desiredRole, experienceLevel, workMode, preferredLocations, noticePeriod, compensationVisibility, expectedMin,
+                    expectedMax, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null,
+                    null, null, null);
+        }
+    }
+
+    // proficiency: learning | working | strong | expert.
+    public record SkillEntry(String name, String proficiency, Integer years) {
+    }
+
+    // Yearly INR.
+    public record CurrentCtc(Integer fixed, Integer variable) {
+    }
+
+    public record ExpectedCtc(Integer min, Integer max) {
+    }
+
+    public record Education(String degree, String institution, Integer year) {
+    }
+
+    // The flow §6 extras as someone sees them. Hidden fields are absent. currentCtc and
+    // expectedCtc appear only for the owner, or for an employer the person applied to with
+    // "include my CTC" ticked.
+    public record CareerDetails(
+            String currentCompany,
+            String status,
+            String lastWorkingDay,
+            Integer experienceMonths,
+            String roleFamily,
+            List<SkillEntry> skills,
+            List<String> sapModules,
+            List<String> certifications,
+            CurrentCtc currentCtc,
+            ExpectedCtc expectedCtc,
+            Boolean negotiable,
+            List<String> desiredRoles,
+            List<String> workModes,
+            Boolean relocate,
+            String shift,
+            List<String> companySizes,
+            List<String> links,
+            Education education,
+            List<String> languages
     ) {
     }
 
@@ -39,7 +107,10 @@ public final class CareerDtos {
             String currency,
             boolean openToWork,
             boolean published,
-            String publishedAt
+            String publishedAt,
+            // Row 19 (added): every extra field, and each field's visibility (defaults filled in).
+            CareerDetails details,
+            java.util.Map<String, String> visibility
     ) {
     }
 
@@ -56,7 +127,9 @@ public final class CareerDtos {
             List<String> skills,
             Integer expectedMin,
             Integer expectedMax,
-            String currency
+            String currency,
+            // Row 19 (added): the extra fields this audience may see.
+            CareerDetails details
     ) {
     }
 
@@ -66,7 +139,9 @@ public final class CareerDtos {
             String compensationShownTo,
             CareerPublicView employers,
             CareerPublicView connections,
-            CareerPublicView neighbors
+            CareerPublicView neighbors,
+            // Added: what an employer you apply to sees (without "include my CTC").
+            CareerPublicView employersYouApplyTo
     ) {
     }
 }

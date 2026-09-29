@@ -5,8 +5,6 @@ import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
-import com.vikisol.arena.career.entity.CareerEnums.CompensationVisibility;
-import com.vikisol.arena.career.entity.CareerProfile;
 import com.vikisol.arena.career.service.CompensationPolicy;
 import com.vikisol.arena.enterprise.entity.CompanySize;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
@@ -134,17 +132,15 @@ class CareerFlowTest extends EmbeddedPostgresAppTest {
                 .andExpect(jsonPath("$.data.expectedMin").doesNotExist());
 
         call(asha, get("/career/me/preview"), null)
-                .andExpect(jsonPath("$.data.compensationShownTo").value("nobody"))
+                .andExpect(jsonPath("$.data.compensationShownTo").value("only employers you choose to include it for when you apply"))
                 .andExpect(jsonPath("$.data.employers.expectedMin").doesNotExist())
+                .andExpect(jsonPath("$.data.employersYouApplyTo.expectedMin").doesNotExist())
                 .andExpect(jsonPath("$.data.neighbors.experienceLevel").doesNotExist());
 
-        // Opting in shows pay to employers - and the preview says so.
-        setup("{\"compensationVisibility\":\"employers\"}");
-        call(recruiter, get("/career/" + asha.getId()), null).andExpect(jsonPath("$.data.expectedMin").value(2000000));
-        call(neighbor, get("/career/" + asha.getId()), null).andExpect(jsonPath("$.data.expectedMin").doesNotExist());
-        call(asha, get("/career/me/preview"), null)
-                .andExpect(jsonPath("$.data.compensationShownTo").value("employers"))
-                .andExpect(jsonPath("$.data.employers.expectedMax").value(2600000));
+        // Flow §6: pay is never opened up by a setting - only per application.
+        call(asha, put("/career/me"), "{\"compensationVisibility\":\"employers\"}").andExpect(status().isBadRequest());
+        call(asha, put("/career/me"), "{\"compensationVisibility\":\"on_application\"}").andExpect(status().isBadRequest());
+        call(recruiter, get("/career/" + asha.getId()), null).andExpect(jsonPath("$.data.expectedMin").doesNotExist());
 
         call(asha, post("/career/me/unpublish"), null).andExpect(jsonPath("$.data.published").value(false));
         call(neighbor, get("/career/" + asha.getId()), null).andExpect(status().isNotFound());
@@ -167,35 +163,47 @@ class CareerFlowTest extends EmbeddedPostgresAppTest {
                 .andExpect(jsonPath("$.data.currentCtc").doesNotExist())
                 .andExpect(jsonPath("$.data.expectedCtc").doesNotExist())
                 .andExpect(jsonPath("$.data.homeCity").doesNotExist());
-        setup("{\"intent\":\"find_job\",\"compensationVisibility\":\"employers\"}");
+        // Publishing doesn't share pay, and neither does applying without ticking "include my CTC".
+        setup("{\"intent\":\"find_job\"}");
+        call(asha, post("/career/me/publish"), null).andExpect(status().isOk());
+        JobPosting job = job();
+        Application application = applications.save(Application.builder().candidate(ashaProfile).jobPosting(job).appliedAt(Instant.now()).build());
+        call(recruiter, get(detail), null).andExpect(jsonPath("$.data.expectedCtc").doesNotExist());
+        application.setIncludeCtc(true);
+        applications.save(application);
         call(recruiter, get(detail), null).andExpect(jsonPath("$.data.expectedCtc").value(2400000));
+        call(recruiter, get("/career/" + asha.getId()), null).andExpect(status().isOk());
     }
 
     @Test
     void applicantListFollowsTheSameRule() throws Exception {
-        JobPosting job = postings.save(JobPosting.builder().enterprise(acme).title("Product designer").industry(Industry.DESIGN)
-                .location("Hyderabad").remote(false).employmentType(EmploymentType.FULL_TIME).salaryMin(1).salaryMax(2)
-                .description("Design things").build());
-        applications.save(Application.builder().candidate(ashaProfile).jobPosting(job).appliedAt(Instant.now()).build());
+        JobPosting job = job();
+        Application application = applications.save(Application.builder().candidate(ashaProfile).jobPosting(job).appliedAt(Instant.now()).build());
         String list = "/enterprise/postings/" + job.getId() + "/applicants";
+        setup("{\"intent\":\"find_job\",\"expectedCtc\":{\"min\":2000000,\"max\":2600000}}");
         call(recruiter, get(list), null)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.content[0].candidate.fullAccess").value(true))
                 .andExpect(jsonPath("$.data.content[0].candidate.currentCtc").doesNotExist())
-                .andExpect(jsonPath("$.data.content[0].candidate.approxLat").doesNotExist());
-        setup("{\"intent\":\"find_job\",\"compensationVisibility\":\"on_application\"}");
-        call(recruiter, get(list), null).andExpect(jsonPath("$.data.content[0].candidate.currentCtc").value(1800000));
+                .andExpect(jsonPath("$.data.content[0].candidate.approxLat").doesNotExist())
+                .andExpect(jsonPath("$.data.content[0].career.expectedMin").doesNotExist());
+        application.setIncludeCtc(true);
+        applications.save(application);
+        call(recruiter, get(list), null)
+                .andExpect(jsonPath("$.data.content[0].candidate.currentCtc").value(1800000))
+                .andExpect(jsonPath("$.data.content[0].career.details.expectedCtc.max").value(2600000));
     }
 
     @Test
     void compensationPolicy() {
-        CareerProfile onApply = CareerProfile.builder().compensationVisibility(CompensationVisibility.ON_APPLICATION).build();
-        CareerProfile employers = CareerProfile.builder().compensationVisibility(CompensationVisibility.EMPLOYERS).build();
-        assertThat(CompensationPolicy.employerMaySee(null, true, true)).isFalse();
-        assertThat(CompensationPolicy.employerMaySee(onApply, false, true)).isFalse();
-        assertThat(CompensationPolicy.employerMaySee(onApply, true, false)).isTrue();
-        assertThat(CompensationPolicy.employerMaySee(employers, false, true)).isTrue();
-        assertThat(CompensationPolicy.employerMaySee(employers, false, false)).isFalse();
+        assertThat(CompensationPolicy.employerMaySee(false)).isFalse();
+        assertThat(CompensationPolicy.employerMaySee(true)).isTrue();
+    }
+
+    private JobPosting job() {
+        return postings.save(JobPosting.builder().enterprise(acme).title("Product designer").industry(Industry.DESIGN)
+                .location("Hyderabad").remote(false).employmentType(EmploymentType.FULL_TIME).salaryMin(1).salaryMax(2)
+                .description("Design things").build());
     }
 
     private ResultActions setup(String body) throws Exception {

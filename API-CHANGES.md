@@ -334,7 +334,7 @@ the CV stay where they are today (`PUT /profile/me/skills`, `POST /profile/me/cv
 |---|---|---|---|
 | G18 | `PUT /career/me` | talent | `{ intent, desiredRole? (≤100), experienceLevel?, workMode?, preferredLocations?[] (≤5, ≤60 chars), noticePeriod?, compensationVisibility?, expectedMin?, expectedMax? }`. `intent` is required the first time; afterwards only the fields sent change |
 | G18 | `GET /career/me` | talent | Own view: every field, plus `currency: "INR"`, `openToWork`, `published`, `publishedAt` |
-| G20 | `GET /career/me/preview` | talent | `{ published, compensationShownTo: "nobody"\|"employers you apply to"\|"employers", employers, connections, neighbors }`. Each audience view is built by the same code that serves other people |
+| G20 | `GET /career/me/preview` | talent | `{ published, compensationShownTo, employers, connections, neighbors, employersYouApplyTo }`. Each audience view is built by the same code that serves other people |
 | G20 | `POST /career/me/publish` | talent | `{ openToWork? }`. Refused while the intent is `explore_quietly` |
 | G20 | `POST /career/me/unpublish` | talent | Also turns `openToWork` off |
 | G19 | `GET /career/{userId}` | any signed-in person | The published profile as the caller's audience sees it; not published → 404 |
@@ -347,7 +347,7 @@ the CV stay where they are today (`PUT /profile/me/skills`, `POST /profile/me/cv
 | `experienceLevel` | `entry`, `junior`, `mid`, `senior`, `lead` |
 | `workMode` | `any`, `onsite`, `hybrid`, `remote` |
 | `noticePeriod` | `immediate`, `days_15`, `days_30`, `days_60`, `days_90` |
-| `compensationVisibility` | `private` (default), `on_application`, `employers` |
+| `compensationVisibility` | `private` only (see "Pay, per the app flow" below) |
 
 `expectedMin` and `expectedMax` are yearly INR, from 0 to 1e9, with min ≤ max. Choosing
 `explore_quietly` unpublishes.
@@ -362,24 +362,76 @@ fields are absent):
 | `connection` | people you both follow | Role, level, work mode, open to work, skills |
 | `neighbor` | any other signed-in person | Role, open to work, skills |
 
-**One pay rule, everywhere (G21).** `CompensationPolicy` decides whether an employer sees pay:
+**One pay rule, everywhere (G21), per the app flow (§6).** `CompensationPolicy` decides whether an
+employer sees pay:
 - the career range;
+- the row 19 `currentCtc` / `expectedCtc`;
 - **and the existing `currentCtc` / `expectedCtc`** in talent search, `GET /enterprise/talent/{id}`
   and the applicant list.
 
-| Setting | Who sees pay |
-|---|---|
-| `private` (or no career profile) | nobody |
-| `on_application` | employers you applied to |
-| `employers` | employers you applied to, employers who unlocked you, and any employer when the profile is published |
+Pay is "only me" by default. It reaches an employer only when the person applies to them and ticks
+**include my CTC** (`POST /applications { …, includeCtc: true }`), and only while that application
+isn't withdrawn. The applicant list uses that application's own tick. Publishing, an unlock or any
+setting never shares pay. `compensationVisibility` is kept for compatibility, but only `private` is
+accepted: `on_application` and `employers` answer 400.
 
-**⚠ Existing behaviour changes (values only; no field added or removed):**
+**⚠ Existing behaviour changes (values only; no field removed):**
 - `GET /enterprise/talent/search`, `GET /enterprise/talent/{id}` and
   `GET /enterprise/postings/{id}/applicants` return `currentCtc`/`expectedCtc` as absent unless the
-  candidate shares pay. Before, any employer with full access saw them.
+  candidate included pay on an application to that employer. Before, any employer with full access
+  saw them.
 - The applicant list no longer returns the candidate's `homeCity`/`approxLat`/`approxLng`.
   Talent search already stripped them, because location consent covers peer discovery only; the
   applicant list was missing that.
+- **Talent search lists only people whose career profile is published** (flow §8: "shows only
+  people whose career visibility is open"), on top of the existing search consent. Someone who never
+  opened or published a career profile no longer appears.
+
+### Career per the app flow (FE-API-GAPS rows 19, 32)
+
+`PUT /career/me` takes these optional extras. Only the fields sent change; `""` or `[]` clears one.
+
+| Field | Values |
+|---|---|
+| `currentCompany` | ≤80 |
+| `status` | `employed`, `notice`, `between`, `student`, `freelancer` |
+| `noticePeriod` | also takes the frontend's labels: `Immediate`, `15 days` … `90 days` |
+| `lastWorkingDay` | `YYYY-MM-DD` |
+| `experienceMonths` | 0–600 (years × 12 + months) |
+| `roleFamily` | `Engineering`, `Design`, `Product`, `Data`, `SAP`, `Sales`, `Marketing`, `Operations`, `Finance`, `HR`, `Support`, `Other` |
+| `skills` | `[{ name (≤40), proficiency?: learning\|working\|strong\|expert, years? (0–50) }]`, ≤20. Separate from the profile's skill tags |
+| `sapModules` | the frontend's list (`FI`, `CO`, `MM`, … `S/4HANA Finance`) |
+| `certifications` | ≤10 × ≤100 |
+| `currentCtc` | `{ fixed, variable }`, yearly INR |
+| `expectedCtc` | `{ min, max }`, yearly INR; the same values as `expectedMin`/`expectedMax` |
+| `negotiable`, `relocate` | yes/no |
+| `desiredRoles` | ≤3 × ≤100; the first also becomes `desiredRole` |
+| `workModes` | `onsite`, `hybrid`, `remote`; one sets `workMode`, several set it to `any` |
+| `shift` | `day`, `night`, `rotational`, `flexible` |
+| `companySizes` | `1–10`, `11–50`, `51–200`, `201–1000`, `1000+` (a plain hyphen works too) |
+| `links` | ≤5 http(s) links |
+| `education` | `{ degree?: 10th\|12th\|Diploma\|Bachelor's\|Master's\|PhD\|Other, institution? (≤100), year? (1960–2035) }` |
+| `languages` | ≤8 × ≤40 |
+| `visibility` | `{ field: "only_me"\|"employers_i_apply"\|"public" }` for any field above, plus `noticePeriod` and `preferredLocations` |
+
+**Visibility:**
+- Defaults: `currentCompany` and `lastWorkingDay` are `employers_i_apply`, and every other field is
+  `public`.
+- `currentCtc` and `expectedCtc` are always `only_me`. Anything else answers 400; pay goes per
+  application.
+- `public` means anyone who can see the published career profile.
+- `employers_i_apply` means only an employer the person has an application with.
+
+**Responses:**
+- `GET /career/me` adds `details` (every field) and `visibility` (with the defaults filled in).
+- `GET /career/{userId}` and the preview add `details`: only the fields that audience may see.
+- **Row 32:** `GET /enterprise/postings/{id}/applicants` items add `career`: the applicant's career
+  profile as that employer sees it, published or not (applying shares it with that employer).
+  - It includes `noticePeriod` and each field the person shares with employers they apply to.
+  - Pay is in `career.details` only when that application includes it.
+  - `career` is absent when the person has no career profile.
+  - The row's `evidence` list is G26 (`GET /enterprise/applicants/{id}/evidence`), not repeated
+    here.
 
 Account erasure deletes the career profile.
 

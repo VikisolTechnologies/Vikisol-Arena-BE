@@ -38,6 +38,7 @@ public class ApplicantService {
     private final CandidateProfileMapper candidateProfileMapper;
     private final JobPostingRepository jobPostingRepository;
     private final CareerProfileRepository careerProfileRepository;
+    private final com.vikisol.arena.career.service.CareerService careerService;
 
     // IDOR fix (found via the ARENA-SHIP-IT.md endpoint audit): this previously took no caller
     // identity at all - any recruiter/company_admin could list another tenant's full applicant
@@ -83,12 +84,14 @@ public class ApplicantService {
     }
 
     // They applied here, so the employer has full access (CV, job-seeker fields); pay only if the
-    // candidate shares it (G21), and never the approximate home location.
+    // candidate included it on this application (G21, flow §6), and never the approximate home
+    // location.
     private ApplicantResponse toResponse(Application a, CareerProfile career) {
+        boolean pay = CompensationPolicy.employerMaySee(a.isIncludeCtc() && a.getStage() != com.vikisol.arena.applications.entity.ApplicationStage.WITHDRAWN);
         return new ApplicantResponse(
                 a.getId().toString(), a.getJobPosting().getId().toString(), a.getCandidate().getId().toString(),
                 a.getStage().wireValue(), a.getAppliedAt().toString(),
-                candidateProfileMapper.forEmployer(candidateProfileMapper.toResponse(a.getCandidate()), true,
-                        CompensationPolicy.employerMaySee(career, true, false)));
+                candidateProfileMapper.forEmployer(candidateProfileMapper.toResponse(a.getCandidate()), true, pay),
+                careerService.forApplicant(career, pay, a.getCandidate().getSkills().stream().map(k -> k.getName()).toList()));
     }
 }

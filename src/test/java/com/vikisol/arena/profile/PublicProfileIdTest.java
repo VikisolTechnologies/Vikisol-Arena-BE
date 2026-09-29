@@ -5,6 +5,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
+import com.vikisol.arena.career.entity.CareerEnums;
+import com.vikisol.arena.career.entity.CareerProfile;
+import com.vikisol.arena.career.repository.CareerProfileRepository;
 import com.vikisol.arena.enterprise.entity.CompanySize;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
@@ -46,6 +49,7 @@ class PublicProfileIdTest extends EmbeddedPostgresAppTest {
     @Autowired UserRepository users;
     @Autowired CandidateProfileRepository profiles;
     @Autowired EnterpriseProfileRepository enterprises;
+    @Autowired CareerProfileRepository careers;
     @MockBean TokenDenylistService denylist;
 
     @BeforeEach
@@ -57,6 +61,8 @@ class PublicProfileIdTest extends EmbeddedPostgresAppTest {
     void aTalentUniverseResultLinksToTheCandidatesPublicProfile() throws Exception {
         User talent = user(Role.TALENT, "Asha Rao");
         CandidateProfile profile = profile(talent, "Zebra-unique platform engineer");
+        // Talent search lists only published career profiles (ARENA-APP-FLOW §8).
+        careers.save(CareerProfile.builder().user(talent).intent(CareerEnums.Intent.FIND_JOB).publishedAt(java.time.Instant.now()).build());
         User recruiter = user(Role.COMPANY_ADMIN, "Recruiter");
         enterprises.save(EnterpriseProfile.builder().user(recruiter).companyName("Acme").logoEmoji("A")
                 .industry(Industry.ENGINEERING).size(CompanySize.S_11_50).build());

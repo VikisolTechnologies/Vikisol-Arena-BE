@@ -41,6 +41,8 @@ public interface CandidateProfileRepository extends JpaRepository<CandidateProfi
     // Hibernate paginate in memory (loads the full unbounded result set, then slices it in Java) -
     // worse than the per-row lazy loads this is meant to fix. See the IN-batched fetches below,
     // called once per page after this query returns, for the actual N+1 fix.
+    // ARENA-APP-FLOW §8: talent search shows only people whose career profile is published
+    // ("open"), on top of the search consent.
     // ARENA-FIX-EVERYTHING.md Phase 1 fix - this query never excluded an anonymized/erased
     // account (User.deletedAt set - see CandidateProfileService.deleteMyAccount). Without this,
     // exercising the DPDP right-to-erasure flow didn't actually remove a candidate from
@@ -50,6 +52,8 @@ public interface CandidateProfileRepository extends JpaRepository<CandidateProfi
             select c from CandidateProfile c
             where c.consent.searchableByEnterprises = true
               and c.user.deletedAt is null
+              and exists (select 1 from com.vikisol.arena.career.entity.CareerProfile cp
+                          where cp.user = c.user and cp.publishedAt is not null)
               and (:industry is null or c.industry = :industry)
               and (:remoteOnly = false or c.remote = true)
               and (:text = '' or
