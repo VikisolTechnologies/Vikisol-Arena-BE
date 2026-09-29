@@ -192,3 +192,36 @@ only talent can host or join.
 - **The public join-count trust signal** (on post cards) no longer drops a no-show immediately. A
   no-show counts against someone only once it is final: recorded more than 72h ago and never
   disputed. An open dispute never counts against them.
+
+## Needs & offers — G14 to G17
+
+`{id}` is an `ASK` (need) or `OFFER` post, created as today with `POST /posts`. A response to a
+need is an **offer of help**; a response to an offer is a **request for it**. Anything else
+answers 404.
+
+| Gap | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| G14 | `GET /needs/categories` | anyone | `["moving","repairs","tech_help","tutoring","errands","pets","rides","cooking","cleaning","gardening","career_advice","creative","other"]` |
+| G14 | `GET /needs/{id}` | anyone (guest too) | `{ postId, kind: "need"\|"offer", category, preferredTime, status, responseCount, viewer: { owner, myResponse } }` |
+| G14 | `PUT /needs/{id}/details` | owner | `{ category, preferredTime? (≤100) }` |
+| G15 | `POST /needs/{id}/responses` | talent, not the owner | `{ message (≤500) }`. Refused on an anonymous post (accepting would open a chat that reveals the author), a closed post, a duplicate, or after the owner declined you |
+| G15 | `GET /needs/{id}/responses` | signed in | The owner gets every live response, oldest first; anyone else gets only their own |
+| G15 | `PUT /needs/{id}/responses/{rid}/accept` | owner | Opens the pair's private conversation (the existing one-per-pair DM, `/messages/conversations/{conversationId}`) and returns its `conversationId` |
+| G15 | `PUT /needs/{id}/responses/{rid}/decline` | owner | |
+| G15 | `DELETE /needs/{id}/responses/me` | the responder | Not after completion |
+| G16 | `POST /needs/{id}/responses/{rid}/confirm` | owner or that responder | `{ note? (≤500) }`. It's an outcome only when **both** have confirmed (`completion.completedAt`). The first confirmation asks the other side to confirm. A need closes when completed; an offer stays open for others |
+| G17 | `GET /needs/outcomes/{userId}` | anyone | That person's confirmed outcomes: `[{ postId, kind, category, role: "gave"\|"received", completedAt }]`, newest first, paged with headers. Never names the other person |
+| G17 | `GET /needs/responses/mine` | signed in | "My offers" for Work: `[{ postId, postTitle, kind, response }]`, newest first, paged with headers |
+
+`response` =
+
+```
+{ id, postId, userId, name, avatarEmoji, message, status: "pending"|"accepted"|"declined"|"withdrawn",
+  createdAt, conversationId, completion: { ownerConfirmedAt, responderConfirmedAt, ownerNote, responderNote, completedAt } }
+```
+
+`conversationId` and `completion` are only in the response for the owner and that responder.
+
+**Not built:** the Post-a-Need "Share with: nearby people only" scope. Feed, search and Discover
+don't filter by it yet, and storing a privacy promise the API doesn't keep would be dishonest. The
+frontend should not offer the choice until the backend enforces it.

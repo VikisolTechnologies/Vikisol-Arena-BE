@@ -158,6 +158,9 @@ public class SecurityConfig {
                         // An activity's page (details, questions, spots, waitlist size) is as
                         // public as the post itself; "/activities/kinds" is the form catalogue.
                         .requestMatchers(HttpMethod.GET, "/activities/*").permitAll()
+                        // A need/offer page and someone's confirmed outcomes are public; the
+                        // responses list and "my offers" stay signed-in (anyRequest below).
+                        .requestMatchers(HttpMethod.GET, "/needs/*", "/needs/outcomes/*").permitAll()
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())
