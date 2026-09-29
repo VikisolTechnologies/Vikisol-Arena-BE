@@ -20,6 +20,7 @@ import com.vikisol.arena.notifications.service.NotificationService;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -48,8 +49,8 @@ public class ConversationService {
     static final int MAX_ANONYMOUS_CHATS_PER_DAY = 10;
 
     @Transactional(readOnly = true)
-    public List<ConversationResponse> getMyConversations(UUID userId) {
-        List<Conversation> rows = conversationRepository.findAllForUser(userId);
+    public List<ConversationResponse> getMyConversations(UUID userId, Pageable pageable) {
+        List<Conversation> rows = conversationRepository.findAllForUser(userId, pageable);
         List<User> others = rows.stream().map(c -> c.getUserA().getId().equals(userId) ? c.getUserB() : c.getUserA()).toList();
         Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
                 others.stream().filter(u -> u.getRole() == Role.TALENT).map(User::getId).toList());

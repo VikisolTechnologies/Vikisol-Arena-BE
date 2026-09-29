@@ -15,6 +15,7 @@ import com.vikisol.arena.notifications.service.NotificationService;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -63,16 +64,16 @@ public class FollowService {
     }
 
     @Transactional(readOnly = true)
-    public List<FollowerResponse> getFollowers(UUID userId) {
-        List<Follow> rows = followRepository.findByFollowingUserIdOrderByCreatedAtDesc(userId);
+    public List<FollowerResponse> getFollowers(UUID userId, Pageable pageable) {
+        List<Follow> rows = followRepository.findByFollowingUserIdOrderByCreatedAtDesc(userId, pageable);
         Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
                 rows.stream().map(f -> f.getFollowerUser().getId()).toList());
         return rows.stream().map(f -> toResponse(f.getFollowerUser(), f.getCreatedAt().toString(), profiles)).toList();
     }
 
     @Transactional(readOnly = true)
-    public List<FollowerResponse> getFollowing(UUID userId) {
-        List<Follow> rows = followRepository.findByFollowerUserIdOrderByCreatedAtDesc(userId);
+    public List<FollowerResponse> getFollowing(UUID userId, Pageable pageable) {
+        List<Follow> rows = followRepository.findByFollowerUserIdOrderByCreatedAtDesc(userId, pageable);
         Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
                 rows.stream().map(f -> f.getFollowingUser().getId()).toList());
         return rows.stream().map(f -> toResponse(f.getFollowingUser(), f.getCreatedAt().toString(), profiles)).toList();

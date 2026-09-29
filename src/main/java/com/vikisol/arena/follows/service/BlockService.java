@@ -11,6 +11,7 @@ import com.vikisol.arena.follows.repository.UserBlockRepository;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -63,8 +64,8 @@ public class BlockService {
     }
 
     @Transactional(readOnly = true)
-    public List<BlockedUserResponse> getMyBlocks(UUID blockerUserId) {
-        List<UserBlock> rows = userBlockRepository.findByBlockerUserIdOrderByCreatedAtDesc(blockerUserId);
+    public List<BlockedUserResponse> getMyBlocks(UUID blockerUserId, Pageable pageable) {
+        List<UserBlock> rows = userBlockRepository.findByBlockerUserIdOrderByCreatedAtDesc(blockerUserId, pageable);
         Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
                 rows.stream().map(b -> b.getBlockedUser().getId()).toList());
         return rows.stream()

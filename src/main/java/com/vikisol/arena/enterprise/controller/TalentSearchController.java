@@ -1,13 +1,13 @@
 package com.vikisol.arena.enterprise.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.enterprise.dto.TalentSearchResult;
 import com.vikisol.arena.enterprise.service.TalentSearchService;
 import com.vikisol.arena.profile.dto.CandidateProfileResponse;
 import com.vikisol.arena.security.service.UserPrincipal;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -31,7 +31,7 @@ public class TalentSearchController {
             @RequestParam(defaultValue = "false") boolean remoteOnly,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size);
+        var pageable = PageLimits.of(page, size);
         return ResponseEntity.ok(ApiResponse.ok(talentSearchService.search(principal.getId(), text, industry, remoteOnly, pageable)));
     }
 

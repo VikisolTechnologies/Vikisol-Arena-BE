@@ -24,6 +24,7 @@ import com.vikisol.arena.rooms.repository.RoomMessageRepository;
 import com.vikisol.arena.rooms.repository.RoomReportRepository;
 import com.vikisol.arena.rooms.repository.RoomRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -130,8 +131,8 @@ public class RoomService {
     }
 
     @Transactional(readOnly = true)
-    public List<RoomResponse> getMyRooms(UUID userId) {
-        List<RoomMember> memberships = roomMemberRepository.findByUserIdOrderByCreatedAtDesc(userId);
+    public List<RoomResponse> getMyRooms(UUID userId, Pageable pageable) {
+        List<RoomMember> memberships = roomMemberRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
         List<UUID> roomIds = memberships.stream().map(m -> m.getRoom().getId()).toList();
         if (roomIds.isEmpty()) return List.of();
         // One COUNT ... GROUP BY and one latest-message query for every room, instead of both

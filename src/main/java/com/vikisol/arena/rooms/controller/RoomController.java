@@ -1,6 +1,7 @@
 package com.vikisol.arena.rooms.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.rooms.dto.ReportRoomRequest;
 import com.vikisol.arena.rooms.dto.RoomMemberResponse;
 import com.vikisol.arena.rooms.dto.RoomMessageResponse;
@@ -27,8 +28,9 @@ public class RoomController {
     private final RoomService roomService;
 
     @GetMapping
-    public ResponseEntity<ApiResponse<List<RoomResponse>>> getMyRooms(@AuthenticationPrincipal UserPrincipal principal) {
-        return ResponseEntity.ok(ApiResponse.ok(roomService.getMyRooms(principal.getId())));
+    public ResponseEntity<ApiResponse<List<RoomResponse>>> getMyRooms(
+            @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(roomService.getMyRooms(principal.getId(), PageLimits.of(page, size))));
     }
 
     @GetMapping("/{id}/messages")

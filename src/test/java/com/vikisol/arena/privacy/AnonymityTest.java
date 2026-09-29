@@ -1,5 +1,6 @@
 package com.vikisol.arena.privacy;
 
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
@@ -148,7 +149,7 @@ class AnonymityTest extends EmbeddedPostgresAppTest {
         assertThat(fromSender.participantName()).startsWith("Anonymous ").doesNotContain("Sana");
 
         conversations.sendMessage(sender.getId(), UUID.fromString(fromSender.id()), "Happened to me - happy to share what worked");
-        ConversationResponse asAuthor = conversations.getMyConversations(author.getId()).get(0);
+        ConversationResponse asAuthor = conversations.getMyConversations(author.getId(), PageLimits.firstPage()).get(0);
         assertThat(asAuthor.anonymous()).isFalse();
         assertThat(asAuthor.meAnonymous()).isTrue();
         assertThat(asAuthor.participantName()).isEqualTo("Vikram");
@@ -180,7 +181,7 @@ class AnonymityTest extends EmbeddedPostgresAppTest {
         assertThat(sent).isNotEmpty();
         assertThat(sent.get(0).getBody()).doesNotContain("Hidden Sender").contains("anonymous");
 
-        ConversationResponse asRecipient = conversations.getMyConversations(recipient.getId()).get(0);
+        ConversationResponse asRecipient = conversations.getMyConversations(recipient.getId(), PageLimits.firstPage()).get(0);
         assertThat(asRecipient.participantId()).isEmpty();
         assertThat(asRecipient.participantName()).doesNotContain("Hidden");
     }

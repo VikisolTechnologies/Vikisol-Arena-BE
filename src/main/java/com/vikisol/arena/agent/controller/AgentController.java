@@ -5,6 +5,7 @@ import com.vikisol.arena.agent.dto.AgentMessageResponse;
 import com.vikisol.arena.agent.dto.SendAgentMessageRequest;
 import com.vikisol.arena.agent.service.AgentService;
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
@@ -30,8 +31,8 @@ public class AgentController {
 
     @GetMapping("/conversations/{id}/messages")
     public ResponseEntity<ApiResponse<List<AgentMessageResponse>>> getMessages(
-            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(agentService.getMessages(principal.getId(), id)));
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(agentService.getMessages(principal.getId(), id, PageLimits.of(page, size))));
     }
 
     @PostMapping("/conversations/{id}/messages")

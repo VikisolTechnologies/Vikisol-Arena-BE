@@ -612,12 +612,12 @@ public class PostService {
     }
 
     @Transactional(readOnly = true)
-    public List<PostJoinRequestResponse> getJoinRequests(UUID userId, UUID postId) {
+    public List<PostJoinRequestResponse> getJoinRequests(UUID userId, UUID postId, Pageable pageable) {
         Post post = requirePost(postId);
         if (!post.getAuthorUser().getId().equals(userId)) {
             throw new AccessDeniedException("Not your post");
         }
-        return mapper.toResponseList(postJoinRequestRepository.findByPostIdOrderByCreatedAtAsc(postId));
+        return mapper.toResponseList(postJoinRequestRepository.findByPostIdOrderByCreatedAtAsc(postId, pageable));
     }
 
     // Shared by both the PUBLIC-auto-approve path and the APPROVAL-manual-approve path so the

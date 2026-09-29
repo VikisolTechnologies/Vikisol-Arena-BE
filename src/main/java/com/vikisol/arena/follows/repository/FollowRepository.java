@@ -2,6 +2,7 @@ package com.vikisol.arena.follows.repository;
 
 import com.vikisol.arena.follows.entity.Follow;
 import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -24,10 +25,10 @@ public interface FollowRepository extends JpaRepository<Follow, UUID> {
     List<UUID> findFollowingUserIdsByFollowerUserId(@Param("followerUserId") UUID followerUserId);
 
     @EntityGraph(attributePaths = "followerUser")
-    List<Follow> findByFollowingUserIdOrderByCreatedAtDesc(UUID followingUserId);
+    List<Follow> findByFollowingUserIdOrderByCreatedAtDesc(UUID followingUserId, Pageable pageable);
 
     @EntityGraph(attributePaths = "followingUser")
-    List<Follow> findByFollowerUserIdOrderByCreatedAtDesc(UUID followerUserId);
+    List<Follow> findByFollowerUserIdOrderByCreatedAtDesc(UUID followerUserId, Pageable pageable);
 
     // Phase C company-follow (see Follow's own class comment for the additive-column shape).
     Optional<Follow> findByFollowerUserIdAndFollowingCompanyId(UUID followerUserId, UUID followingCompanyId);

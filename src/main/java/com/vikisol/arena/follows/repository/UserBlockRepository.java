@@ -2,6 +2,7 @@ package com.vikisol.arena.follows.repository;
 
 import com.vikisol.arena.follows.entity.UserBlock;
 import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.List;
@@ -13,7 +14,7 @@ public interface UserBlockRepository extends JpaRepository<UserBlock, UUID> {
     void deleteByBlockerUserIdAndBlockedUserId(UUID blockerUserId, UUID blockedUserId);
 
     @EntityGraph(attributePaths = "blockedUser")
-    List<UserBlock> findByBlockerUserIdOrderByCreatedAtDesc(UUID blockerUserId);
+    List<UserBlock> findByBlockerUserIdOrderByCreatedAtDesc(UUID blockerUserId, Pageable pageable);
 
     List<UserBlock> findByBlockerUserId(UUID blockerUserId);
 }

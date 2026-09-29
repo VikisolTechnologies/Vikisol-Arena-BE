@@ -15,6 +15,7 @@ import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,9 +55,14 @@ public class AgentService {
     }
 
     @Transactional(readOnly = true)
-    public List<AgentMessageResponse> getMessages(UUID userId, UUID conversationId) {
+    // Page 0 is the most recent messages; each page is returned oldest-first for display, the same
+    // as room and DM history.
+    public List<AgentMessageResponse> getMessages(UUID userId, UUID conversationId, Pageable pageable) {
         AgentConversation conversation = requireOwnedConversation(userId, conversationId);
-        return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId()).stream()
+        List<AgentMessage> recent = new java.util.ArrayList<>(
+                messageRepository.findByConversationIdOrderByCreatedAtDesc(conversation.getId(), pageable));
+        java.util.Collections.reverse(recent);
+        return recent.stream()
                 .map(this::toMessageResponse)
                 .toList();
     }

@@ -2,6 +2,7 @@ package com.vikisol.arena.rooms.repository;
 
 import com.vikisol.arena.rooms.entity.RoomMember;
 import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -14,7 +15,7 @@ import java.util.UUID;
 public interface RoomMemberRepository extends JpaRepository<RoomMember, UUID> {
     // room.post too: RoomService.getMyRooms reads the post's body/intent/status for every room.
     @EntityGraph(attributePaths = {"room", "room.post"})
-    List<RoomMember> findByUserIdOrderByCreatedAtDesc(UUID userId);
+    List<RoomMember> findByUserIdOrderByCreatedAtDesc(UUID userId, Pageable pageable);
 
     @EntityGraph(attributePaths = "user")
     List<RoomMember> findByRoomId(UUID roomId);

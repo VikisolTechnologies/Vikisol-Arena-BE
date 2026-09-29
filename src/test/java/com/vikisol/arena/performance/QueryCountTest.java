@@ -1,5 +1,6 @@
 package com.vikisol.arena.performance;
 
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
@@ -89,23 +90,23 @@ class QueryCountTest extends EmbeddedPostgresAppTest {
         User me = talent();
         for (int i = 0; i < 2; i++) follow(talent(), me);
         for (int i = 0; i < 2; i++) follow(me, talent());
-        long fewFollowers = count(() -> followService.getFollowers(me.getId()));
-        long fewFollowing = count(() -> followService.getFollowing(me.getId()));
+        long fewFollowers = count(() -> followService.getFollowers(me.getId(), PageLimits.firstPage()));
+        long fewFollowing = count(() -> followService.getFollowing(me.getId(), PageLimits.firstPage()));
 
         for (int i = 0; i < 6; i++) follow(talent(), me);
         for (int i = 0; i < 6; i++) follow(me, talent());
-        assertThat(count(() -> followService.getFollowers(me.getId()))).isEqualTo(fewFollowers);
-        assertThat(count(() -> followService.getFollowing(me.getId()))).isEqualTo(fewFollowing);
-        assertThat(followService.getFollowers(me.getId())).hasSize(8);
+        assertThat(count(() -> followService.getFollowers(me.getId(), PageLimits.firstPage()))).isEqualTo(fewFollowers);
+        assertThat(count(() -> followService.getFollowing(me.getId(), PageLimits.firstPage()))).isEqualTo(fewFollowing);
+        assertThat(followService.getFollowers(me.getId(), PageLimits.firstPage())).hasSize(8);
     }
 
     @Test
     void blockListIsConstantQueries() {
         User me = talent();
         for (int i = 0; i < 2; i++) block(me, talent());
-        long few = count(() -> blockService.getMyBlocks(me.getId()));
+        long few = count(() -> blockService.getMyBlocks(me.getId(), PageLimits.firstPage()));
         for (int i = 0; i < 6; i++) block(me, talent());
-        assertThat(count(() -> blockService.getMyBlocks(me.getId()))).isEqualTo(few);
+        assertThat(count(() -> blockService.getMyBlocks(me.getId(), PageLimits.firstPage()))).isEqualTo(few);
     }
 
     @Test
@@ -113,22 +114,22 @@ class QueryCountTest extends EmbeddedPostgresAppTest {
         User me = talent();
         conversation(me, talent());
         conversation(recruiter(), me);
-        long few = count(() -> conversationService.getMyConversations(me.getId()));
+        long few = count(() -> conversationService.getMyConversations(me.getId(), PageLimits.firstPage()));
         for (int i = 0; i < 4; i++) {
             conversation(me, talent());
             conversation(recruiter(), me);
         }
-        assertThat(count(() -> conversationService.getMyConversations(me.getId()))).isEqualTo(few);
-        assertThat(conversationService.getMyConversations(me.getId())).hasSize(10);
+        assertThat(count(() -> conversationService.getMyConversations(me.getId(), PageLimits.firstPage()))).isEqualTo(few);
+        assertThat(conversationService.getMyConversations(me.getId(), PageLimits.firstPage())).hasSize(10);
     }
 
     @Test
     void roomListIsConstantQueries() {
         User me = talent();
         for (int i = 0; i < 2; i++) room(me);
-        long few = count(() -> roomService.getMyRooms(me.getId()));
+        long few = count(() -> roomService.getMyRooms(me.getId(), PageLimits.firstPage()));
         for (int i = 0; i < 6; i++) room(me);
-        assertThat(count(() -> roomService.getMyRooms(me.getId()))).isEqualTo(few);
+        assertThat(count(() -> roomService.getMyRooms(me.getId(), PageLimits.firstPage()))).isEqualTo(few);
     }
 
     @Test
@@ -137,9 +138,9 @@ class QueryCountTest extends EmbeddedPostgresAppTest {
         Post activity = posts.save(Post.builder().authorUser(host).intentType(PostIntentType.ACTIVITY)
                 .body("Evening game").visibility(PostVisibility.PUBLIC).build());
         for (int i = 0; i < 2; i++) join(activity, talent());
-        long few = count(() -> postService.getJoinRequests(host.getId(), activity.getId()));
+        long few = count(() -> postService.getJoinRequests(host.getId(), activity.getId(), PageLimits.firstPage()));
         for (int i = 0; i < 6; i++) join(activity, talent());
-        assertThat(count(() -> postService.getJoinRequests(host.getId(), activity.getId()))).isEqualTo(few);
+        assertThat(count(() -> postService.getJoinRequests(host.getId(), activity.getId(), PageLimits.firstPage()))).isEqualTo(few);
     }
 
     private long count(Supplier<?> call) {

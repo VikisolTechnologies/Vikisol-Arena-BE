@@ -1,6 +1,7 @@
 package com.vikisol.arena.follows.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.follows.dto.FollowCountsResponse;
 import com.vikisol.arena.follows.dto.FollowerResponse;
 import com.vikisol.arena.follows.service.FollowService;
@@ -41,13 +42,15 @@ public class FollowController {
     }
 
     @GetMapping("/me/followers")
-    public ResponseEntity<ApiResponse<List<FollowerResponse>>> getMyFollowers(@AuthenticationPrincipal UserPrincipal principal) {
-        return ResponseEntity.ok(ApiResponse.ok(followService.getFollowers(principal.getId())));
+    public ResponseEntity<ApiResponse<List<FollowerResponse>>> getMyFollowers(
+            @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(followService.getFollowers(principal.getId(), PageLimits.of(page, size))));
     }
 
     @GetMapping("/me/following")
-    public ResponseEntity<ApiResponse<List<FollowerResponse>>> getMyFollowing(@AuthenticationPrincipal UserPrincipal principal) {
-        return ResponseEntity.ok(ApiResponse.ok(followService.getFollowing(principal.getId())));
+    public ResponseEntity<ApiResponse<List<FollowerResponse>>> getMyFollowing(
+            @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
+        return ResponseEntity.ok(ApiResponse.ok(followService.getFollowing(principal.getId(), PageLimits.of(page, size))));
     }
 
     // Phase C company-follow.

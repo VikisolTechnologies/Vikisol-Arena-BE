@@ -2,6 +2,7 @@ package com.vikisol.arena.messaging.repository;
 
 import com.vikisol.arena.messaging.entity.Conversation;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -14,7 +15,7 @@ public interface ConversationRepository extends JpaRepository<Conversation, UUID
     // Both participants fetched in the same query - ConversationService.toResponse reads the
     // other side's name/role for every row.
     @Query("select c from Conversation c join fetch c.userA join fetch c.userB where c.userA.id = :userId or c.userB.id = :userId order by c.lastMessageAt desc")
-    List<Conversation> findAllForUser(@Param("userId") UUID userId);
+    List<Conversation> findAllForUser(@Param("userId") UUID userId, Pageable pageable);
 
     @Query("""
             select c from Conversation c
