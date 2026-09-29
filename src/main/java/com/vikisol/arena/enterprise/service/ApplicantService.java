@@ -73,8 +73,8 @@ public class ApplicantService {
     }
 
     @Transactional
-    public ApplicantResponse moveStage(UUID enterpriseUserId, UUID applicantId, ApplicationStage stage) {
-        Application application = applicationService.advanceStageAsEnterprise(enterpriseUserId, applicantId, stage);
+    public ApplicantResponse moveStage(UUID enterpriseUserId, UUID applicantId, ApplicationStage stage, String message) {
+        Application application = applicationService.advanceStageAsEnterprise(enterpriseUserId, applicantId, stage, message);
         return toResponse(application);
     }
 
