@@ -41,6 +41,8 @@ public abstract class EmbeddedPostgresAppTest {
         // No demo seeding, bootstrap seeding or Cloudinary in tests.
         registry.add("app.seed.enabled", () -> "false");
         registry.add("app.demo-content.enabled", () -> "false");
+        // Uploaded files (photos, covers) land under target/, never in the working tree.
+        registry.add("app.storage.root-dir", () -> "target/test-uploads");
         // Lets a test count the SQL statements a call issues (QueryCountTest), to prove N+1 fixes.
         registry.add("spring.jpa.properties.hibernate.generate_statistics", () -> "true");
         registry.add("logging.level.org.hibernate.engine.internal.StatisticalLoggingSessionEventListener", () -> "WARN");

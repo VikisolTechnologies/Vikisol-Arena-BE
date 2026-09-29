@@ -1,5 +1,14 @@
 package com.vikisol.arena.profile.service;
 
+import com.vikisol.arena.profile.dto.PatchProfileRequest;
+import com.vikisol.arena.profile.dto.ProfileBasicsResponse;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
+import java.util.stream.Collectors;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.audit.AuditActions;
 import com.vikisol.arena.audit.AuditService;
@@ -53,6 +62,14 @@ public class CandidateProfileService {
     private final TokenDenylistService tokenDenylistService;
     private final JwtTokenProvider jwtTokenProvider;
     private final FollowService followService;
+    private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
+
+    // FE-API-GAPS 1 and 5: the closed vocabularies the onboarding screens send.
+    static final Set<String> INTENTS = Set.of("activities", "meet", "ask", "offer", "job", "hire", "projects", "explore");
+    static final Set<String> AVAILABILITY = Set.of("weekdays", "weekends", "evenings");
+    static final int MAX_INTERESTS = 20;
+    static final int MAX_INTEREST_LENGTH = 30;
+    private static final Set<String> PHOTO_EXTENSIONS = Set.of(".png", ".jpg", ".jpeg", ".webp");
 
     @Transactional(readOnly = true)
     public CandidateProfile getEntityForUser(UUID userId) {
@@ -206,6 +223,13 @@ public class CandidateProfileService {
         CandidateProfile profile = getEntityForUser(userId);
         User user = userRepository.findById(userId).orElseThrow();
 
+        if (profile.getPhotoUrl() != null) {
+            fileStorageService.delete(profile.getPhotoUrl());
+            profile.setPhotoUrl(null);
+        }
+        profile.setIntents(new java.util.ArrayList<>());
+        profile.setInterests(new java.util.ArrayList<>());
+        profile.setAvailability(new java.util.ArrayList<>());
         if (profile.getCvUrl() != null) {
             fileStorageService.delete(profile.getCvUrl());
         }
@@ -237,6 +261,98 @@ public class CandidateProfileService {
         auditService.record(null, userId, AuditActions.ACCOUNT_DELETED, auditReason);
     }
 
+    // --- FE-API-GAPS 1-5: onboarding basics -------------------------------------------------
+
+    @Transactional(readOnly = true)
+    public ProfileBasicsResponse getBasics(UUID userId) {
+        return toBasics(getEntityForUser(userId));
+    }
+
+    // Gap 4 and 5: only the fields present in the request change; industry, experience and rate
+    // are not required here (unlike PUT /profile/me/details).
+    @Transactional
+    public ProfileBasicsResponse patch(UUID userId, PatchProfileRequest request) {
+        CandidateProfile profile = getEntityForUser(userId);
+        if (request.name() != null) {
+            if (request.name().isBlank()) throw new BadRequestException("Name can't be empty");
+            profile.setName(request.name().trim());
+            profile.getUser().setName(request.name().trim());
+        }
+        if (request.title() != null) profile.setTitle(request.title().trim());
+        if (request.bio() != null) profile.setBio(request.bio().isBlank() ? null : request.bio().trim());
+        if (request.availability() != null) {
+            profile.setAvailability(new ArrayList<>(vocabulary(request.availability(), AVAILABILITY, "availability")));
+        }
+        return toBasics(candidateProfileRepository.save(profile));
+    }
+
+    @Transactional
+    public ProfileBasicsResponse setIntents(UUID userId, List<String> intents) {
+        CandidateProfile profile = getEntityForUser(userId);
+        profile.setIntents(new ArrayList<>(vocabulary(intents, INTENTS, "intent")));
+        return toBasics(candidateProfileRepository.save(profile));
+    }
+
+    @Transactional
+    public ProfileBasicsResponse setInterests(UUID userId, List<String> interests) {
+        CandidateProfile profile = getEntityForUser(userId);
+        LinkedHashMap<String, String> unique = new LinkedHashMap<>();
+        for (String raw : interests) {
+            String interest = raw == null ? "" : raw.trim().replaceAll("\\s+", " ");
+            if (interest.isEmpty()) continue;
+            if (interest.length() > MAX_INTEREST_LENGTH) {
+                throw new BadRequestException("Each interest can be at most " + MAX_INTEREST_LENGTH + " characters");
+            }
+            unique.putIfAbsent(interest.toLowerCase(Locale.ROOT), interest);
+        }
+        if (unique.size() > MAX_INTERESTS) throw new BadRequestException("You can add up to " + MAX_INTERESTS + " interests");
+        profile.setInterests(new ArrayList<>(unique.values()));
+        return toBasics(candidateProfileRepository.save(profile));
+    }
+
+    // Gap 3. Images only; the old photo file is removed.
+    @Transactional
+    public ProfileBasicsResponse uploadPhoto(UUID userId, org.springframework.web.multipart.MultipartFile file) {
+        String name = file == null ? null : file.getOriginalFilename();
+        String extension = name != null && name.contains(".") ? name.substring(name.lastIndexOf('.')).toLowerCase(Locale.ROOT) : "";
+        if (!PHOTO_EXTENSIONS.contains(extension)) {
+            throw new BadRequestException("A profile photo must be a PNG, JPG or WebP image");
+        }
+        CandidateProfile profile = getEntityForUser(userId);
+        FileStorageService.StoredFile stored = fileStorageService.store(file, "profile-photo", profile.getId().toString(), "photo");
+        if (profile.getPhotoUrl() != null) fileStorageService.delete(profile.getPhotoUrl());
+        profile.setPhotoUrl(stored.url());
+        return toBasics(candidateProfileRepository.save(profile));
+    }
+
+    @Transactional
+    public ProfileBasicsResponse deletePhoto(UUID userId) {
+        CandidateProfile profile = getEntityForUser(userId);
+        if (profile.getPhotoUrl() != null) {
+            fileStorageService.delete(profile.getPhotoUrl());
+            profile.setPhotoUrl(null);
+        }
+        return toBasics(candidateProfileRepository.save(profile));
+    }
+
+    private static List<String> vocabulary(List<String> values, Set<String> allowed, String label) {
+        LinkedHashSet<String> out = new LinkedHashSet<>();
+        for (String raw : values) {
+            String v = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
+            if (!allowed.contains(v)) {
+                throw new BadRequestException("'" + raw + "' is not a valid " + label + ". Use one of: "
+                        + allowed.stream().sorted().collect(Collectors.joining(", ")));
+            }
+            out.add(v);
+        }
+        return List.copyOf(out);
+    }
+
+    private ProfileBasicsResponse toBasics(CandidateProfile p) {
+        return new ProfileBasicsResponse(p.getName(), p.getTitle(), p.getBio(), fileSigningService.sign(p.getPhotoUrl()),
+                List.copyOf(p.getIntents()), List.copyOf(p.getInterests()), List.copyOf(p.getAvailability()));
+    }
+
     // ARENA-V2-PRODUCT-ARCHITECTURE.md Phase C profile revamp - the public/other-user view
     // `/identity` never had at all (see DECISIONS.md). The canonical key is the PROFILE OWNER's
     // user id, since that's what Follow/Post already key on everywhere else. Talent Universe
@@ -259,7 +375,9 @@ public class CandidateProfileService {
                 profile.getExperienceYears(), profile.getOpenTo().stream().map(o -> o.wireValue()).toList(),
                 profile.getCareerHealth(), profile.getBio(),
                 user.getVerificationLevel().wireValue(), user.isPhoneVerified(), homeCity,
-                counts.followerCount(), counts.followingCount(), counts.viewerFollows());
+                counts.followerCount(), counts.followingCount(), counts.viewerFollows(),
+                fileSigningService.sign(profile.getPhotoUrl()), List.copyOf(profile.getInterests()),
+                List.copyOf(profile.getAvailability()));
     }
 
     @Transactional

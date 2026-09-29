@@ -105,4 +105,26 @@ public class CandidateProfile extends BaseEntity {
     private Integer currentCtc;
     private Integer expectedCtc;
     private String preferredLocation;
+
+    // FE-API-GAPS 1-5 (onboarding, V22). Intents are only ever shown to the person themself;
+    // interests, availability and the photo appear on the public profile.
+    private String photoUrl;
+
+    @ElementCollection
+    @CollectionTable(name = "arena_candidate_intents", joinColumns = @JoinColumn(name = "candidate_id"))
+    @Column(name = "intent")
+    @Builder.Default
+    private List<String> intents = new ArrayList<>();
+
+    @ElementCollection
+    @CollectionTable(name = "arena_candidate_interests", joinColumns = @JoinColumn(name = "candidate_id"))
+    @Column(name = "interest")
+    @Builder.Default
+    private List<String> interests = new ArrayList<>();
+
+    @ElementCollection
+    @CollectionTable(name = "arena_candidate_availability", joinColumns = @JoinColumn(name = "candidate_id"))
+    @Column(name = "slot")
+    @Builder.Default
+    private List<String> availability = new ArrayList<>();
 }
