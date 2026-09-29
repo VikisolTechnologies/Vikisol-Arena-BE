@@ -1,6 +1,7 @@
 package com.vikisol.arena.common.exception;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.integration.provider.ProviderException;
 import lombok.extern.slf4j.Slf4j;
 import jakarta.validation.ConstraintViolationException;
 import org.springframework.dao.ConcurrencyFailureException;
@@ -130,6 +131,14 @@ public class GlobalExceptionHandler {
                 .collect(Collectors.joining("; "));
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(new ApiResponse<>(false, message.isBlank() ? "Please check the values you entered" : message, null));
+    }
+
+    // An email/SMS/WhatsApp/Teams/OpenAI call failed. The message is the short user-facing text
+    // chosen by the kind of failure; the provider's own error was logged, redacted, where it was
+    // thrown (ProviderException.failure) and never reaches the response.
+    @ExceptionHandler(ProviderException.class)
+    public ResponseEntity<ApiResponse<Void>> handleProvider(ProviderException ex) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(new ApiResponse<>(false, ex.getMessage(), null));
     }
 
     @ExceptionHandler(DataIntegrityViolationException.class)

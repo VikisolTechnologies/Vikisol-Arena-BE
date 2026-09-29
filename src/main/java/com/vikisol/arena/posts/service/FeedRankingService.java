@@ -13,6 +13,7 @@ import com.vikisol.arena.posts.repository.PostRepository;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -50,6 +51,7 @@ import java.util.stream.Collectors;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class FeedRankingService {
 
     // Bounded window, not the whole table - keeps this a fixed-cost read regardless of how many
@@ -190,7 +192,14 @@ public class FeedRankingService {
         Pageable recentFew = PageRequest.of(0, 5, Sort.by(Sort.Direction.DESC, "createdAt"));
         postRepository.findByAuthorUserIdOrderByCreatedAtDesc(viewingUserId, recentFew)
                 .forEach(p -> text.append(p.getBody()).append(' '));
-        return embeddingProvider.embed(text.toString());
+        // Best-effort like PostService.embedOrNull: an OpenAI outage must not fail the feed, and
+        // its error text must not reach the caller. A null vector means no interest boost.
+        try {
+            return embeddingProvider.embed(text.toString());
+        } catch (Exception e) {
+            log.warn("Interest embedding failed, feed ranks without it ({})", e.getClass().getSimpleName());
+            return null;
+        }
     }
 
     // Merges both report paths a post can accumulate - a direct report (ModerationContentType.

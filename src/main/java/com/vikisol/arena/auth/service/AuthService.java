@@ -18,6 +18,7 @@ import com.vikisol.arena.enterprise.repository.MembershipRepository;
 import com.vikisol.arena.integration.provider.EmailMessage;
 import com.vikisol.arena.integration.provider.EmailProvider;
 import com.vikisol.arena.integration.provider.PhoneOtpProvider;
+import com.vikisol.arena.integration.provider.ProviderException;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import com.vikisol.arena.security.jwt.JwtTokenProvider;
@@ -150,7 +151,7 @@ public class AuthService {
                                         : "Post your first job to start building your pipeline.")
                                 + "</p><p>- The Vikisol Arena team</p>"));
             } catch (Exception e) {
-                log.warn("Welcome email failed for {}: {}", user.getEmail(), e.getMessage());
+                log.warn("Welcome email failed for user {}", user.getId());
             }
         }
 
@@ -288,7 +289,7 @@ public class AuthService {
                             + "<p>If this wasn't you, you can safely ignore this email - your password hasn't changed.</p>"
                             + "<p>- The Vikisol Arena team</p>"));
         } catch (Exception e) {
-            log.warn("Password reset email failed for {}: {}", user.getEmail(), e.getMessage());
+            log.warn("Password reset email failed for user {}", user.getId());
         }
     }
 
@@ -415,8 +416,8 @@ public class AuthService {
                             + "you can safely ignore this email.</p>"
                             + "<p>- The Vikisol Arena team</p>"));
         } catch (Exception e) {
-            log.warn("Email OTP send failed for {}: {}", user.getEmail(), e.getMessage());
-            throw new BadRequestException("Could not send the code right now - please try again");
+            log.warn("Email OTP send failed for user {}", user.getId());
+            throw new ProviderException(ProviderException.Kind.CODE);
         }
     }
 

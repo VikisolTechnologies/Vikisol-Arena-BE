@@ -82,12 +82,13 @@ public class WhatsAppBusinessProvider implements WhatsAppProvider {
                     .build();
             HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 300) {
-                throw new RuntimeException("WhatsApp Cloud API returned " + response.statusCode() + ": " + response.body());
+                throw ProviderException.failure(log, ProviderException.Kind.WHATSAPP, "WhatsApp", response.statusCode(), response.body());
             }
-            log.info("WhatsApp template \"{}\" sent to {}", templateName, to);
+            log.info("WhatsApp template \"{}\" sent", templateName);
+        } catch (ProviderException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("WhatsApp send failed: {}", e.getMessage());
-            throw new RuntimeException("Could not send WhatsApp message: " + e.getMessage(), e);
+            throw ProviderException.failure(log, ProviderException.Kind.WHATSAPP, "WhatsApp", e);
         }
     }
 }

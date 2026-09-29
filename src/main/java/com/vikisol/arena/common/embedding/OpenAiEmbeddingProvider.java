@@ -2,6 +2,7 @@ package com.vikisol.arena.common.embedding;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vikisol.arena.integration.provider.ProviderException;
 import lombok.extern.slf4j.Slf4j;
 
 import java.net.URI;
@@ -60,16 +61,17 @@ public class OpenAiEmbeddingProvider implements EmbeddingProvider {
                     .build();
             HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 300) {
-                throw new RuntimeException("OpenAI embeddings API returned " + response.statusCode() + ": " + response.body());
+                throw ProviderException.failure(log, ProviderException.Kind.EMBEDDING, "OpenAI", response.statusCode(), response.body());
             }
             JsonNode root = objectMapper.readTree(response.body());
             JsonNode values = root.at("/data/0/embedding");
             float[] vector = new float[values.size()];
             for (int i = 0; i < values.size(); i++) vector[i] = (float) values.get(i).asDouble();
             return vector;
+        } catch (ProviderException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("OpenAI embedding request failed: {}", e.getMessage());
-            throw new RuntimeException("Could not compute embedding via OpenAI: " + e.getMessage(), e);
+            throw ProviderException.failure(log, ProviderException.Kind.EMBEDDING, "OpenAI", e);
         }
     }
 

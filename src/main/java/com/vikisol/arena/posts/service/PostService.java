@@ -733,7 +733,7 @@ public class PostService {
         try {
             return embeddingProvider.embed(text);
         } catch (Exception e) {
-            log.warn("Embedding failed, post will save without one: {}", e.getMessage());
+            log.warn("Embedding failed, post will save without one ({})", e.getClass().getSimpleName());
             return null;
         }
     }
