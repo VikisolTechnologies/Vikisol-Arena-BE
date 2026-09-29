@@ -44,13 +44,13 @@ public class FollowController {
     @GetMapping("/me/followers")
     public ResponseEntity<ApiResponse<List<FollowerResponse>>> getMyFollowers(
             @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(followService.getFollowers(principal.getId(), PageLimits.of(page, size))));
+        return PageLimits.ok(followService.getFollowers(principal.getId(), PageLimits.of(page, size)));
     }
 
     @GetMapping("/me/following")
     public ResponseEntity<ApiResponse<List<FollowerResponse>>> getMyFollowing(
             @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(followService.getFollowing(principal.getId(), PageLimits.of(page, size))));
+        return PageLimits.ok(followService.getFollowing(principal.getId(), PageLimits.of(page, size)));
     }
 
     // Phase C company-follow.

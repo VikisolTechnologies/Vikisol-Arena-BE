@@ -24,6 +24,8 @@ import com.vikisol.arena.rooms.repository.RoomMessageRepository;
 import com.vikisol.arena.rooms.repository.RoomReportRepository;
 import com.vikisol.arena.rooms.repository.RoomRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -131,21 +133,20 @@ public class RoomService {
     }
 
     @Transactional(readOnly = true)
-    public List<RoomResponse> getMyRooms(UUID userId, Pageable pageable) {
-        List<RoomMember> memberships = roomMemberRepository.findByUserIdOrderByCreatedAtDesc(userId, pageable);
+    public Page<RoomResponse> getMyRooms(UUID userId, Pageable pageable) {
+        Page<RoomMember> memberships = roomMemberRepository.findMyRoomsByLatestActivity(userId, pageable);
         List<UUID> roomIds = memberships.stream().map(m -> m.getRoom().getId()).toList();
-        if (roomIds.isEmpty()) return List.of();
+        if (roomIds.isEmpty()) return new PageImpl<>(List.of(), pageable, memberships.getTotalElements());
         // One COUNT ... GROUP BY and one latest-message query for every room, instead of both
         // once per room.
         Map<UUID, Long> memberCounts = roomMemberRepository.countByRoomIdIn(roomIds).stream()
                 .collect(Collectors.toMap(RoomMemberRepository.RoomCount::getRoomId, RoomMemberRepository.RoomCount::getCnt));
         Map<UUID, RoomMessage> lastMessages = roomMessageRepository.findLatestByRoomIdIn(roomIds).stream()
                 .collect(Collectors.toMap(m -> m.getRoom().getId(), m -> m, (a, b) -> a));
-        return memberships.stream()
+        return memberships
                 .map(membership -> toResponse(membership.getRoom(), membership,
                         lastMessages.get(membership.getRoom().getId()),
-                        memberCounts.getOrDefault(membership.getRoom().getId(), 0L).intValue()))
-                .toList();
+                        memberCounts.getOrDefault(membership.getRoom().getId(), 0L).intValue()));
     }
 
     @Transactional(readOnly = true)

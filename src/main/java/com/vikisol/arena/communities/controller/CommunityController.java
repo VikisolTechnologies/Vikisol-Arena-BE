@@ -51,13 +51,13 @@ public class CommunityController {
     public ResponseEntity<ApiResponse<List<CommunityResponse>>> list(
             @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "") String q,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(PageLimits.slice(communityService.list(q, viewer(principal)), page, size)));
+        return PageLimits.ok(PageLimits.page(communityService.list(q, viewer(principal)), page, size));
     }
 
     @GetMapping("/communities/mine")
     public ResponseEntity<ApiResponse<List<CommunityResponse>>> mine(
             @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(PageLimits.slice(communityService.mine(principal.getId()), page, size)));
+        return PageLimits.ok(PageLimits.page(communityService.mine(principal.getId()), page, size));
     }
 
     @PreAuthorize("permitAll()")

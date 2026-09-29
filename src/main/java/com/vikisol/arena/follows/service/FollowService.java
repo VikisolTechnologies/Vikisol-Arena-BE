@@ -15,6 +15,7 @@ import com.vikisol.arena.notifications.service.NotificationService;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -64,19 +65,19 @@ public class FollowService {
     }
 
     @Transactional(readOnly = true)
-    public List<FollowerResponse> getFollowers(UUID userId, Pageable pageable) {
-        List<Follow> rows = followRepository.findByFollowingUserIdOrderByCreatedAtDesc(userId, pageable);
+    public Page<FollowerResponse> getFollowers(UUID userId, Pageable pageable) {
+        Page<Follow> rows = followRepository.findByFollowingUserIdOrderByCreatedAtDescIdDesc(userId, pageable);
         Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
                 rows.stream().map(f -> f.getFollowerUser().getId()).toList());
-        return rows.stream().map(f -> toResponse(f.getFollowerUser(), f.getCreatedAt().toString(), profiles)).toList();
+        return rows.map(f -> toResponse(f.getFollowerUser(), f.getCreatedAt().toString(), profiles));
     }
 
     @Transactional(readOnly = true)
-    public List<FollowerResponse> getFollowing(UUID userId, Pageable pageable) {
-        List<Follow> rows = followRepository.findByFollowerUserIdOrderByCreatedAtDesc(userId, pageable);
+    public Page<FollowerResponse> getFollowing(UUID userId, Pageable pageable) {
+        Page<Follow> rows = followRepository.findByFollowerUserIdOrderByCreatedAtDescIdDesc(userId, pageable);
         Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
                 rows.stream().map(f -> f.getFollowingUser().getId()).toList());
-        return rows.stream().map(f -> toResponse(f.getFollowingUser(), f.getCreatedAt().toString(), profiles)).toList();
+        return rows.map(f -> toResponse(f.getFollowingUser(), f.getCreatedAt().toString(), profiles));
     }
 
     private FollowerResponse toResponse(User user, String followedAt, Map<UUID, CandidateProfile> profiles) {

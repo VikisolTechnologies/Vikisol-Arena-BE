@@ -36,7 +36,7 @@ class AgentApprovalFlowTest extends EmbeddedPostgresAppTest {
         var reply = service.sendMessage(user.getId(), conversation.id(), "Join the game");
         verify(gateway).sendMessage(any(), eq(List.of()), eq("Join the game"));
         verify(gateway, never()).decideAction(any(), anyString(), anyBoolean());
-        assertThat(service.getMessages(user.getId(), conversation.id(), PageLimits.firstPage()).getLast().actions()).hasSize(1);
+        assertThat(service.getMessages(user.getId(), conversation.id(), PageLimits.firstPage()).getContent().getLast().actions()).hasSize(1);
         var actionId = reply.actions().getFirst().id();
         assertThatThrownBy(() -> service.decideAction(other.getId(), actionId, true)).hasMessageContaining("Action not found");
         when(gateway.decideAction(any(), anyString(), eq(true))).thenReturn(new AgentDecision("done", json.readTree("{\"status\":\"approved\"}"), null));

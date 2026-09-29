@@ -30,7 +30,7 @@ public class RoomController {
     @GetMapping
     public ResponseEntity<ApiResponse<List<RoomResponse>>> getMyRooms(
             @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(roomService.getMyRooms(principal.getId(), PageLimits.of(page, size))));
+        return PageLimits.ok(roomService.getMyRooms(principal.getId(), PageLimits.of(page, size)));
     }
 
     @GetMapping("/{id}/messages")

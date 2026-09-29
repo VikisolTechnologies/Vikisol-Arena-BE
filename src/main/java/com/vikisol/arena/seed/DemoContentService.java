@@ -921,7 +921,7 @@ public class DemoContentService {
         // shared between two demo users via the Set, same pattern as the Room cleanup above.
         Set<Conversation> conversations = new java.util.LinkedHashSet<>();
         for (User user : users) {
-            conversations.addAll(conversationRepository.findAllForUser(user.getId(), Pageable.unpaged()));
+            conversations.addAll(conversationRepository.findAllForUser(user.getId(), Pageable.unpaged()).getContent());
         }
         for (Conversation conversation : conversations) {
             threadMessageRepository.deleteByConversationId(conversation.getId());

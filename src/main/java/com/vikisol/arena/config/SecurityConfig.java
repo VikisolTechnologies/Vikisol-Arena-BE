@@ -2,6 +2,7 @@ package com.vikisol.arena.config;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.security.jwt.AgentServiceTokenAuthenticationFilter;
 import com.vikisol.arena.security.jwt.JwtAuthenticationEntryPoint;
 import com.vikisol.arena.security.jwt.JwtAuthenticationFilter;
@@ -30,6 +31,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 import java.util.Arrays;
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -57,6 +59,8 @@ public class SecurityConfig {
                     config.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
                     config.addAllowedHeader("*");
                     config.addAllowedMethod("*");
+                    // PageLimits' paging headers on the bare-array list endpoints.
+                    config.setExposedHeaders(List.of(PageLimits.TOTAL_COUNT_HEADER, PageLimits.HAS_MORE_HEADER));
                     return config;
                 }))
                 .csrf(csrf -> csrf.disable())

@@ -2,6 +2,7 @@ package com.vikisol.arena.follows.repository;
 
 import com.vikisol.arena.follows.entity.Follow;
 import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -24,11 +25,12 @@ public interface FollowRepository extends JpaRepository<Follow, UUID> {
     @Query("select f.followingUser.id from Follow f where f.followerUser.id = :followerUserId")
     List<UUID> findFollowingUserIdsByFollowerUserId(@Param("followerUserId") UUID followerUserId);
 
+    // Newest first; id breaks same-instant ties so page boundaries are stable.
     @EntityGraph(attributePaths = "followerUser")
-    List<Follow> findByFollowingUserIdOrderByCreatedAtDesc(UUID followingUserId, Pageable pageable);
+    Page<Follow> findByFollowingUserIdOrderByCreatedAtDescIdDesc(UUID followingUserId, Pageable pageable);
 
     @EntityGraph(attributePaths = "followingUser")
-    List<Follow> findByFollowerUserIdOrderByCreatedAtDesc(UUID followerUserId, Pageable pageable);
+    Page<Follow> findByFollowerUserIdOrderByCreatedAtDescIdDesc(UUID followerUserId, Pageable pageable);
 
     // Phase C company-follow (see Follow's own class comment for the additive-column shape).
     Optional<Follow> findByFollowerUserIdAndFollowingCompanyId(UUID followerUserId, UUID followingCompanyId);

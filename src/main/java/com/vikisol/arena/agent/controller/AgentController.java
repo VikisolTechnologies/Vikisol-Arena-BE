@@ -32,7 +32,7 @@ public class AgentController {
     @GetMapping("/conversations/{id}/messages")
     public ResponseEntity<ApiResponse<List<AgentMessageResponse>>> getMessages(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(agentService.getMessages(principal.getId(), id, PageLimits.of(page, size))));
+        return PageLimits.ok(agentService.getMessages(principal.getId(), id, PageLimits.of(page, size)));
     }
 
     @PostMapping("/conversations/{id}/messages")

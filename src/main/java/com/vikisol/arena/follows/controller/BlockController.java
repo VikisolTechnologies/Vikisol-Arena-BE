@@ -37,6 +37,6 @@ public class BlockController {
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<List<BlockedUserResponse>>> getMyBlocks(
             @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(blockService.getMyBlocks(principal.getId(), PageLimits.of(page, size))));
+        return PageLimits.ok(blockService.getMyBlocks(principal.getId(), PageLimits.of(page, size)));
     }
 }

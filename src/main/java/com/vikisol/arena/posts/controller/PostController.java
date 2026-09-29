@@ -176,7 +176,7 @@ public class PostController {
     @GetMapping("/{id}/joins")
     public ResponseEntity<ApiResponse<List<PostJoinRequestResponse>>> getJoinRequests(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.getJoinRequests(principal.getId(), id, PageLimits.of(page, size))));
+        return PageLimits.ok(postService.getJoinRequests(principal.getId(), id, PageLimits.of(page, size)));
     }
 
     @PutMapping("/{id}/joins/{joinId}/approve")

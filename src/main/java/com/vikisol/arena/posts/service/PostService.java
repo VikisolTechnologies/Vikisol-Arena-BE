@@ -35,6 +35,8 @@ import com.vikisol.arena.rooms.entity.Room;
 import com.vikisol.arena.rooms.service.RoomService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -612,12 +614,14 @@ public class PostService {
     }
 
     @Transactional(readOnly = true)
-    public List<PostJoinRequestResponse> getJoinRequests(UUID userId, UUID postId, Pageable pageable) {
+    public Page<PostJoinRequestResponse> getJoinRequests(UUID userId, UUID postId, Pageable pageable) {
         Post post = requirePost(postId);
         if (!post.getAuthorUser().getId().equals(userId)) {
             throw new AccessDeniedException("Not your post");
         }
-        return mapper.toResponseList(postJoinRequestRepository.findByPostIdOrderByCreatedAtAsc(postId, pageable));
+        // A review queue: oldest request first, so the host answers people in the order they asked.
+        Page<PostJoinRequest> rows = postJoinRequestRepository.findByPostIdOrderByCreatedAtAscIdAsc(postId, pageable);
+        return new PageImpl<>(mapper.toResponseList(rows.getContent()), pageable, rows.getTotalElements());
     }
 
     // Shared by both the PUBLIC-auto-approve path and the APPROVAL-manual-approve path so the

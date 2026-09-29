@@ -27,7 +27,7 @@ public class MessageController {
     @GetMapping("/conversations")
     public ResponseEntity<ApiResponse<List<ConversationResponse>>> getConversations(
             @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(conversationService.getMyConversations(principal.getId(), PageLimits.of(page, size))));
+        return PageLimits.ok(conversationService.getMyConversations(principal.getId(), PageLimits.of(page, size)));
     }
 
     @GetMapping("/conversations/{id}/messages")
