@@ -81,3 +81,114 @@ Before, `size=100000` was honoured and a negative page was a 400. `GET /search?l
 Unchanged: 400 validation errors (still carry the field map in `data`), 400 bad JSON, 400 bad UUID,
 401 from the entry point, 403 from method security, 404 `ResourceNotFoundException`, 409 constraint
 violations, 429 from the rate limiter, and every Jenny service-token 403.
+
+---
+
+# Backend for the new frontend — `feature/be-fe-gaps`
+
+Stacked on `cloud/api-hardening`. **Every change here is additive:** new endpoints, new tables,
+new optional fields. Existing endpoints keep their paths, request bodies and response fields. The
+one behaviour change on an existing endpoint is marked **⚠** where it appears.
+
+**Gap numbers:**
+- **1–6** are the rows in the frontend's `docs/FE-API-GAPS.md`.
+- **G7 and up** are new. They come from `docs/design/BPLUS-SCREENS.md` and the FE `ARENA-MISSION.md`,
+  because the `ARENA-APP-FLOW.md` the brief names doesn't exist in the frontend repo. The frontend
+  should copy these rows into `FE-API-GAPS.md`.
+
+All bodies use the usual envelope: `{ "success": true, "data": … }`, and errors are
+`{ "success": false, "message": "…" }`.
+
+**Protected attributes:** free text that one person writes for others to meet or answer is checked
+by `ProtectedAttributes`:
+- activity details;
+- host questions;
+- must-haves;
+- screening questions.
+
+It refuses wording about age, gender, marital status, religion, caste or disability with a 400:
+"Arena doesn't allow asking about or filtering by … Please rephrase …". There is no such field or
+filter anywhere in the API.
+
+## Profile basics (onboarding) — gaps 1–5
+
+All endpoints need a talent session; they only ever touch the caller's own profile.
+
+| Gap | Endpoint | Body | Returns |
+|---|---|---|---|
+| 1 | `PUT /profile/me/intents` | `{ "intents": ["activities","meet","ask","offer","job","hire","projects","explore"] }` (any subset) | `ProfileBasics` |
+| 2 | `PUT /profile/me/interests` | `{ "interests": ["Badminton", …] }`. Up to 20, each ≤30 chars, trimmed, de-duplicated ignoring case | `ProfileBasics` |
+| 3 | `POST /profile/me/photo` | multipart `file` (PNG, JPG or WebP, ≤10 MB) | `ProfileBasics` with a signed `photoUrl` |
+| 3 | `DELETE /profile/me/photo` | none | `ProfileBasics` without `photoUrl` |
+| 4, 5 | `PATCH /profile/me` | `{ name?, title?, bio? (≤160), availability? ("weekdays"\|"weekends"\|"evenings")[] }`. Only the fields sent change | `ProfileBasics` |
+| 1–5 | `GET /profile/me/basics` | none | `ProfileBasics` |
+
+`ProfileBasics` = `{ name, title, bio, photoUrl, intents[], interests[], availability[] }`.
+
+- Intents are **self-only**; they appear in no other response.
+- `GET /profile/{id}` (public profile) gains three **added** fields: `photoUrl`, `interests[]` and
+  `availability[]`.
+- Account erasure clears all of them.
+
+**Passwords (gap logged by the frontend):** `POST /auth/signup`, `POST /auth/reset-password` and
+`POST /auth/change-password` now need **at least 8 characters**. The 400 is
+`data.password` / `data.newPassword`: "must be at least 8 characters". Sign-in is unchanged, so an
+existing shorter password still works until it is changed.
+
+## Activities — G7 to G13
+
+`{id}` is the id of an `ACTIVITY` post (created as today with `POST /posts`). A non-activity,
+anonymous or removed post answers 404. Only the host (the post's author) can change the activity;
+only talent can host or join.
+
+| Gap | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| G7 | `GET /activities/kinds` | anyone | `{ kind: [type-specific keys] }` catalogue for the form |
+| G7 | `GET /activities/{id}` | anyone (guest too) | `Activity` below; `viewer` only when signed in |
+| G7 | `PUT /activities/{id}/details` | host | `{ kind?, details?: { key: value }, waitlistEnabled? }`. `kind` is required the first time. Keys: common `level, cost, bring, accessibility, language`, plus per kind (`sport`: sport, format, equipment; `fitness`: activity, pace, distance; `study`: subject, format; `meetup`: theme; `workshop`: topic, materials; `collaboration`: skillsNeeded, commitment; `volunteer`: cause, requirements). Values ≤200 chars, up to 12 keys; an empty value removes the key |
+| G13 | `POST /activities/{id}/cover` | host | multipart `file` (PNG/JPG/WebP). Needs `details` first |
+| G13 | `DELETE /activities/{id}/cover` | host | |
+| G8 | `PUT /activities/{id}/questions` | host | `{ questions: [{ text (≤200), required? (default true) }] }`, at most 3. Refused once anyone has answered |
+| G8 | `POST /activities/{id}/join` | talent | `{ answers: [{ questionId, answer (≤500) }] }` → the same `PostJoinRequest` body as `POST /posts/{id}/joins` |
+| G8 | `GET /activities/{id}/answers/{userId}` | host, or that user | `[{ questionId, question, answer }]` |
+| G9 | `POST /activities/{id}/waitlist` | talent | Optional `{ answers }`. Only when the activity is full; 400 "There are still spots" otherwise |
+| G9 | `DELETE /activities/{id}/waitlist` | the waiting person | |
+| G9 | `GET /activities/{id}/waitlist` | host | `[{ userId, name, avatarEmoji, position, joinedAt }]` in queue order |
+| G10 | `POST /activities/{id}/check-in` | someone who joined | Opens 1h before `startsAt` and closes at `endsAt` (or `startsAt` + 6h). Idempotent |
+| G11 | `GET /activities/{id}/attendance` | host | `[{ joinId, userId, name, checkedInAt, outcome, outcomeRecordedAt, disputeStatus, disputeReason }]` |
+| G11 | `POST /activities/{id}/attendance/dispute` | the person marked `no_show` | `{ reason (≤500) }`, within 72h of the host recording it, once |
+| G11 | `PUT /activities/{id}/attendance/{joinId}/accept-dispute` | host | Marks them `attended` |
+| G12 | `POST /activities/{id}/feedback` | host ↔ someone who joined | `{ toUserId, text (≤500) }`, once the activity has started. One note per pair; sending again edits it |
+| G12 | `GET /activities/feedback/received` | anyone signed in | Own received feedback, newest first. Paged with `page`/`size` + `X-Total-Count`/`X-Has-More` |
+
+`Activity` =
+
+```
+{ postId, kind, details: {…}, coverUrl, waitlistEnabled, questions: [{ id, text, required }],
+  spotsLeft, waitlistCount,
+  viewer: { host, joinStatus, waitlistPosition, answered, checkedInAt, outcome, disputeStatus, disputeOpenUntil } }
+```
+
+**How the pieces behave:**
+- **Waitlist promotion.** When someone who had joined leaves (`DELETE /posts/{id}/joins/me`), the
+  first person on the waitlist who can still join gets the spot:
+  - for an open activity they're approved straight in (room, notification);
+  - for an approval activity they become a pending request for the host.
+  
+  One spot promotes one person. People who can no longer join (blocked, not verified enough) are
+  skipped. Joining directly uses up a waitlist place.
+- **Attendance stays private.** The host records it with the existing
+  `PUT /posts/{id}/joins/{joinId}/outcome`, and only the host and that person ever see it.
+- **The 72h dispute window.**
+  - Recording an outcome now starts the 72h window.
+  - Marking someone present accepts their open dispute.
+  - A no-show can't be re-recorded after the host accepted a dispute (400).
+
+**⚠ Existing behaviour changes:**
+- **`POST /posts/{id}/joins`** on an activity whose host added a **required question** now answers
+  400: "The host asks a question before you join. Answer it to send your request." The client should
+  call `POST /activities/{id}/join` with answers instead. No existing activity has questions, so
+  nothing live changes, and the Jenny join tool keeps working for every activity without questions.
+- **The public join-count trust signal** (on post cards) no longer drops a no-show immediately. A
+  no-show counts against someone only once it is final: recorded more than 72h ago and never
+  disputed. An open dispute never counts against them.

@@ -128,6 +128,12 @@ public class NotificationService {
         notify(recipient, NotificationType.SYSTEM, "Starting soon", "\"" + preview(post.getBody()) + "\" starts within the hour.");
     }
 
+    // New features (activities, needs, jobs) use the existing SYSTEM type, same reasoning as the
+    // Phase A notifications above.
+    public void notifySystem(User recipient, String title, String body) {
+        notify(recipient, NotificationType.SYSTEM, title, body);
+    }
+
     private String preview(String body) {
         return body.length() > 60 ? body.substring(0, 60) + "…" : body;
     }

@@ -155,6 +155,9 @@ public class SecurityConfig {
                         // every other permitAll GET on this list.
                         .requestMatchers(HttpMethod.GET, "/posts/mine", "/posts/saved", "/posts/joined").authenticated()
                         .requestMatchers(HttpMethod.GET, "/posts/*", "/posts/*/comments").permitAll()
+                        // An activity's page (details, questions, spots, waitlist size) is as
+                        // public as the post itself; "/activities/kinds" is the form catalogue.
+                        .requestMatchers(HttpMethod.GET, "/activities/*").permitAll()
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())

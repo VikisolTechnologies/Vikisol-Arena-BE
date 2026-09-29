@@ -1,5 +1,9 @@
 package com.vikisol.arena.posts.service;
 
+import com.vikisol.arena.activities.entity.ActivityAttendance;
+import com.vikisol.arena.activities.entity.ActivityWaitlistEntry;
+import com.vikisol.arena.activities.entity.DisputeStatus;
+import com.vikisol.arena.activities.entity.WaitlistStatus;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.entity.VerificationLevel;
 import com.vikisol.arena.auth.repository.UserRepository;
@@ -62,6 +66,9 @@ public class PostService {
     private static final int DISCUSS_WINDOW = 500;
 
     private final PostRepository postRepository;
+    private final com.vikisol.arena.activities.repository.ActivityQuestionRepository activityQuestionRepository;
+    private final com.vikisol.arena.activities.repository.ActivityWaitlistRepository activityWaitlistRepository;
+    private final com.vikisol.arena.activities.repository.ActivityAttendanceRepository activityAttendanceRepository;
     private final PostJoinRequestRepository postJoinRequestRepository;
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
@@ -491,6 +498,14 @@ public class PostService {
 
     @Transactional
     public PostJoinRequestResponse requestJoin(UUID userId, UUID postId) {
+        return requestJoin(userId, postId, false);
+    }
+
+    // ActivitiesService.join saves the answers to the host's questions first, then calls this with
+    // answersSaved = true. The plain POST /posts/{id}/joins can't carry answers, so it is refused
+    // for an activity whose host asks a required question (G8).
+    @Transactional
+    public PostJoinRequestResponse requestJoin(UUID userId, UUID postId, boolean answersSaved) {
         Post post = requireLockedPost(postId);
         if (!post.isJoinable()) {
             throw new BadRequestException("This post doesn't accept join requests");
@@ -501,6 +516,10 @@ public class PostService {
         PostJoinRequest existing = postJoinRequestRepository.findByPostIdAndUserId(postId, userId).orElse(null);
         if (existing != null && existing.getStatus() != PostJoinStatus.WITHDRAWN && existing.getStatus() != PostJoinStatus.DECLINED) {
             throw new BadRequestException("You've already requested to join this post");
+        }
+        if (!answersSaved && post.getIntentType() == PostIntentType.ACTIVITY
+                && activityQuestionRepository.existsByPostIdAndRequiredTrue(postId)) {
+            throw new BadRequestException("The host asks a question before you join. Answer it to send your request.");
         }
         requireOpenCapacity(post);
         if (blockService.isBlockedEitherDirection(userId, post.getAuthorUser().getId())) {
@@ -520,6 +539,14 @@ public class PostService {
         joinRequest.setStatus(autoApprove ? PostJoinStatus.APPROVED : PostJoinStatus.PENDING);
         joinRequest.setDecidedAt(autoApprove ? Instant.now() : null);
         joinRequest = postJoinRequestRepository.save(joinRequest);
+        // Got in (or asked) directly: any place they held in the queue is used up.
+        activityWaitlistRepository.findByPostIdAndUserId(postId, userId)
+                .filter(w -> w.getStatus() == WaitlistStatus.WAITING)
+                .ifPresent(w -> {
+                    w.setStatus(WaitlistStatus.PROMOTED);
+                    w.setPromotedAt(Instant.now());
+                    activityWaitlistRepository.save(w);
+                });
 
         if (autoApprove) {
             onJoinApproved(post, joinRequest);
@@ -584,6 +611,7 @@ public class PostService {
             postRepository.save(post);
         }
         notificationService.notifyPostJoinWithdrawn(post, joinRequest.getUser().getName(), hadJoined);
+        if (hadJoined) promoteFromWaitlist(post);
         return mapper.toResponse(joinRequest);
     }
 
@@ -607,6 +635,19 @@ public class PostService {
         if (joinRequest.getStatus() != PostJoinStatus.APPROVED) {
             throw new BadRequestException("Only someone who joined can be marked present or absent");
         }
+        // G11: when it was recorded starts the 72h dispute window. A dispute the host already
+        // accepted can't be turned back into a no-show; marking present accepts an open one.
+        ActivityAttendance attendance = activityAttendanceRepository.findByJoinRequestId(joinRequest.getId())
+                .orElseGet(() -> ActivityAttendance.builder().joinRequest(joinRequest).build());
+        if (outcome == PostJoinOutcome.NO_SHOW && attendance.getDisputeStatus() == DisputeStatus.ACCEPTED) {
+            throw new BadRequestException("You accepted this person's dispute, so they stay marked present");
+        }
+        if (outcome == PostJoinOutcome.ATTENDED && attendance.getDisputeStatus() == DisputeStatus.OPEN) {
+            attendance.setDisputeStatus(DisputeStatus.ACCEPTED);
+            attendance.setDisputeResolvedAt(Instant.now());
+        }
+        attendance.setOutcomeRecordedAt(Instant.now());
+        activityAttendanceRepository.save(attendance);
         joinRequest.setOutcome(outcome);
         postJoinRequestRepository.save(joinRequest);
         notificationService.notifyJoinOutcome(joinRequest);
@@ -638,6 +679,46 @@ public class PostService {
         postRepository.save(post);
 
         notificationService.notifyPostJoinApproved(joinRequest);
+    }
+
+    // G9: a spot opened (someone who had joined left). The first eligible person in the queue
+    // gets it: straight in for an open activity, or a request to the host for an approval one.
+    // One spot, one promotion; people who can no longer join are skipped, not left blocking.
+    private void promoteFromWaitlist(Post post) {
+        if (post.getIntentType() != PostIntentType.ACTIVITY || post.getStatus() != PostStatus.OPEN) return;
+        if (post.getStartsAt() != null && !post.getStartsAt().isAfter(Instant.now())) return;
+        for (ActivityWaitlistEntry entry : activityWaitlistRepository
+                .findByPostIdAndStatusOrderByJoinedAtAscIdAsc(post.getId(), WaitlistStatus.WAITING)) {
+            User user = entry.getUser();
+            boolean eligible = !blockService.isBlockedEitherDirection(user.getId(), post.getAuthorUser().getId())
+                    && user.getDateOfBirth() != null && AgeUtil.isAdult(user.getDateOfBirth())
+                    && user.getDeletedAt() == null
+                    && (post.getRequiredVerificationLevel() == null || user.getVerificationLevel().atLeast(post.getRequiredVerificationLevel()));
+            if (!eligible) {
+                entry.setStatus(WaitlistStatus.SKIPPED);
+                activityWaitlistRepository.save(entry);
+                continue;
+            }
+            entry.setStatus(WaitlistStatus.PROMOTED);
+            entry.setPromotedAt(Instant.now());
+            activityWaitlistRepository.save(entry);
+
+            PostJoinRequest joinRequest = postJoinRequestRepository.findByPostIdAndUserId(post.getId(), user.getId())
+                    .orElseGet(() -> PostJoinRequest.builder().post(post).user(user).build());
+            boolean autoApprove = post.getVisibility() == PostVisibility.PUBLIC;
+            joinRequest.setStatus(autoApprove ? PostJoinStatus.APPROVED : PostJoinStatus.PENDING);
+            joinRequest.setDecidedAt(autoApprove ? Instant.now() : null);
+            joinRequest.setOutcome(null);
+            joinRequest = postJoinRequestRepository.save(joinRequest);
+            if (autoApprove) {
+                onJoinApproved(post, joinRequest);
+            } else {
+                notificationService.notifyPostJoinRequested(post, joinRequest);
+                notificationService.notifySystem(user, "A spot opened up",
+                        "You were next on the waitlist. Your request is now with the host.");
+            }
+            return;
+        }
     }
 
     private void requireAdult(User user) {

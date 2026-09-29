@@ -23,6 +23,10 @@ public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest
 
     long countByPostIdAndStatus(UUID postId, PostJoinStatus status);
 
+    // Activity attendance sheet (ActivitiesService): everyone who joined, in the order they joined.
+    @EntityGraph(attributePaths = "user")
+    List<PostJoinRequest> findByPostIdAndStatusOrderByCreatedAtAscIdAsc(UUID postId, PostJoinStatus status);
+
     // PostService.delete() - a hard delete needs its dependents gone first (FK on post_id).
     void deleteByPostId(UUID postId);
 
@@ -30,11 +34,18 @@ public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest
     // about to meet a stranger from an ACTIVITY/ASK post) - how many other posts this person has
     // actually been approved into elsewhere, a track record of real participation. Batched per
     // feed/nearby window, same shape as every other batch-count query in PostMapper.
+    //
+    // G11: a host's no-show only lowers this count once it is final - recorded before
+    // `finalBefore` (72h ago) and not disputed. Until then, or while a dispute is open, it counts
+    // like any other join, so host-recorded attendance can't become reputation unchecked.
     @Query("select j.user.id as userId, count(j) as cnt from PostJoinRequest j " +
             "where j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED " +
-            "and (j.outcome is null or j.outcome <> com.vikisol.arena.posts.entity.PostJoinOutcome.NO_SHOW) " +
+            "and (j.outcome is null or j.outcome <> com.vikisol.arena.posts.entity.PostJoinOutcome.NO_SHOW " +
+            "  or exists (select a.id from com.vikisol.arena.activities.entity.ActivityAttendance a where a.joinRequest = j " +
+            "    and (a.disputeStatus <> com.vikisol.arena.activities.entity.DisputeStatus.NONE or a.outcomeRecordedAt > :finalBefore))) " +
             "and j.user.id in :userIds group by j.user.id")
-    List<UserJoinCountProjection> countApprovedByUserIdIn(@Param("userIds") List<UUID> userIds);
+    List<UserJoinCountProjection> countApprovedByUserIdIn(@Param("userIds") List<UUID> userIds,
+                                                         @Param("finalBefore") java.time.Instant finalBefore);
 
     interface UserJoinCountProjection {
         UUID getUserId();
