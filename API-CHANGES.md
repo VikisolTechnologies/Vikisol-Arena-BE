@@ -225,3 +225,65 @@ answers 404.
 **Not built:** the Post-a-Need "Share with: nearby people only" scope. Feed, search and Discover
 don't filter by it yet, and storing a privacy promise the API doesn't keep would be dishonest. The
 frontend should not offer the choice until the backend enforces it.
+
+## Career profile — G18 to G21
+
+**What it is.** The opt-in career layer on the same identity; there is no second signup. Skills and
+the CV stay where they are today (`PUT /profile/me/skills`, `POST /profile/me/cv`).
+
+**Rules:**
+- Nothing here is visible to anyone else until it's **published**.
+- **Pay is private by default.**
+
+| Gap | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| G18 | `PUT /career/me` | talent | `{ intent, desiredRole? (≤100), experienceLevel?, workMode?, preferredLocations?[] (≤5, ≤60 chars), noticePeriod?, compensationVisibility?, expectedMin?, expectedMax? }`. `intent` is required the first time; afterwards only the fields sent change |
+| G18 | `GET /career/me` | talent | Own view: every field, plus `currency: "INR"`, `openToWork`, `published`, `publishedAt` |
+| G20 | `GET /career/me/preview` | talent | `{ published, compensationShownTo: "nobody"\|"employers you apply to"\|"employers", employers, connections, neighbors }`. Each audience view is built by the same code that serves other people |
+| G20 | `POST /career/me/publish` | talent | `{ openToWork? }`. Refused while the intent is `explore_quietly` |
+| G20 | `POST /career/me/unpublish` | talent | Also turns `openToWork` off |
+| G19 | `GET /career/{userId}` | any signed-in person | The published profile as the caller's audience sees it; not published → 404 |
+
+**Values:**
+
+| Field | Allowed values |
+|---|---|
+| `intent` | `find_job`, `explore_quietly`, `offer_skills`, `hire_locally` |
+| `experienceLevel` | `entry`, `junior`, `mid`, `senior`, `lead` |
+| `workMode` | `any`, `onsite`, `hybrid`, `remote` |
+| `noticePeriod` | `immediate`, `days_15`, `days_30`, `days_60`, `days_90` |
+| `compensationVisibility` | `private` (default), `on_application`, `employers` |
+
+`expectedMin` and `expectedMax` are yearly INR, from 0 to 1e9, with min ≤ max. Choosing
+`explore_quietly` unpublishes.
+
+**Audiences** (`CareerPublicView`: `{ userId, audience, desiredRole, experienceLevel, workMode,
+preferredLocations, noticePeriod, openToWork, skills, expectedMin, expectedMax, currency }`; hidden
+fields are absent):
+
+| Audience | Who | Sees |
+|---|---|---|
+| `employer` | recruiter, company admin, hiring manager | Everything except pay. Pay only per the rule below |
+| `connection` | people you both follow | Role, level, work mode, open to work, skills |
+| `neighbor` | any other signed-in person | Role, open to work, skills |
+
+**One pay rule, everywhere (G21).** `CompensationPolicy` decides whether an employer sees pay:
+- the career range;
+- **and the existing `currentCtc` / `expectedCtc`** in talent search, `GET /enterprise/talent/{id}`
+  and the applicant list.
+
+| Setting | Who sees pay |
+|---|---|
+| `private` (or no career profile) | nobody |
+| `on_application` | employers you applied to |
+| `employers` | employers you applied to, employers who unlocked you, and any employer when the profile is published |
+
+**⚠ Existing behaviour changes (values only; no field added or removed):**
+- `GET /enterprise/talent/search`, `GET /enterprise/talent/{id}` and
+  `GET /enterprise/postings/{id}/applicants` return `currentCtc`/`expectedCtc` as absent unless the
+  candidate shares pay. Before, any employer with full access saw them.
+- The applicant list no longer returns the candidate's `homeCity`/`approxLat`/`approxLng`.
+  Talent search already stripped them, because location consent covers peer discovery only; the
+  applicant list was missing that.
+
+Account erasure deletes the career profile.

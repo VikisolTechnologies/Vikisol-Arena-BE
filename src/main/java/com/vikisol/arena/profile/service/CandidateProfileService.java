@@ -63,6 +63,7 @@ public class CandidateProfileService {
     private final JwtTokenProvider jwtTokenProvider;
     private final FollowService followService;
     private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
+    private final com.vikisol.arena.career.repository.CareerProfileRepository careerProfileRepository;
 
     // FE-API-GAPS 1 and 5: the closed vocabularies the onboarding screens send.
     static final Set<String> INTENTS = Set.of("activities", "meet", "ask", "offer", "job", "hire", "projects", "explore");
@@ -227,6 +228,8 @@ public class CandidateProfileService {
             fileStorageService.delete(profile.getPhotoUrl());
             profile.setPhotoUrl(null);
         }
+        // The career layer (G18-G21) holds pay and job-seeking intent: erased outright.
+        careerProfileRepository.findByUserId(userId).ifPresent(careerProfileRepository::delete);
         profile.setIntents(new java.util.ArrayList<>());
         profile.setInterests(new java.util.ArrayList<>());
         profile.setAvailability(new java.util.ArrayList<>());

@@ -4,6 +4,9 @@ import com.vikisol.arena.applications.entity.Application;
 import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.applications.service.ApplicationService;
+import com.vikisol.arena.career.entity.CareerProfile;
+import com.vikisol.arena.career.repository.CareerProfileRepository;
+import com.vikisol.arena.career.service.CompensationPolicy;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.dto.ApplicantResponse;
@@ -17,6 +20,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -33,6 +37,7 @@ public class ApplicantService {
     private final EnterpriseProfileService enterpriseProfileService;
     private final CandidateProfileMapper candidateProfileMapper;
     private final JobPostingRepository jobPostingRepository;
+    private final CareerProfileRepository careerProfileRepository;
 
     // IDOR fix (found via the ARENA-SHIP-IT.md endpoint audit): this previously took no caller
     // identity at all - any recruiter/company_admin could list another tenant's full applicant
@@ -46,7 +51,10 @@ public class ApplicantService {
         if (!posting.getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your posting");
         }
-        return PagedResponse.of(applicationRepository.findByJobPostingId(postingId, pageable), this::toResponse);
+        var page = applicationRepository.findByJobPostingId(postingId, pageable);
+        Map<UUID, CareerProfile> careers = careerProfileRepository.mapByUserId(
+                page.getContent().stream().map(a -> a.getCandidate().getUser().getId()).toList());
+        return PagedResponse.of(page, a -> toResponse(a, careers.get(a.getCandidate().getUser().getId())));
     }
 
     // Fills a real gap: arena-web's enterprise/interviews/[applicationId] page needs to look up
@@ -71,8 +79,16 @@ public class ApplicantService {
     }
 
     private ApplicantResponse toResponse(Application a) {
+        return toResponse(a, careerProfileRepository.findByUserId(a.getCandidate().getUser().getId()).orElse(null));
+    }
+
+    // They applied here, so the employer has full access (CV, job-seeker fields); pay only if the
+    // candidate shares it (G21), and never the approximate home location.
+    private ApplicantResponse toResponse(Application a, CareerProfile career) {
         return new ApplicantResponse(
                 a.getId().toString(), a.getJobPosting().getId().toString(), a.getCandidate().getId().toString(),
-                a.getStage().wireValue(), a.getAppliedAt().toString(), candidateProfileMapper.toResponse(a.getCandidate()));
+                a.getStage().wireValue(), a.getAppliedAt().toString(),
+                candidateProfileMapper.forEmployer(candidateProfileMapper.toResponse(a.getCandidate()), true,
+                        CompensationPolicy.employerMaySee(career, true, false)));
     }
 }
