@@ -10,7 +10,7 @@ files, CI and deployment config are unchanged.
 | Run | Test classes | Tests | Failures | Errors |
 |---|---|---|---|---|
 | Baseline (`main` at `f89b01c`, before any change) | 20 | 88 | 0 | 0 |
-| After all changes | 26 | 112 | 0 | 0 |
+| After all changes | 26 | 113 | 0 | 0 |
 
 Every baseline test still passes. No test was deleted or loosened. Three existing tests had one
 call site updated because a service method gained a `Pageable` argument
@@ -109,7 +109,9 @@ became a 400 carrying the driver's message (SQL text); the servlet `/error` page
 **Fix.** (`bee56b1`)
 - `GlobalExceptionHandler`: one handler for Spring's request errors using each exception's real
   status (404/405/400/415, `ResponseStatusException` status + reason), 413 for uploads, 400 for
-  `ConstraintViolationException`, 500 without detail for `DataAccessException`.
+  `ConstraintViolationException`, 409 for lock timeouts/deadlocks (`ConcurrencyFailureException`,
+  the rows behind join capacity, Jenny approvals and unlock credits are pessimistically locked),
+  500 without detail for any other `DataAccessException`.
   A shared `messageFor(status)` keeps wording identical everywhere.
 - `ApiErrorController` replaces Boot's `/error` body with the same envelope (status only, never the
   exception message or path).
@@ -123,7 +125,8 @@ exactly `success`, `message` for: unknown route 404, `PUT /version` 405, `/posts
 `lat` 400 "Lat is required", `text/plain` to `POST /posts` 415, the `/error` page for 500 and 429,
 plus the existing cases (bad UUID 400, missing profile 404, guest 401, talent on recruiter search
 403, bad JSON 400) and the validation field map. Handler-level: DB errors are 500 and don't echo
-SQL, uploads 413, `ResponseStatusException` keeps 409 + reason. On the old code the 404, 405, 400,
+SQL, lock conflicts are a 409 that doesn't echo SQL, uploads 413, `ResponseStatusException` keeps
+409 + reason. On the old code the 404, 405, 400,
 415 and `/error` cases fail (checked by stashing the change).
 
 ---

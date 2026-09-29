@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -125,6 +126,14 @@ class ErrorContractTest extends EmbeddedPostgresAppTest {
                 new DataAccessResourceFailureException("select password_hash from arena_users"));
         assertThat(response.getStatusCode().value()).isEqualTo(500);
         assertThat(response.getBody().message()).doesNotContain("arena_users");
+    }
+
+    @Test
+    void aLockConflictIsARetryable409() {
+        ResponseEntity<ApiResponse<Void>> response = handler.handleConcurrency(
+                new PessimisticLockingFailureException("could not obtain lock on row in relation arena_posts"));
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody().message()).doesNotContain("arena_posts");
     }
 
     @Test

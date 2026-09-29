@@ -50,7 +50,8 @@ Before, `size=100000` was honoured and a negative page was a 400. `GET /search?l
 | Unsupported `Content-Type` | 500 | 415 |
 | Upload over 10 MB | 400 with Spring's internal message | 413 |
 | `ResponseStatusException` | 400 | its own status and reason |
-| Database failure other than a constraint violation | 400 carrying the driver message (SQL text) | 500 generic message |
+| Lock timeout / deadlock on a locked row | 400 carrying the driver message | 409 "Someone else changed this at the same moment. Please try again." |
+| Database failure other than a constraint violation or lock conflict | 400 carrying the driver message (SQL text) | 500 generic message |
 | Anything rendered by the servlet `/error` page | Spring Boot's `{timestamp, status, error, path}` | `{success, message}` with the same status |
 | Guest request that errors after security (e.g. inside a filter) | 401 (the error dispatch was re-authenticated) | the real status |
 | 403 decided by the security filter chain | empty body | `{"success": false, "message": "Access denied"}` |

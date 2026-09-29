@@ -14,7 +14,7 @@ Updated 28 Sep 2026. Resume from here.
 ## Backend hardening (branch `cloud/api-hardening`, draft PR, not merged)
 
 29 Sep 2026. Profile-id links from Talent Universe fixed, five N+1 lists batched, unbounded lists
-paged (shape unchanged), V21 indexes, one error envelope with real statuses. 112 tests green
+paged (shape unchanged), V21 indexes, one error envelope with real statuses. 113 tests green
 (baseline 88, all still green). See `BACKEND-FIXES.md` and `API-CHANGES.md`. Needs review before
 merge; merging to `main` deploys.
 

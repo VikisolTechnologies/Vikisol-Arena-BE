@@ -3,6 +3,7 @@ package com.vikisol.arena.common.exception;
 import com.vikisol.arena.common.dto.ApiResponse;
 import lombok.extern.slf4j.Slf4j;
 import jakarta.validation.ConstraintViolationException;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.dao.DataAccessException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatusCode;
@@ -145,6 +146,15 @@ public class GlobalExceptionHandler {
             message = "This request could not be completed because it conflicts with existing data.";
         }
         return ResponseEntity.status(HttpStatus.CONFLICT).body(new ApiResponse<>(false, message, null));
+    }
+
+    // Lock timeouts and deadlocks on the rows this API locks (join capacity, Jenny action approval,
+    // unlock credits) - retryable, not the caller's mistake and not a server fault.
+    @ExceptionHandler(ConcurrencyFailureException.class)
+    public ResponseEntity<ApiResponse<Void>> handleConcurrency(ConcurrencyFailureException ex) {
+        log.warn("Concurrent update conflict: {}", ex.getClass().getSimpleName());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiResponse<>(false, "Someone else changed this at the same moment. Please try again.", null));
     }
 
     // Any other database failure (connection, timeout, bad SQL) is our fault, not the caller's -
