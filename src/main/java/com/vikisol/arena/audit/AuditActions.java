@@ -39,4 +39,7 @@ public final class AuditActions {
     // this on a user's behalf," per ADR-003's own re-derive-authorization-independently principle.
     public static final String AGENT_ACTION_AUTHORIZED = "agent.action.authorized";
     public static final String AGENT_ACTION_DENIED = "agent.action.denied";
+
+    // G27: a company admin confirmed the domain code.
+    public static final String BUSINESS_VERIFIED = "business.verified";
 }

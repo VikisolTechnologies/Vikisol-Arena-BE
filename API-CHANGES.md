@@ -317,3 +317,26 @@ Account erasure deletes the career profile.
   through `answers`) what's missing.
 - **⚠ Existing enum widened:** `ApplicationStage` gains `hired`, so any client that switches on
   stage should handle it. Nothing sets it except a recruiter choosing it.
+
+## Business verification and team roles — G27, G28
+
+| Gap | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| G27 | `POST /enterprise/verification` | company admin | `{ legalName (≤200), website, workEmail, submitterRole }`. `submitterRole` is one of `founder`, `hr`, `talent_acquisition`, `hiring_manager`, `operations`, `other`: the "Your role" dropdown, the submitter's job at the company, not a permission. Sends a 6-digit code to the work email |
+| G27 | `POST /enterprise/verification/confirm` | company admin | `{ code }`. The right code turns the status to `verified` |
+| G27 | `GET /enterprise/verification` | anyone on the company team | `{ status: "not_started"\|"pending"\|"verified", legalName, website, domain, workEmail (masked, "a***@domain"), submitterRole, codeExpiresAt, verifiedAt }` |
+| G27 | `GET /companies/{id}/verification` | anyone (guest too) | `{ verified, domain, verifiedAt }` for the badge. `verified: false` until a code is confirmed |
+| G28 | `GET /enterprise/team/roles` | anyone on a company team | `[{ role: "company_admin"\|"recruiter"\|"hiring_manager", label, can: [...] }]`. Each capability mirrors a real API guard, so the Team screen can't promise something the API refuses. Inviting, changing roles, suspending and removing members were already there (`/enterprise/admin/team/*`) and are unchanged |
+
+**What the badge proves: control of the website's domain, nothing more.**
+- The work email must be at the website's domain or one of its subdomains, and not a personal
+  mailbox (gmail, outlook, yahoo, …); otherwise 400.
+- The code:
+  - lasts 30 minutes;
+  - allows 5 wrong tries;
+  - can be re-sent once a minute;
+  - is stored only as a hash and cleared once used.
+- Submitting again (for example with new details) starts over and removes the badge until the new
+  code is confirmed.
+- If the email can't be sent, the answer is the usual 503 with "We couldn't send the code right
+  now…", and nothing is verified.

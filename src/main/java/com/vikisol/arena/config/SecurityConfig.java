@@ -132,7 +132,7 @@ public class SecurityConfig {
                         // PostService/FeedAggregationService/ProjectService/CompanyService) -
                         // that null-tolerance was already there for shared-link support (FIX 1 /
                         // G9 below); this just opens the same door to the main browse surfaces.
-                        .requestMatchers(HttpMethod.GET, "/companies", "/companies/*", "/companies/*/jobs").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/companies", "/companies/*", "/companies/*/jobs", "/companies/*/verification").permitAll()
                         .requestMatchers(HttpMethod.GET, "/jobs").permitAll()
                         .requestMatchers(HttpMethod.GET, "/search").permitAll()
                         // Phase 2 (Discuss) - browsing communities and threads is open to guests;
