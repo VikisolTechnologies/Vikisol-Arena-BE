@@ -19,6 +19,23 @@ provider errors never reach users (503 + short message, redacted server log), ca
 recent first, `X-Total-Count` / `X-Has-More` headers. 125 tests green (baseline 88, all still green). See `BACKEND-FIXES.md` and `API-CHANGES.md`. Needs review before
 merge; merging to `main` deploys.
 
+## Backend for the new frontend (branch `feature/be-fe-gaps`, draft PR stacked on `cloud/api-hardening`)
+
+29 Sep 2026. Everything below is additive (migrations V22–V28, each with rollback in its header).
+170 tests green, including the Jenny contract tests. Every endpoint is in `API-CHANGES.md` with its
+gap number.
+
+- Profile basics, FE gaps 1–5.
+- Activities, G7–G13.
+- Needs & offers, G14–G17.
+- Career, G18–G21.
+- Jobs, G22–G26.
+- Business verification and team roles, G27–G28.
+- Community projects and profile stats, G29–G32.
+
+The frontend's `ARENA-APP-FLOW.md` does not exist, so the choices made without it are in
+`DECISIONS.md`. Not merged; the architect reviews.
+
 ## Current step
 
 No further P0 work. Frontend continues under Claude Code. Do not merge the VNext pull request.

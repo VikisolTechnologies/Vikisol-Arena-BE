@@ -31,6 +31,16 @@ up in `API-CHANGES.md`. Choices made along the way:
 - **Found, not changed:** `PUT /applications/{id}/stage` lets a candidate set any stage on their own
   application, `offer` and now `hired` included. The frontend may rely on it, so it is logged for
   the architect rather than changed here. Suggested fix: candidates may only withdraw.
+- **Community projects are posts (`collab`), not marketplace rows.** The architecture's core primitive
+  is "every Post … can open a Room", and the marketplace request body is Jenny's locked
+  `createProject` contract, which requires a budget. The wire value is `collab` because `project` is
+  already the feed's item type for a marketplace project.
+- **Business verification proves domain control only.** The proof is a code at a work email on the
+  website's domain. No documents are uploaded, and nobody reviews anything by hand. The badge says
+  what it proves.
+- **Not yet covered by the data export and erasure:** activity answers and feedback, need responses
+  and notes, screening answers and evidence, and project join notes. Erasure already anonymises the
+  person; deleting or exporting these texts is a follow-up.
 
 ## 29 Sep 2026 — Architect follow-ups on `cloud/api-hardening`
 
