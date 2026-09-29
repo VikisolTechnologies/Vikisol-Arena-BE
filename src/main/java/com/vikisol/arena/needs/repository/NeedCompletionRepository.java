@@ -33,4 +33,13 @@ public interface NeedCompletionRepository extends JpaRepository<NeedCompletion, 
               and (c.response.user.id = :userId or c.response.post.authorUser.id = :userId)
             """)
     Page<NeedCompletion> findCompletedFor(@Param("userId") UUID userId, Pageable pageable);
+
+    // G32 "Helped": confirmed outcomes where this person gave - answered a need, or owned the offer.
+    @Query("""
+            select count(c) from NeedCompletion c
+            where c.completedAt is not null and (
+                (c.response.user.id = :userId and c.response.post.intentType = com.vikisol.arena.posts.entity.PostIntentType.ASK)
+             or (c.response.post.authorUser.id = :userId and c.response.post.intentType = com.vikisol.arena.posts.entity.PostIntentType.OFFER))
+            """)
+    long countHelped(@Param("userId") UUID userId);
 }

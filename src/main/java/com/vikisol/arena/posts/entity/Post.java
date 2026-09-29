@@ -143,6 +143,7 @@ public class Post extends BaseEntity {
     // An anonymous post can't be "joined": joining creates a Room hosted by the author, which
     // would reveal who they are.
     public boolean isJoinable() {
-        return !anonymous && (intentType == PostIntentType.ACTIVITY || intentType == PostIntentType.ASK);
+        return !anonymous && (intentType == PostIntentType.ACTIVITY || intentType == PostIntentType.ASK
+                || intentType == PostIntentType.COLLAB);
     }
 }

@@ -161,6 +161,9 @@ public class SecurityConfig {
                         // A need/offer page and someone's confirmed outcomes are public; the
                         // responses list and "my offers" stay signed-in (anyRequest below).
                         .requestMatchers(HttpMethod.GET, "/needs/*", "/needs/outcomes/*").permitAll()
+                        // A community project's page, someone's projects and their profile stat
+                        // row are public like the profile itself.
+                        .requestMatchers(HttpMethod.GET, "/projects/*", "/projects/of/*", "/profile/*/stats").permitAll()
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())

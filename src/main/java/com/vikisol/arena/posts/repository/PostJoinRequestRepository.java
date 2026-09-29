@@ -47,6 +47,16 @@ public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest
     List<UserJoinCountProjection> countApprovedByUserIdIn(@Param("userIds") List<UUID> userIds,
                                                          @Param("finalBefore") java.time.Instant finalBefore);
 
+    // G32 "Joined": activities someone was approved into, with the same no-show rule as the trust
+    // signal above (a no-show only drops out once final and undisputed).
+    @Query("select count(j) from PostJoinRequest j " +
+            "where j.user.id = :userId and j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED " +
+            "and j.post.intentType = com.vikisol.arena.posts.entity.PostIntentType.ACTIVITY " +
+            "and (j.outcome is null or j.outcome <> com.vikisol.arena.posts.entity.PostJoinOutcome.NO_SHOW " +
+            "  or exists (select a.id from com.vikisol.arena.activities.entity.ActivityAttendance a where a.joinRequest = j " +
+            "    and (a.disputeStatus <> com.vikisol.arena.activities.entity.DisputeStatus.NONE or a.outcomeRecordedAt > :finalBefore)))")
+    long countJoinedActivities(@Param("userId") UUID userId, @Param("finalBefore") java.time.Instant finalBefore);
+
     interface UserJoinCountProjection {
         UUID getUserId();
         long getCnt();

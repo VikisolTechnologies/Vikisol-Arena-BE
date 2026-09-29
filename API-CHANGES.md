@@ -340,3 +340,44 @@ Account erasure deletes the career profile.
   code is confirmed.
 - If the email can't be sent, the answer is the usual 503 with "We couldn't send the code right
   now…", and nothing is verified.
+
+## Community projects and profile stats — G29 to G32
+
+**What a community project is:**
+- A `collab` post ("Start a project"), created with the existing `POST /posts`:
+  `{ "intentType": "collab", "title", "body", "visibility": "public"|"approval", … }`.
+- People join it for an open role. Its Room is the team space.
+- It is separate from the paid marketplace (`/marketplace/projects`: bids, award, milestones),
+  which is unchanged, and from the Jenny `createProject` tool, which still creates marketplace
+  projects.
+- The wire value is `"collab"` so it never collides with the feed's `"project"` item type
+  (a marketplace project).
+- A collab post can't be anonymous.
+
+| Gap | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| G29 | `POST /posts` (existing) | talent | Now accepts `"intentType": "collab"` |
+| G29 | `PUT /projects/{id}/roles` | owner | `{ roles: [{ title (≤80), description? (≤300), slots? (1–50, default 1) }] }`, up to 10, protected-attribute check. Refused once anyone asked for a role |
+| G29 | `POST /projects/{id}/join` | talent | `{ roleId?, message? (≤500) }` → the usual `PostJoinRequest`. A role is required when the project has roles; a filled role is refused |
+| G30 | `GET /projects/{id}` | anyone (guest too) | `{ postId, title, status, roles: [{id,title,description,slots,filled}], team: [{userId,name,avatarEmoji,roleId,roleTitle}], viewer: { owner, joinStatus, roleId } }`. `team` lists only people who are in |
+| G30 | `GET /projects/{id}/requests` | owner | `[{ joinId, userId, name, status, roleId, roleTitle, message }]`. Approve or decline with the existing `PUT /posts/{id}/joins/{joinId}/approve\|decline` |
+| G31 | `GET /projects/of/{userId}` | anyone | Projects that person started or is in: `[{ postId, title, status, role: "owner"\|role title\|"member", createdAt }]`, newest first, paged with headers |
+| G32 | `GET /profile/{userId}/stats` | anyone | `{ hosted, joined, helped, projects }`: the profile stat row |
+
+**How the G32 stats are counted** (real counts only):
+
+| Stat | Counts |
+|---|---|
+| `hosted` | activities the person hosted in their own name that weren't cancelled or removed |
+| `joined` | activities they were approved into. A no-show drops out only once final and undisputed (G11) |
+| `helped` | confirmed outcomes where they gave help (G16/G17) |
+| `projects` | the same set as G31 |
+
+**Known limit:** role capacity is checked when someone asks, not when the owner approves. Approving
+more people than a role's slots is possible and shows as `filled > slots`. The owner sees it; it
+never blocks anyone.
+
+**⚠ Existing enum widened:** `PostIntentType` gains `collab`.
+- It also appears as a feed `itemType` and a post `intentType`, so clients that switch on either
+  should handle it.
+- A `collab` post is joinable (`joinable: true`) like activities and needs.

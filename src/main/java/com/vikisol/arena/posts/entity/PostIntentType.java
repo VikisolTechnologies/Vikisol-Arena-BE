@@ -8,7 +8,10 @@ package com.vikisol.arena.posts.entity;
 // here between hires") and it has no pre-existing backing entity either, same as
 // ACTIVITY/ASK/UPDATE - see DECISIONS.md and PostService.createCompanyPost.
 public enum PostIntentType {
-    ACTIVITY, ASK, UPDATE, COMPANY, OFFER;
+    ACTIVITY, ASK, UPDATE, COMPANY, OFFER,
+    // G29 (V28): a community project ("Start a project") people join for an open role. Wire value
+    // "collab" so it never collides with the feed's "project" item type (a paid marketplace project).
+    COLLAB;
 
     public String wireValue() {
         return name().toLowerCase();

@@ -63,6 +63,33 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     @Query("select p from Post p where p.id in (select j.post.id from PostJoinRequest j where j.user.id = :userId and j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED)")
     Page<Post> findApprovedJoinsByUserId(@Param("userId") UUID userId, Pageable pageable);
 
+    // G31: community projects someone started or is in, newest first (anonymous and removed ones never).
+    @Query(value = """
+            select p from Post p
+            where p.intentType = com.vikisol.arena.posts.entity.PostIntentType.COLLAB
+              and p.anonymous = false and p.removedReason is null
+              and (p.authorUser.id = :userId or p.id in (select j.post.id from PostJoinRequest j
+                   where j.user.id = :userId and j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED))
+            order by p.createdAt desc, p.id desc
+            """,
+            countQuery = """
+            select count(p) from Post p
+            where p.intentType = com.vikisol.arena.posts.entity.PostIntentType.COLLAB
+              and p.anonymous = false and p.removedReason is null
+              and (p.authorUser.id = :userId or p.id in (select j.post.id from PostJoinRequest j
+                   where j.user.id = :userId and j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED))
+            """)
+    Page<Post> findCollabProjectsOf(@Param("userId") UUID userId, Pageable pageable);
+
+    // G32 "Hosted": activities someone hosted in their own name that weren't cancelled or removed.
+    @Query("""
+            select count(p) from Post p
+            where p.authorUser.id = :userId and p.intentType = com.vikisol.arena.posts.entity.PostIntentType.ACTIVITY
+              and p.anonymous = false and p.removedReason is null
+              and p.status <> com.vikisol.arena.posts.entity.PostStatus.CANCELLED
+            """)
+    long countHostedActivities(@Param("userId") UUID userId);
+
     // Company page's own post history (post-spec reconciliation - §3.5/§6 company posting).
     @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
     Page<Post> findByAuthorCompanyIdOrderByCreatedAtDesc(UUID authorCompanyId, Pageable pageable);
