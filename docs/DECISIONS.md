@@ -2,6 +2,21 @@
 
 Choices made without the founder in the room. Newest first.
 
+## 29 Sep 2026 — Architect follow-ups on `cloud/api-hardening`
+
+Decided by the architect; the implementation choices below are mine.
+
+- A failed email/SMS/WhatsApp/Teams/OpenAI call answers **503** with a short message. The provider's
+  text is logged server-side only, redacted. 503 rather than 502 because the user's next step is
+  "try again in a minute", which is what 503 means to clients and proxies.
+- Jenny's unavailable reply keeps its mandated copy ("The agent is temporarily unavailable. Your
+  Arena account is still working normally.") instead of a reword. It never contained provider text.
+- `/rooms` now sorts by latest activity, not join time, so the 100-row cap never hides a busy room.
+  Jenny history pages are chosen newest first but read top to bottom inside a page.
+- Join requests stay oldest first (a queue), and communities keep their member-count ranking.
+- Paging state is in `X-Total-Count` / `X-Has-More` headers, exposed through CORS. The body stays
+  an array.
+
 ## 29 Sep 2026 — Error pages are not re-authenticated; list endpoints cap at 100 rows
 
 Branch `cloud/api-hardening`, not merged. Two security-config lines changed, logged here as the

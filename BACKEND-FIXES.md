@@ -10,12 +10,13 @@ files, CI and deployment config are unchanged.
 | Run | Test classes | Tests | Failures | Errors |
 |---|---|---|---|---|
 | Baseline (`main` at `f89b01c`, before any change) | 20 | 88 | 0 | 0 |
-| After all changes | 26 | 113 | 0 | 0 |
+| After the first round (PR opened) | 26 | 113 | 0 | 0 |
+| After the architect's follow-ups (§6–§8) | 29 | 125 | 0 | 0 |
 
-Every baseline test still passes. No test was deleted or loosened. Three existing tests had one
-call site updated because a service method gained a `Pageable` argument
-(`AgentApprovalFlowTest`, `AnonymityTest`: `…, PageLimits.firstPage()`); their assertions are
-unchanged. Command: `mvn test`.
+Every baseline test still passes. No test was deleted or loosened. Two existing tests had call
+sites updated because a service method gained a `Pageable` argument and now returns a `Page`
+(`AgentApprovalFlowTest`, `AnonymityTest`: `…, PageLimits.firstPage()).getContent()`); their
+assertions are unchanged. Command: `mvn test`.
 
 ---
 
@@ -129,29 +130,105 @@ SQL, lock conflicts are a 409 that doesn't echo SQL, uploads 413, `ResponseStatu
 409 + reason. On the old code the 404, 405, 400,
 415 and `/error` cases fail (checked by stashing the change).
 
+## 6. Provider errors never reach users (architect decision)
+
+**Issue.** Resend, MSG91, WhatsApp, Teams and OpenAI threw `RuntimeException("… returned 401:
+<body>")`. Phone sign-in and phone verification did not catch it, so the provider's response came
+back as a 400. That response can include the recipient and even the code. OpenAI failures did
+the same on a signed-in user's feed. The logs had the same problem:
+- callers logged recipients' email addresses;
+- the Resend success log printed the subject, which for a sign-in email contains the code;
+- the Teams success log printed the meeting join link.
+
+**Fix.**
+- **One exception type.** Every provider now throws `ProviderException`. Its message is always a
+  short user message chosen by the kind of failure:
+  - code (SMS or sign-in email): "We couldn't send the code right now. Please try again in a minute."
+  - email: "We couldn't send the email right now. Please try again in a minute."
+  - WhatsApp and meeting link: the same pattern.
+- **503 response.** `GlobalExceptionHandler` returns that message with a 503.
+- **Redacted server log.** `ProviderException.failure(…)` logs the provider's detail once,
+  server-side, through `ProviderLogs.redact`. It masks emails, bearer tokens, key-like strings and
+  any run of 4+ digits (phones, codes), and truncates to 500 characters. The raw text is not kept
+  as the exception's cause.
+- **Clean success logs.** Providers no longer log recipients, subjects or join links.
+- **Callers log ids.** Callers log user, interview or application ids, never email addresses.
+- **Sign-in code email.** A failure now gives the same 503 and message as an SMS code failure.
+- **Feed.** The interest embedding is best-effort, like post creation already was: OpenAI down
+  means no interest boost, not a failed feed.
+
+Jenny's chat was already safe: a gateway failure is caught and the reply is the fixed copy "The
+agent is temporarily unavailable. Your Arena account is still working normally." That exact text
+is mandated in `AgentService` (ARENA-DOCUMENT-3), so it was kept rather than reworded.
+
+**Proof.** `integration/ProviderErrorTest`:
+- An MSG91 failure whose raw text carries a key, a phone number, the code and an email returns
+  503 with the exact short message. None of that text is in the body.
+- The server log has provider, kind, `HTTP 401` and the redacted detail, and none of the secrets.
+- A failed sign-in code email returns the same message.
+- The feed returns 200 while OpenAI throws.
+- Every kind's exception message equals its user text, with no cause attached.
+
+`integration/ProviderLogsTest` covers the redaction rules and truncation.
+
+## 7. Capped lists: most recent first (architect decision)
+
+**Issue.** A 100-row cap only helps if page 0 holds the most recent rows. `/rooms` sorted by join
+time, so a busy room you joined long ago sank below a silent new one. Same-timestamp rows had no
+tiebreak, so a row could move between pages.
+
+**Fix.**
+- Followers, following, blocks and Jenny history are newest first. Conversations are sorted by
+  latest message.
+- `/rooms` is sorted by latest activity (last message, else join time), in one query with the
+  post fetched.
+- Every time-ordered list breaks ties by id.
+- Jenny history pages are selected newest first but read oldest → newest inside the page, because
+  the chat renders top to bottom and `AgentApprovalFlowTest` reads the latest message as the last
+  element.
+- Join requests stay an oldest-first review queue, and communities keep their member-count
+  ranking. Neither is time-based.
+
+**Proof.** `performance/ListOrderAndHeadersTest`:
+- Followers come back newest first, and page 1 holds the oldest.
+- Conversations are sorted by last message.
+- `/rooms` puts an older-joined room with a new message ahead of a newer silent room. The old
+  join-time order fails this.
+- Jenny page 0 holds `m4, m5` of five messages, and page 2 holds `m1`.
+- Join requests are oldest first.
+
+## 8. `X-Total-Count` / `X-Has-More` (architect decision)
+
+**Fix.** The nine capped list endpoints return `X-Total-Count` (rows across all pages) and
+`X-Has-More` (`true`/`false`). The body stays a bare array. Services return a Spring `Page`, and
+`PageLimits.ok(page)` writes the body and the headers. Both headers are in
+`Access-Control-Expose-Headers`, so the browser can read them. Documented in `API-CHANGES.md`
+§2.1.
+
+**Proof.** `ListOrderAndHeadersTest` checks both headers on followers, conversations, rooms, Jenny
+messages, join requests and communities, including `true` on a partial page and `false` on the
+last. It also checks that a request from `http://localhost:3000` gets both names in
+`Access-Control-Expose-Headers`.
+
 ---
 
 ## Not fixed, and why
 
-1. **Third-party error bodies can reach the client.** Integration providers (Resend, MSG91,
-   WhatsApp, Teams, OpenAI) throw `RuntimeException("… returned 401: <body>")`, which
-   `handleRuntime` returns as a 400 with that message. Changing it means deciding what the user
-   should see when email/OTP delivery fails (a 502 and a generic message is the recommendation);
-   that is a UX decision in several flows, so it is left for a separate change.
+1. **Dev-only noop providers print codes.** With no provider configured, `NoopPhoneOtpProvider` and
+   `NoopEmailProvider` log the would-be message, code included, by design, so local sign-in works
+   without SMS or email. Production must keep `MSG91_*` and `RESEND_API_KEY` set. A startup
+   warning, or refusing the noop providers outside local, is a follow-up.
 2. **`IllegalStateException` "not configured / unavailable" is a 400.** e.g. Google sign-in without
    `GOOGLE_CLIENT_ID`, "Agent service is unavailable". A 503 would be more accurate, but the
    frontend may show these messages today, and the Jenny paths are contract-sensitive. Left as is.
-3. **Paging metadata for the bare-array lists.** Needs the `PagedResponse` shape change proposed in
-   `API-CHANGES.md` §1. Until the frontend adopts it, a client asks for the next page and stops on
-   an empty or short page.
-4. **Composite `(user_id, created_at)` indexes for follows / room members.** The new paged queries
+3. **Composite `(user_id, created_at)` indexes for follows / room members.** The new paged queries
    sort one user's rows; per-user sets are small and the existing single-column indexes serve the
    filter. Worth adding only if those lists grow.
-5. **Ten remaining unindexed FKs** (`closed_by_user_id`, `post_id` on conversations, credit-ledger
+4. **Ten remaining unindexed FKs** (`closed_by_user_id`, `post_id` on conversations, credit-ledger
    actor, deliverable submitter, membership inviter, three moderation-item columns, rating
    `from_user_id`, room-report reporter). They are on small tables with no query that filters on
    them; indexing them now costs writes for no measured gain.
-6. **Frontend docs.** `docs/PROGRESS.md` and `docs/ARENA-CURRENT-STATE.md` in the frontend repo were
+5. **Frontend docs.** `docs/PROGRESS.md` and `docs/ARENA-CURRENT-STATE.md` in the frontend repo were
    not reachable from this session (only this repository is in scope), so they were not read or
    updated. The frontend can keep linking with `candidate.id`; nothing there needs to change for
    §1 to work.
