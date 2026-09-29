@@ -85,15 +85,17 @@ public class TeamsMeetingLinkProvider implements MeetingLinkProvider {
                         .build();
                 HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
                 if (response.statusCode() >= 300) {
-                    throw new RuntimeException("Azure AD token request failed (" + response.statusCode() + "): " + response.body());
+                    throw ProviderException.failure(log, ProviderException.Kind.MEETING_LINK, "Azure AD token", response.statusCode(), response.body());
                 }
                 JsonNode json = objectMapper.readTree(response.body());
                 cachedToken = json.get("access_token").asText();
                 int expiresInSeconds = json.has("expires_in") ? json.get("expires_in").asInt() : 3600;
                 tokenExpiresAt = Instant.now().plusSeconds(Math.max(60, expiresInSeconds - 60));
                 return cachedToken;
+            } catch (ProviderException e) {
+                throw e;
             } catch (Exception e) {
-                throw new RuntimeException("Could not acquire Microsoft Graph access token: " + e.getMessage(), e);
+                throw ProviderException.failure(log, ProviderException.Kind.MEETING_LINK, "Azure AD token", e);
             }
         }
     }
@@ -121,19 +123,22 @@ public class TeamsMeetingLinkProvider implements MeetingLinkProvider {
                     .build();
             HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 300) {
-                throw new RuntimeException("Graph event creation failed (" + response.statusCode() + "): " + response.body());
+                throw ProviderException.failure(log, ProviderException.Kind.MEETING_LINK, "Teams (Graph)", response.statusCode(), response.body());
             }
             JsonNode json = objectMapper.readTree(response.body());
             JsonNode onlineMeeting = json.get("onlineMeeting");
             String joinUrl = onlineMeeting != null && onlineMeeting.has("joinUrl") ? onlineMeeting.get("joinUrl").asText() : null;
             if (joinUrl == null || joinUrl.isBlank()) {
-                throw new RuntimeException("Graph event created but no Teams joinUrl was returned");
+                throw ProviderException.failure(log, ProviderException.Kind.MEETING_LINK, "Teams (Graph)",
+                        "event created for interview " + interviewId + " but no joinUrl was returned");
             }
-            log.info("Teams meeting created for interview {}: {}", interviewId, joinUrl);
+            // Not the join URL itself: anyone holding it can join the meeting.
+            log.info("Teams meeting created for interview {}", interviewId);
             return joinUrl;
+        } catch (ProviderException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("Teams meeting creation failed for interview {}: {}", interviewId, e.getMessage());
-            throw new RuntimeException("Could not create Teams meeting: " + e.getMessage(), e);
+            throw ProviderException.failure(log, ProviderException.Kind.MEETING_LINK, "Teams (Graph)", e);
         }
     }
 }

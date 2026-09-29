@@ -1,13 +1,13 @@
 package com.vikisol.arena.company.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.company.dto.CompanyResponse;
 import com.vikisol.arena.company.service.CompanyService;
 import com.vikisol.arena.jobs.dto.JobResponse;
 import com.vikisol.arena.security.service.UserPrincipal;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -33,7 +33,7 @@ public class CompanyController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(required = false) String query,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         UUID viewerId = principal == null ? null : principal.getId();
         return ResponseEntity.ok(ApiResponse.ok(companyService.listCompanies(query, viewerId, pageable)));
     }
@@ -52,7 +52,7 @@ public class CompanyController {
     @GetMapping("/{id}/jobs")
     public ResponseEntity<ApiResponse<PagedResponse<JobResponse>>> getJobs(
             @PathVariable UUID id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return ResponseEntity.ok(ApiResponse.ok(companyService.getCompanyJobs(id, pageable)));
     }
 }

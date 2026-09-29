@@ -67,12 +67,14 @@ public class ResendEmailProvider implements EmailProvider {
                     .build();
             HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 300) {
-                throw new RuntimeException("Resend API returned " + response.statusCode() + ": " + response.body());
+                throw ProviderException.failure(log, ProviderException.Kind.EMAIL, "Resend", response.statusCode(), response.body());
             }
-            log.info("Email sent via Resend to {}: {}", message.to(), message.subject());
+            // No recipient or subject: a sign-in code email carries the code in its subject.
+            log.info("Email sent via Resend");
+        } catch (ProviderException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("Resend email send failed: {}", e.getMessage());
-            throw new RuntimeException("Could not send email via Resend: " + e.getMessage(), e);
+            throw ProviderException.failure(log, ProviderException.Kind.EMAIL, "Resend", e);
         }
     }
 }

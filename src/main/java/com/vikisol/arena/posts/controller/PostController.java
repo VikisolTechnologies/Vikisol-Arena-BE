@@ -1,6 +1,7 @@
 package com.vikisol.arena.posts.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.posts.dto.CreateCommentRequest;
 import com.vikisol.arena.posts.dto.CreatePostRequest;
@@ -15,7 +16,6 @@ import com.vikisol.arena.platform.service.ModerationService;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -46,7 +46,7 @@ public class PostController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         UUID viewerId = principal == null ? null : principal.getId();
-        return ResponseEntity.ok(ApiResponse.ok(postService.getFeed(viewerId, page, size)));
+        return ResponseEntity.ok(ApiResponse.ok(postService.getFeed(viewerId, PageLimits.page(page), PageLimits.size(size))));
     }
 
     @PreAuthorize("permitAll()")
@@ -56,7 +56,7 @@ public class PostController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         UUID viewerId = principal == null ? null : principal.getId();
-        return ResponseEntity.ok(ApiResponse.ok(postService.getTrending(viewerId, page, size)));
+        return ResponseEntity.ok(ApiResponse.ok(postService.getTrending(viewerId, PageLimits.page(page), PageLimits.size(size))));
     }
 
     // ARENA-INVENTORY-FIXES.md FIX 1 - the public profile page's "Activity" section needs this
@@ -67,7 +67,7 @@ public class PostController {
     public ResponseEntity<ApiResponse<PagedResponse<PostResponse>>> getUserPosts(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID userId,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         UUID viewerId = principal == null ? null : principal.getId();
         return ResponseEntity.ok(ApiResponse.ok(postService.getUserPosts(userId, viewerId, pageable)));
     }
@@ -102,7 +102,7 @@ public class PostController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return ResponseEntity.ok(ApiResponse.ok(postService.getMyPosts(principal.getId(), pageable)));
     }
 
@@ -111,7 +111,7 @@ public class PostController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return ResponseEntity.ok(ApiResponse.ok(postService.getJoined(principal.getId(), pageable)));
     }
 
@@ -129,7 +129,7 @@ public class PostController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return ResponseEntity.ok(ApiResponse.ok(postService.getSaved(principal.getId(), pageable)));
     }
 
@@ -175,8 +175,8 @@ public class PostController {
 
     @GetMapping("/{id}/joins")
     public ResponseEntity<ApiResponse<List<PostJoinRequestResponse>>> getJoinRequests(
-            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.getJoinRequests(principal.getId(), id)));
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
+        return PageLimits.ok(postService.getJoinRequests(principal.getId(), id, PageLimits.of(page, size)));
     }
 
     @PutMapping("/{id}/joins/{joinId}/approve")

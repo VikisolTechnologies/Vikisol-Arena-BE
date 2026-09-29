@@ -8,12 +8,16 @@ import com.vikisol.arena.follows.dto.BlockedUserResponse;
 import com.vikisol.arena.follows.entity.UserBlock;
 import com.vikisol.arena.follows.repository.FollowRepository;
 import com.vikisol.arena.follows.repository.UserBlockRepository;
+import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -61,19 +65,22 @@ public class BlockService {
     }
 
     @Transactional(readOnly = true)
-    public List<BlockedUserResponse> getMyBlocks(UUID blockerUserId) {
-        return userBlockRepository.findByBlockerUserIdOrderByCreatedAtDesc(blockerUserId).stream()
+    public Page<BlockedUserResponse> getMyBlocks(UUID blockerUserId, Pageable pageable) {
+        Page<UserBlock> rows = userBlockRepository.findByBlockerUserIdOrderByCreatedAtDescIdDesc(blockerUserId, pageable);
+        Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
+                rows.stream().map(b -> b.getBlockedUser().getId()).toList());
+        return rows
                 .map(b -> {
                     User blocked = b.getBlockedUser();
                     String name = blocked.getName();
                     String emoji = "🧑🏽";
-                    var profile = candidateProfileRepository.findByUserId(blocked.getId());
-                    if (profile.isPresent()) {
-                        name = profile.get().getName();
-                        emoji = profile.get().getAvatarEmoji();
+                    CandidateProfile profile = profiles.get(blocked.getId());
+                    if (profile != null) {
+                        name = profile.getName();
+                        emoji = profile.getAvatarEmoji();
                     }
                     return new BlockedUserResponse(blocked.getId().toString(), name, emoji, b.getCreatedAt().toString());
-                }).toList();
+                });
     }
 
     private User requireUser(UUID id) {

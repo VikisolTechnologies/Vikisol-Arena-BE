@@ -2,6 +2,8 @@ package com.vikisol.arena.messaging.repository;
 
 import com.vikisol.arena.messaging.entity.Conversation;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -11,8 +13,16 @@ import java.util.UUID;
 
 public interface ConversationRepository extends JpaRepository<Conversation, UUID> {
 
-    @Query("select c from Conversation c where c.userA.id = :userId or c.userB.id = :userId order by c.lastMessageAt desc")
-    List<Conversation> findAllForUser(@Param("userId") UUID userId);
+    // Both participants fetched in the same query - ConversationService.toResponse reads the
+    // other side's name/role for every row. Most recent message first; id breaks ties so page
+    // boundaries are stable.
+    @Query(value = """
+            select c from Conversation c join fetch c.userA join fetch c.userB
+            where c.userA.id = :userId or c.userB.id = :userId
+            order by c.lastMessageAt desc, c.id desc
+            """,
+            countQuery = "select count(c) from Conversation c where c.userA.id = :userId or c.userB.id = :userId")
+    Page<Conversation> findAllForUser(@Param("userId") UUID userId, Pageable pageable);
 
     @Query("""
             select c from Conversation c

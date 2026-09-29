@@ -80,6 +80,7 @@ import com.vikisol.arena.rooms.repository.RoomMemberRepository;
 import com.vikisol.arena.rooms.repository.RoomMessageRepository;
 import com.vikisol.arena.rooms.repository.RoomRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -920,7 +921,7 @@ public class DemoContentService {
         // shared between two demo users via the Set, same pattern as the Room cleanup above.
         Set<Conversation> conversations = new java.util.LinkedHashSet<>();
         for (User user : users) {
-            conversations.addAll(conversationRepository.findAllForUser(user.getId()));
+            conversations.addAll(conversationRepository.findAllForUser(user.getId(), Pageable.unpaged()).getContent());
         }
         for (Conversation conversation : conversations) {
             threadMessageRepository.deleteByConversationId(conversation.getId());

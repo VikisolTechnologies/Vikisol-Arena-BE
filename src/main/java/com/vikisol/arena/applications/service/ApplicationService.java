@@ -140,7 +140,7 @@ public class ApplicationService {
                             + "</b> at " + job.getEnterprise().getCompanyName() + " has moved to <b>"
                             + saved.getStage().wireValue() + "</b>.</p><p>- The Vikisol Arena team</p>"));
         } catch (Exception e) {
-            log.warn("Stage-change email failed for application {}: {}", saved.getId(), e.getMessage());
+            log.warn("Stage-change email failed for application {}", saved.getId());
         }
 
         return saved;

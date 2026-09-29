@@ -3,6 +3,7 @@ package com.vikisol.arena.enterprise.controller;
 import com.vikisol.arena.audit.AuditEventResponse;
 import com.vikisol.arena.audit.AuditService;
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.enterprise.dto.admin.*;
 import com.vikisol.arena.enterprise.service.AdminDashboardService;
@@ -13,7 +14,6 @@ import com.vikisol.arena.enterprise.service.TeamService;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -104,7 +104,7 @@ public class CompanyAdminController {
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
         Instant since = sinceDays == null ? null : Instant.now().minus(sinceDays, ChronoUnit.DAYS);
         return ResponseEntity.ok(ApiResponse.ok(
-                auditService.search(tenantIdFor(principal), actorId, action, since, PageRequest.of(page, size))));
+                auditService.search(tenantIdFor(principal), actorId, action, since, PageLimits.of(page, size))));
     }
 
     @GetMapping(value = "/audit/export", produces = "text/csv")

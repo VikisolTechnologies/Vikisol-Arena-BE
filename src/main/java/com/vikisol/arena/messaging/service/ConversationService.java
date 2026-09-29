@@ -7,6 +7,7 @@ import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
 import com.vikisol.arena.messaging.dto.ConversationResponse;
 import com.vikisol.arena.messaging.dto.ThreadMessageResponse;
@@ -16,8 +17,11 @@ import com.vikisol.arena.messaging.repository.ConversationRepository;
 import com.vikisol.arena.messaging.repository.ThreadMessageRepository;
 import com.vikisol.arena.notifications.entity.NotificationType;
 import com.vikisol.arena.notifications.service.NotificationService;
+import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +29,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -45,8 +50,14 @@ public class ConversationService {
     static final int MAX_ANONYMOUS_CHATS_PER_DAY = 10;
 
     @Transactional(readOnly = true)
-    public List<ConversationResponse> getMyConversations(UUID userId) {
-        return conversationRepository.findAllForUser(userId).stream().map(c -> toResponse(c, userId)).toList();
+    public Page<ConversationResponse> getMyConversations(UUID userId, Pageable pageable) {
+        Page<Conversation> rows = conversationRepository.findAllForUser(userId, pageable);
+        List<User> others = rows.stream().map(c -> c.getUserA().getId().equals(userId) ? c.getUserB() : c.getUserA()).toList();
+        Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
+                others.stream().filter(u -> u.getRole() == Role.TALENT).map(User::getId).toList());
+        Map<UUID, EnterpriseProfile> tenants = enterpriseProfileService.mapByUserId(
+                others.stream().filter(u -> u.getRole() != Role.TALENT).map(User::getId).toList());
+        return rows.map(c -> toResponse(c, userId, profiles, tenants));
     }
 
     @Transactional(readOnly = true)
@@ -213,7 +224,18 @@ public class ConversationService {
         }
     }
 
+    // Single-conversation call sites (start/send/close) - two lookups at most, fine for one row.
     private ConversationResponse toResponse(Conversation c, UUID viewingUserId) {
+        User other = c.getUserA().getId().equals(viewingUserId) ? c.getUserB() : c.getUserA();
+        Map<UUID, CandidateProfile> profiles = other.getRole() == Role.TALENT
+                ? candidateProfileRepository.mapByUserId(List.of(other.getId())) : Map.of();
+        Map<UUID, EnterpriseProfile> tenants = other.getRole() == Role.TALENT
+                ? Map.of() : enterpriseProfileService.mapByUserId(List.of(other.getId()));
+        return toResponse(c, viewingUserId, profiles, tenants);
+    }
+
+    private ConversationResponse toResponse(Conversation c, UUID viewingUserId,
+                                            Map<UUID, CandidateProfile> profiles, Map<UUID, EnterpriseProfile> tenants) {
         boolean viewerIsA = c.getUserA().getId().equals(viewingUserId);
         User other = viewerIsA ? c.getUserB() : c.getUserA();
         Instant lastReadAt = viewerIsA ? c.getLastReadAtA() : c.getLastReadAtB();
@@ -222,10 +244,10 @@ public class ConversationService {
         String displayName = other.getName();
         String displayEmoji = "🧑🏽";
         if (other.getRole() == Role.TALENT) {
-            var profile = candidateProfileRepository.findByUserId(other.getId());
-            if (profile.isPresent()) {
-                displayName = profile.get().getName();
-                displayEmoji = profile.get().getAvatarEmoji();
+            CandidateProfile profile = profiles.get(other.getId());
+            if (profile != null) {
+                displayName = profile.getName();
+                displayEmoji = profile.getAvatarEmoji();
             }
         } else {
             // Always the tenant's identity (company name/logo), not the individual recruiter's -
@@ -234,10 +256,10 @@ public class ConversationService {
             // comment) - the "hiring_manager not yet linked" case below is real and used to
             // silently doom this read transaction via the same exception-crosses-a-
             // @Transactional-boundary mechanism as sendMessage()'s audit call.
-            var tenant = enterpriseProfileService.findEntityForUser(other.getId());
-            if (tenant.isPresent()) {
-                displayName = tenant.get().getCompanyName();
-                displayEmoji = tenant.get().getLogoEmoji();
+            EnterpriseProfile tenant = tenants.get(other.getId());
+            if (tenant != null) {
+                displayName = tenant.getCompanyName();
+                displayEmoji = tenant.getLogoEmoji();
             }
             // else: no resolvable tenant (e.g. a hiring_manager not yet linked) - falls back to
             // the user's own name, set above.

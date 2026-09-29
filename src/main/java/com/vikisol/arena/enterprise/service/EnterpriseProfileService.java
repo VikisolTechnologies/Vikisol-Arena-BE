@@ -12,6 +12,10 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -46,6 +50,20 @@ public class EnterpriseProfileService {
     // above (every other call site in this codebase does, correctly - the user there is
     // guaranteed enterprise already); callers doing a soft "is this user enterprise at all"
     // check should use this instead, which never throws.
+    // Batched findEntityForUser() for a list of users (two IN-queries total) - same membership-
+    // first, founding-admin-second resolution. Users with no tenant are simply absent.
+    @Transactional(readOnly = true)
+    public Map<UUID, EnterpriseProfile> mapByUserId(Collection<UUID> userIds) {
+        if (userIds.isEmpty()) return Map.of();
+        Map<UUID, EnterpriseProfile> out = new HashMap<>();
+        membershipRepository.findByUserIdIn(userIds).forEach(m -> out.putIfAbsent(m.getUser().getId(), m.getTenant()));
+        List<UUID> rest = userIds.stream().filter(id -> !out.containsKey(id)).distinct().toList();
+        if (!rest.isEmpty()) {
+            enterpriseProfileRepository.findByUserIdIn(rest).forEach(e -> out.putIfAbsent(e.getUser().getId(), e));
+        }
+        return out;
+    }
+
     @Transactional(readOnly = true)
     public Optional<EnterpriseProfile> findEntityForUser(UUID userId) {
         return membershipRepository.findByUserId(userId)

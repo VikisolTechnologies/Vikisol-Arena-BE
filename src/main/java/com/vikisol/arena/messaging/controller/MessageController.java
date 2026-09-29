@@ -1,6 +1,7 @@
 package com.vikisol.arena.messaging.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.messaging.dto.ConversationResponse;
 import com.vikisol.arena.messaging.dto.CreateConversationRequest;
 import com.vikisol.arena.messaging.dto.SendMessageRequest;
@@ -24,8 +25,9 @@ public class MessageController {
     private final ConversationService conversationService;
 
     @GetMapping("/conversations")
-    public ResponseEntity<ApiResponse<List<ConversationResponse>>> getConversations(@AuthenticationPrincipal UserPrincipal principal) {
-        return ResponseEntity.ok(ApiResponse.ok(conversationService.getMyConversations(principal.getId())));
+    public ResponseEntity<ApiResponse<List<ConversationResponse>>> getConversations(
+            @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
+        return PageLimits.ok(conversationService.getMyConversations(principal.getId(), PageLimits.of(page, size)));
     }
 
     @GetMapping("/conversations/{id}/messages")

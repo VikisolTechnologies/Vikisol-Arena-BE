@@ -11,6 +11,14 @@ Updated 28 Sep 2026. Resume from here.
 - `GET /api/v1/public/landing-stats` returns honest non-demo counts. Actuator health is UP.
 - Frontend production is `4225f9e`. VNext PR #1 was not merged.
 
+## Backend hardening (branch `cloud/api-hardening`, draft PR, not merged)
+
+29 Sep 2026. Profile-id links from Talent Universe fixed, five N+1 lists batched, unbounded lists
+paged (shape unchanged), V21 indexes, one error envelope with real statuses. Architect follow-ups:
+provider errors never reach users (503 + short message, redacted server log), capped lists most
+recent first, `X-Total-Count` / `X-Has-More` headers. 125 tests green (baseline 88, all still green). See `BACKEND-FIXES.md` and `API-CHANGES.md`. Needs review before
+merge; merging to `main` deploys.
+
 ## Current step
 
 No further P0 work. Frontend continues under Claude Code. Do not merge the VNext pull request.

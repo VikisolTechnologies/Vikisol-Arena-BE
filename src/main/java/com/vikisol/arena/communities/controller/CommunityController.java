@@ -1,6 +1,7 @@
 package com.vikisol.arena.communities.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.communities.dto.*;
 import com.vikisol.arena.communities.service.CommunityService;
 import com.vikisol.arena.posts.dto.PostResponse;
@@ -39,22 +40,24 @@ public class CommunityController {
             @RequestParam(defaultValue = "new") String sort,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "30") int size) {
-        int bounded = Math.max(1, Math.min(size, 100));
+        int p = PageLimits.page(page), bounded = PageLimits.size(size);
         return ResponseEntity.ok(ApiResponse.ok(community == null || community.isBlank()
-                ? postService.listDiscussions(viewer(principal), null, sort, page, bounded)
-                : communityService.posts(community, sort, page, bounded, viewer(principal))));
+                ? postService.listDiscussions(viewer(principal), null, sort, p, bounded)
+                : communityService.posts(community, sort, p, bounded, viewer(principal))));
     }
 
     @PreAuthorize("permitAll()")
     @GetMapping("/communities")
     public ResponseEntity<ApiResponse<List<CommunityResponse>>> list(
-            @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "") String q) {
-        return ResponseEntity.ok(ApiResponse.ok(communityService.list(q, viewer(principal))));
+            @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "") String q,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
+        return PageLimits.ok(PageLimits.page(communityService.list(q, viewer(principal)), page, size));
     }
 
     @GetMapping("/communities/mine")
-    public ResponseEntity<ApiResponse<List<CommunityResponse>>> mine(@AuthenticationPrincipal UserPrincipal principal) {
-        return ResponseEntity.ok(ApiResponse.ok(communityService.mine(principal.getId())));
+    public ResponseEntity<ApiResponse<List<CommunityResponse>>> mine(
+            @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
+        return PageLimits.ok(PageLimits.page(communityService.mine(principal.getId()), page, size));
     }
 
     @PreAuthorize("permitAll()")

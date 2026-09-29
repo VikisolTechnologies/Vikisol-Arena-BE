@@ -2,6 +2,8 @@ package com.vikisol.arena.posts.repository;
 
 import com.vikisol.arena.posts.entity.PostJoinRequest;
 import com.vikisol.arena.posts.entity.PostJoinStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -12,8 +14,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest, UUID> {
-    @EntityGraph(attributePaths = "user")
-    List<PostJoinRequest> findByPostIdOrderByCreatedAtAsc(UUID postId);
+    @EntityGraph(attributePaths = {"user", "post"})
+    Page<PostJoinRequest> findByPostIdOrderByCreatedAtAscIdAsc(UUID postId, Pageable pageable);
 
     Optional<PostJoinRequest> findByPostIdAndUserId(UUID postId, UUID userId);
 

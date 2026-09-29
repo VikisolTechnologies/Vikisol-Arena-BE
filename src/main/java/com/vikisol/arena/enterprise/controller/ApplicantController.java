@@ -3,13 +3,13 @@ package com.vikisol.arena.enterprise.controller;
 import com.vikisol.arena.applications.dto.AdvanceStageRequest;
 import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.enterprise.dto.ApplicantResponse;
 import com.vikisol.arena.enterprise.service.ApplicantService;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -32,7 +32,7 @@ public class ApplicantController {
             @PathVariable UUID postingId,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "50") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "appliedAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "appliedAt"));
         return ResponseEntity.ok(ApiResponse.ok(applicantService.getApplicantsForPosting(principal.getId(), postingId, pageable)));
     }
 

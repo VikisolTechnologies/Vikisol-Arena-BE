@@ -1,13 +1,13 @@
 package com.vikisol.arena.notifications.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.notifications.dto.NotificationResponse;
 import com.vikisol.arena.notifications.entity.Notification;
 import com.vikisol.arena.notifications.repository.NotificationRepository;
 import com.vikisol.arena.security.service.UserPrincipal;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.AccessDeniedException;
@@ -30,7 +30,7 @@ public class NotificationController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         var result = notificationRepository.findByUserIdOrderByCreatedAtDesc(principal.getId(), pageable);
         return ResponseEntity.ok(ApiResponse.ok(PagedResponse.of(result, this::toResponse)));
     }

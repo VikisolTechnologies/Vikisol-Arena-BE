@@ -1,6 +1,7 @@
 package com.vikisol.arena.follows.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.follows.dto.BlockedUserResponse;
 import com.vikisol.arena.follows.service.BlockService;
 import com.vikisol.arena.security.service.UserPrincipal;
@@ -34,7 +35,8 @@ public class BlockController {
     }
 
     @GetMapping("/me")
-    public ResponseEntity<ApiResponse<List<BlockedUserResponse>>> getMyBlocks(@AuthenticationPrincipal UserPrincipal principal) {
-        return ResponseEntity.ok(ApiResponse.ok(blockService.getMyBlocks(principal.getId())));
+    public ResponseEntity<ApiResponse<List<BlockedUserResponse>>> getMyBlocks(
+            @AuthenticationPrincipal UserPrincipal principal, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
+        return PageLimits.ok(blockService.getMyBlocks(principal.getId(), PageLimits.of(page, size)));
     }
 }

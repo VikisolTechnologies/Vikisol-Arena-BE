@@ -198,7 +198,7 @@ public class InterviewService {
             interview.setMeetingLink(meetingLink);
             interview = interviewRepository.save(interview);
         } catch (Exception e) {
-            log.warn("Meeting-link creation failed for interview {}: {}", interview.getId(), e.getMessage());
+            log.warn("Meeting-link creation failed for interview {}", interview.getId());
         }
 
         try {
@@ -211,7 +211,7 @@ public class InterviewService {
                             + (interview.getMeetingLink() != null ? "<p>Join link: <a href=\"" + interview.getMeetingLink() + "\">" + interview.getMeetingLink() + "</a></p>" : "")
                             + "<p>- The Vikisol Arena team</p>"));
         } catch (Exception e) {
-            log.warn("Interview-confirmation email failed for interview {}: {}", interview.getId(), e.getMessage());
+            log.warn("Interview-confirmation email failed for interview {}", interview.getId());
         }
 
         return toResponse(interview);
