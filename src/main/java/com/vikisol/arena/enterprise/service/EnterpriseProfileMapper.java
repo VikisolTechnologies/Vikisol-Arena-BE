@@ -11,6 +11,7 @@ import org.springframework.stereotype.Component;
 public class EnterpriseProfileMapper {
 
     private final BusinessVerificationRepository verificationRepository;
+    private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
 
     public EnterpriseProfileResponse toResponse(EnterpriseProfile p) {
         var verification = p.getId() == null ? null : verificationRepository.findByTenantId(p.getId()).orElse(null);
@@ -18,7 +19,7 @@ public class EnterpriseProfileMapper {
                 p.getCompanyName(), p.getLogoEmoji(), p.getIndustry().wireValue(), p.getSize().wireValue(),
                 p.getHiringFor(), p.getPlan().wireValue(), p.getSeatsUsed(), p.getSeatsTotal(),
                 p.getUnlockCreditsUsed(), p.getUnlockCreditsTotal(), p.getStatus().wireValue(),
-                p.getWebsite(), p.getGstin(), p.getCin(), p.getHqCity(), p.getLogoUrl(),
+                p.getWebsite(), p.getGstin(), p.getCin(), p.getHqCity(), fileSigningService.sign(p.getLogoUrl()),
                 verification == null ? "none" : verification.getStatus().name().toLowerCase(),
                 verification == null ? null : verification.getReviewNote());
     }

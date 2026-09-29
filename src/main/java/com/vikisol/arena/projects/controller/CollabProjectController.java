@@ -30,6 +30,59 @@ public class CollabProjectController {
         return ResponseEntity.ok(ApiResponse.ok(projectService.get(id, principal == null ? null : principal.getId())));
     }
 
+    // Row 26 / flow §7.
+    @PostMapping("/projects")
+    public ResponseEntity<ApiResponse<ProjectView>> create(@AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody CreateProjectRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Project published", projectService.create(principal.getId(), request)));
+    }
+
+    @PostMapping("/projects/{id}/applications")
+    public ResponseEntity<ApiResponse<PostJoinRequestResponse>> apply(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody ApplicationRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(projectService.apply(principal.getId(), id, request)));
+    }
+
+    @PostMapping(value = "/projects/{id}/cover", consumes = "multipart/form-data")
+    public ResponseEntity<ApiResponse<ProjectView>> uploadCover(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        return ResponseEntity.ok(ApiResponse.ok(projectService.uploadCover(principal.getId(), id, file)));
+    }
+
+    @DeleteMapping("/projects/{id}/cover")
+    public ResponseEntity<ApiResponse<ProjectView>> deleteCover(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(projectService.deleteCover(principal.getId(), id)));
+    }
+
+    @GetMapping("/projects/{id}/milestones")
+    public ResponseEntity<ApiResponse<List<MilestoneView>>> milestones(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(projectService.milestones(principal.getId(), id)));
+    }
+
+    @PostMapping("/projects/{id}/milestones")
+    public ResponseEntity<ApiResponse<List<MilestoneView>>> addMilestone(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody MilestoneInput request) {
+        return ResponseEntity.ok(ApiResponse.ok(projectService.addMilestone(principal.getId(), id, request.title())));
+    }
+
+    @PutMapping("/projects/{id}/milestones/{milestoneId}")
+    public ResponseEntity<ApiResponse<List<MilestoneView>>> updateMilestone(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID milestoneId,
+            @Valid @RequestBody MilestoneUpdate request) {
+        return ResponseEntity.ok(ApiResponse.ok(projectService.updateMilestone(principal.getId(), id, milestoneId, request)));
+    }
+
+    @DeleteMapping("/projects/{id}/milestones/{milestoneId}")
+    public ResponseEntity<ApiResponse<List<MilestoneView>>> deleteMilestone(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID milestoneId) {
+        return ResponseEntity.ok(ApiResponse.ok(projectService.deleteMilestone(principal.getId(), id, milestoneId)));
+    }
+
+    @PostMapping("/projects/{id}/complete")
+    public ResponseEntity<ApiResponse<ProjectView>> complete(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody CompleteRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(projectService.complete(principal.getId(), id, request)));
+    }
+
     @PutMapping("/projects/{id}/roles")
     public ResponseEntity<ApiResponse<ProjectView>> setRoles(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody RolesRequest request) {

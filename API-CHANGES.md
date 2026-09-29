@@ -617,3 +617,23 @@ never blocks anyone.
 - It also appears as a feed `itemType` and a post `intentType`, so clients that switch on either
   should handle it.
 - A `collab` post is joinable (`joinable: true`) like activities and needs.
+
+### Community projects per the app flow (FE-API-GAPS row 26; flow §7 PR1–PR6)
+
+| Step | Endpoint | Who | Body / notes |
+|---|---|---|---|
+| PR1–PR2 | `POST /projects` | talent | `{ title (≤80), goal (≤2000), category: community\|environment\|education\|tech\|design\|arts\|other, where?: local\|remote\|both (default local), weeks? (1–52), roles?: [RoleInput], tags?, locationText? }` → `ProjectView`. One transaction. It makes an approval-only `collab` post (people apply), its details and its roles |
+| PR2 | `PUT /projects/{id}/roles` (G29) | owner | Each role also takes `count` (same as `slots`), `skills` (≤8 × ≤40) and `hoursPerWeek` (1–40) |
+| PR1 | `POST /projects/{id}/cover`, `DELETE /projects/{id}/cover` | owner | multipart `file` (PNG/JPG/WebP). An AI cover (row 24) is not built |
+| PR4 | `POST /projects/{id}/applications` | talent | `{ roleId?, note? (≤500) }`: the same request as `POST /projects/{id}/join`. The owner accepts or declines with `PUT /posts/{id}/joins/{joinId}/approve\|decline` |
+| PR5 | `GET /projects/{id}/milestones` | the team (owner and approved members) | `[{ id, title, done, doneAt }]` in order |
+| PR5 | `POST /projects/{id}/milestones` | the team | `{ title (≤120) }`, up to 30 → the list |
+| PR5 | `PUT /projects/{id}/milestones/{milestoneId}` | the team | `{ title?, done? }` → the list |
+| PR5 | `DELETE /projects/{id}/milestones/{milestoneId}` | the owner, or whoever added it | → the list |
+| PR6 | `POST /projects/{id}/complete` | owner | `{ outcome (≤1000), contributorIds?: [userId] }`. Contributors must be on the team. The project closes and each contributor is notified |
+| | `GET /projects/{id}` (G30) | | Adds `goal, category, where, weeks, coverUrl`, then `outcome, completedAt, contributors: [MemberView]` once completed. Roles add `skills` and `hoursPerWeek` |
+| PR6 | `GET /projects/of/{userId}` (G31) | | Cards add `outcome`, `completedAt` and `contributor` (that person was named on it) |
+
+The team room's Chat is the project's Room, as before. Files are links in chat; attachments are
+not built (rows 9 and 40, see GAP-MAPPING.md).
+

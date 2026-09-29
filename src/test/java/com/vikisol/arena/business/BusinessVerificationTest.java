@@ -201,7 +201,7 @@ class BusinessVerificationTest extends EmbeddedPostgresAppTest {
         call(admin, put("/enterprise/profile/me"), base + ",\"cin\":\"123\"}").andExpect(status().isBadRequest());
         call(admin, multipart("/enterprise/profile/me/logo").file(new org.springframework.mock.web.MockMultipartFile("file", "logo.png", "image/png",
                 new byte[]{(byte) 0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0})), null)
-                .andExpect(jsonPath("$.data.logoUrl").isNotEmpty());
+                .andExpect(jsonPath("$.data.logoUrl").value(org.hamcrest.Matchers.containsString("sig="))); // signed, so it loads
         call(recruiter, delete("/enterprise/profile/me/logo"), null).andExpect(status().isForbidden());
         call(admin, delete("/enterprise/profile/me/logo"), null).andExpect(jsonPath("$.data.logoUrl").doesNotExist());
     }
