@@ -131,8 +131,19 @@ public class RoomService {
 
     @Transactional(readOnly = true)
     public List<RoomResponse> getMyRooms(UUID userId) {
-        return roomMemberRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
-                .map(membership -> toResponse(membership.getRoom(), membership))
+        List<RoomMember> memberships = roomMemberRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        List<UUID> roomIds = memberships.stream().map(m -> m.getRoom().getId()).toList();
+        if (roomIds.isEmpty()) return List.of();
+        // One COUNT ... GROUP BY and one latest-message query for every room, instead of both
+        // once per room.
+        Map<UUID, Long> memberCounts = roomMemberRepository.countByRoomIdIn(roomIds).stream()
+                .collect(Collectors.toMap(RoomMemberRepository.RoomCount::getRoomId, RoomMemberRepository.RoomCount::getCnt));
+        Map<UUID, RoomMessage> lastMessages = roomMessageRepository.findLatestByRoomIdIn(roomIds).stream()
+                .collect(Collectors.toMap(m -> m.getRoom().getId(), m -> m, (a, b) -> a));
+        return memberships.stream()
+                .map(membership -> toResponse(membership.getRoom(), membership,
+                        lastMessages.get(membership.getRoom().getId()),
+                        memberCounts.getOrDefault(membership.getRoom().getId(), 0L).intValue()))
                 .toList();
     }
 
@@ -251,16 +262,12 @@ public class RoomService {
         }
     }
 
-    private RoomResponse toResponse(Room room, RoomMember membership) {
-        // P3 audit fix: used to load the room's entire message history (findByRoomIdOrderBy...)
-        // just to read the last element, and every member row just to count them - both once per
-        // room in getMyRooms' loop. A single-row query and a COUNT query instead.
-        RoomMessage last = roomMessageRepository.findTopByRoomIdOrderByCreatedAtDesc(room.getId()).orElse(null);
+    // last and memberCount come batched from getMyRooms - see its comment.
+    private RoomResponse toResponse(Room room, RoomMember membership, RoomMessage last, int memberCount) {
         // Muted rooms never surface an unread badge, even with genuinely new messages - see
         // RoomMember.muted's own doc comment.
         boolean unread = !membership.isMuted() && last != null
                 && (membership.getLastReadAt() == null || membership.getLastReadAt().isBefore(last.getCreatedAt()));
-        int memberCount = (int) roomMemberRepository.countByRoomId(room.getId());
         Post post = room.getPost();
         return new RoomResponse(
                 room.getId().toString(), post.getId().toString(), post.getBody(), post.getIntentType().wireValue(),

@@ -204,12 +204,15 @@ public class PostMapper {
     }
 
     public PostJoinRequestResponse toResponse(PostJoinRequest joinRequest) {
-        var profile = candidateProfileRepository.findByUserId(joinRequest.getUser().getId());
+        return toResponse(joinRequest, candidateProfileRepository.findByUserId(joinRequest.getUser().getId()).orElse(null));
+    }
+
+    private PostJoinRequestResponse toResponse(PostJoinRequest joinRequest, CandidateProfile profile) {
         String userName = joinRequest.getUser().getName();
         String userEmoji = "🧑🏽";
-        if (profile.isPresent()) {
-            userName = profile.get().getName();
-            userEmoji = profile.get().getAvatarEmoji();
+        if (profile != null) {
+            userName = profile.getName();
+            userEmoji = profile.getAvatarEmoji();
         }
         return new PostJoinRequestResponse(
                 joinRequest.getId().toString(), joinRequest.getPost().getId().toString(),
@@ -218,7 +221,10 @@ public class PostMapper {
                 joinRequest.getOutcome() == null ? null : joinRequest.getOutcome().wireValue());
     }
 
+    // Batched: one profile IN-query for the whole list instead of one findByUserId() per request.
     public List<PostJoinRequestResponse> toResponseList(List<PostJoinRequest> requests) {
-        return requests.stream().map(this::toResponse).toList();
+        Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
+                requests.stream().map(r -> r.getUser().getId()).toList());
+        return requests.stream().map(r -> toResponse(r, profiles.get(r.getUser().getId()))).toList();
     }
 }

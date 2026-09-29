@@ -9,15 +9,27 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 public interface CandidateProfileRepository extends JpaRepository<CandidateProfile, UUID> {
 
     Optional<CandidateProfile> findByUserId(UUID userId);
 
     List<CandidateProfile> findByUserIdIn(List<UUID> userIds);
+
+    // One IN-query for a whole list's profiles, keyed by user id - list endpoints use this instead
+    // of one findByUserId() per row (the N+1 QueryCountTest guards against).
+    default Map<UUID, CandidateProfile> mapByUserId(Collection<UUID> userIds) {
+        if (userIds.isEmpty()) return Map.of();
+        return findByUserIdIn(List.copyOf(new java.util.LinkedHashSet<>(userIds))).stream()
+                .collect(Collectors.toMap(p -> p.getUser().getId(), Function.identity(), (a, b) -> a));
+    }
 
     // `:text` is intentionally never null-checked here (always compared/used as a plain string,
     // caller passes "" for "no filter") - a `:text is null or ... :text ...` pattern in the same

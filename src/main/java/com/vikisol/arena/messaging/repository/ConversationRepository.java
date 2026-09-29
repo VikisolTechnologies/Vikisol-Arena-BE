@@ -11,7 +11,9 @@ import java.util.UUID;
 
 public interface ConversationRepository extends JpaRepository<Conversation, UUID> {
 
-    @Query("select c from Conversation c where c.userA.id = :userId or c.userB.id = :userId order by c.lastMessageAt desc")
+    // Both participants fetched in the same query - ConversationService.toResponse reads the
+    // other side's name/role for every row.
+    @Query("select c from Conversation c join fetch c.userA join fetch c.userB where c.userA.id = :userId or c.userB.id = :userId order by c.lastMessageAt desc")
     List<Conversation> findAllForUser(@Param("userId") UUID userId);
 
     @Query("""

@@ -12,7 +12,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest, UUID> {
-    @EntityGraph(attributePaths = "user")
+    @EntityGraph(attributePaths = {"user", "post"})
     List<PostJoinRequest> findByPostIdOrderByCreatedAtAsc(UUID postId);
 
     Optional<PostJoinRequest> findByPostIdAndUserId(UUID postId, UUID userId);

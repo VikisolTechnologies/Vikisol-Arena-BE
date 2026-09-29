@@ -12,12 +12,14 @@ import com.vikisol.arena.follows.entity.Follow;
 import com.vikisol.arena.follows.entity.FollowTargetType;
 import com.vikisol.arena.follows.repository.FollowRepository;
 import com.vikisol.arena.notifications.service.NotificationService;
+import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
@@ -62,23 +64,27 @@ public class FollowService {
 
     @Transactional(readOnly = true)
     public List<FollowerResponse> getFollowers(UUID userId) {
-        return followRepository.findByFollowingUserIdOrderByCreatedAtDesc(userId).stream()
-                .map(f -> toResponse(f.getFollowerUser(), f.getCreatedAt().toString())).toList();
+        List<Follow> rows = followRepository.findByFollowingUserIdOrderByCreatedAtDesc(userId);
+        Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
+                rows.stream().map(f -> f.getFollowerUser().getId()).toList());
+        return rows.stream().map(f -> toResponse(f.getFollowerUser(), f.getCreatedAt().toString(), profiles)).toList();
     }
 
     @Transactional(readOnly = true)
     public List<FollowerResponse> getFollowing(UUID userId) {
-        return followRepository.findByFollowerUserIdOrderByCreatedAtDesc(userId).stream()
-                .map(f -> toResponse(f.getFollowingUser(), f.getCreatedAt().toString())).toList();
+        List<Follow> rows = followRepository.findByFollowerUserIdOrderByCreatedAtDesc(userId);
+        Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
+                rows.stream().map(f -> f.getFollowingUser().getId()).toList());
+        return rows.stream().map(f -> toResponse(f.getFollowingUser(), f.getCreatedAt().toString(), profiles)).toList();
     }
 
-    private FollowerResponse toResponse(User user, String followedAt) {
+    private FollowerResponse toResponse(User user, String followedAt, Map<UUID, CandidateProfile> profiles) {
         String name = user.getName();
         String emoji = "🧑🏽";
-        var profile = candidateProfileRepository.findByUserId(user.getId());
-        if (profile.isPresent()) {
-            name = profile.get().getName();
-            emoji = profile.get().getAvatarEmoji();
+        CandidateProfile profile = profiles.get(user.getId());
+        if (profile != null) {
+            name = profile.getName();
+            emoji = profile.getAvatarEmoji();
         }
         return new FollowerResponse(user.getId().toString(), name, emoji, followedAt);
     }

@@ -7,12 +7,16 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
 public interface MembershipRepository extends JpaRepository<Membership, UUID> {
     Optional<Membership> findByUserId(UUID userId);
+
+    @EntityGraph(attributePaths = "tenant")
+    List<Membership> findByUserIdIn(Collection<UUID> userIds);
 
     // TeamService.listMembers() reads member.getUser() and member.getInvitedBy() for every row -
     // both are single-valued (@ManyToOne) associations, so eagerly fetching them here is one query
