@@ -50,6 +50,13 @@ public class BlockService {
         userBlockRepository.deleteByBlockerUserIdAndBlockedUserId(blockerUserId, blockedUserId);
     }
 
+    // Everyone this user blocked or was blocked by - for filtering a whole list in one query.
+    @Transactional(readOnly = true)
+    public java.util.Set<UUID> blockedEitherDirection(UUID userId) {
+        if (userId == null) return java.util.Set.of();
+        return new java.util.HashSet<>(userBlockRepository.findBlockedEitherDirection(userId));
+    }
+
     /** Either direction blocks interaction - being blocked BY someone stops you from reaching
      * them too, not just the reverse. Used by PostService (join gating) and RoomService. */
     @Transactional(readOnly = true)

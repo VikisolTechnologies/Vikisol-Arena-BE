@@ -9,7 +9,13 @@ import com.vikisol.arena.marketplace.service.ProjectService;
 import com.vikisol.arena.posts.entity.PostIntentType;
 import com.vikisol.arena.posts.service.PostService;
 import lombok.RequiredArgsConstructor;
+import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
+import com.vikisol.arena.jobs.entity.JobPosting;
+import com.vikisol.arena.jobs.entity.PostingStatus;
+import com.vikisol.arena.marketplace.entity.Project;
+import com.vikisol.arena.marketplace.entity.ProjectStatus;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -38,6 +44,9 @@ public class SearchService {
     private final JobService jobService;
     private final ProjectService projectService;
     private final CompanyService companyService;
+    private final com.vikisol.arena.jobs.repository.JobPostingRepository jobPostingRepository;
+    private final com.vikisol.arena.marketplace.repository.ProjectRepository projectRepository;
+    private final com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository enterpriseProfileRepository;
     private final com.vikisol.arena.profile.repository.CandidateProfileRepository candidateProfileRepository;
     private final com.vikisol.arena.follows.service.BlockService blockService;
     private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
@@ -54,12 +63,18 @@ public class SearchService {
             return new SearchResponse(query, List.of(), List.of(), List.of(), List.of(), List.of(),
                     viewingUserId == null ? List.of() : people(terms, t.equals("skills"), limit, viewingUserId, nearLat, nearLng, radiusKm));
         }
+        // Activities and discussions come from one candidate read (PERFORMANCE.md).
+        List<PostIntentType> activityKinds = List.of(PostIntentType.ACTIVITY);
+        List<PostIntentType> discussionKinds = java.util.Arrays.stream(PostIntentType.values()).filter(PostIntentType::isDiscussion).toList();
+        List<List<PostIntentType>> groups = new java.util.ArrayList<>();
+        if (all || t.equals("activities")) groups.add(activityKinds);
+        if (all || t.equals("discussions")) groups.add(discussionKinds);
+        List<List<com.vikisol.arena.posts.dto.PostResponse>> posts = groups.isEmpty() ? List.of()
+                : postService.search(viewingUserId, terms, groups, limit);
         return new SearchResponse(
                 query,
-                all || t.equals("activities")
-                        ? postService.search(viewingUserId, terms, p -> p.getIntentType() == PostIntentType.ACTIVITY, limit) : List.of(),
-                all || t.equals("discussions")
-                        ? postService.search(viewingUserId, terms, p -> p.getIntentType().isDiscussion(), limit) : List.of(),
+                groups.contains(activityKinds) ? posts.get(groups.indexOf(activityKinds)) : List.of(),
+                groups.contains(discussionKinds) ? posts.get(groups.indexOf(discussionKinds)) : List.of(),
                 all || t.equals("jobs") ? jobs(terms, limit, viewingUserId) : List.of(),
                 all || t.equals("projects") ? projects(terms, limit, viewingUserId) : List.of(),
                 all || t.equals("companies") ? companies(terms, limit, viewingUserId) : List.of(),
@@ -112,20 +127,41 @@ public class SearchService {
         return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     }
 
+    // PERFORMANCE.md: each source is ranked on its rows, and only the hits are mapped to
+    // responses. Mapping every candidate (up to 1,000 jobs, projects and companies, with their
+    // counts and match scores) just to rank them was most of search's cost. Same fields, same order.
     private List<JobResponse> jobs(List<String> terms, int limit, UUID viewer) {
-        return rank(jobService.getOpenJobs(PageRequest.of(0, CANDIDATES), viewer).content(), limit,
-                j -> SearchText.score(terms, j.title(), SearchText.haystack(
-                        j.company(), j.industry(), j.location(), j.remote() ? "remote" : null, j.employmentType(), j.skills(), j.description())));
+        String first = terms.get(0);
+        List<JobPosting> candidates = SearchText.isAscii(first)
+                ? jobPostingRepository.searchCandidates(PostingStatus.OPEN, SearchText.likePattern(first),
+                        java.util.Arrays.stream(com.vikisol.arena.profile.entity.Industry.values())
+                                .filter(i -> i.wireValue().toLowerCase(java.util.Locale.ROOT).contains(first)).toList(),
+                        java.util.Arrays.stream(com.vikisol.arena.jobs.entity.EmploymentType.values())
+                                .filter(t -> t.wireValue().toLowerCase(java.util.Locale.ROOT).contains(first)).toList(),
+                        "remote".contains(first), PageRequest.of(0, CANDIDATES))
+                : jobPostingRepository.findByStatus(PostingStatus.OPEN, PageRequest.of(0, CANDIDATES,
+                        Sort.by(Sort.Direction.DESC, "createdAt"))).getContent();
+        if (!candidates.isEmpty()) jobPostingRepository.findByIdInFetchingSkills(candidates.stream().map(JobPosting::getId).toList());
+        List<JobPosting> hits = rank(candidates, limit, j -> SearchText.score(terms, j.getTitle(), SearchText.haystack(
+                j.getEnterprise().getCompanyName(), j.getIndustry().wireValue(), j.getLocation(), j.isRemote() ? "remote" : null,
+                j.getEmploymentType().wireValue(), j.getSkills(), j.getDescription())));
+        return jobService.toResponses(hits, viewer);
     }
 
     private List<ProjectResponse> projects(List<String> terms, int limit, UUID viewer) {
-        return rank(projectService.getOpenProjects(PageRequest.of(0, CANDIDATES), viewer).content(), limit,
-                p -> SearchText.score(terms, p.title(), SearchText.haystack(p.description(), p.skills(), p.postedBy())));
+        List<Project> candidates = projectRepository.findByStatus(ProjectStatus.OPEN, PageRequest.of(0, CANDIDATES,
+                Sort.by(Sort.Direction.DESC, "createdAt"))).getContent();
+        if (!candidates.isEmpty()) projectRepository.findByIdInFetchingSkills(candidates.stream().map(Project::getId).toList());
+        List<Project> hits = rank(candidates, limit, p -> SearchText.score(terms, p.getTitle(),
+                SearchText.haystack(p.getDescription(), p.getSkills(), p.getPostedByUser().getName())));
+        return projectService.toResponses(hits, viewer);
     }
 
     private List<CompanyResponse> companies(List<String> terms, int limit, UUID viewer) {
-        return rank(companyService.listCompanies("", viewer, PageRequest.of(0, CANDIDATES)).content(), limit,
-                c -> SearchText.score(terms, c.name(), SearchText.haystack(c.industry(), c.size())));
+        List<EnterpriseProfile> candidates = enterpriseProfileRepository.search("", PageRequest.of(0, CANDIDATES)).getContent();
+        List<EnterpriseProfile> hits = rank(candidates, limit, c -> SearchText.score(terms, c.getCompanyName(),
+                SearchText.haystack(c.getIndustry().wireValue(), c.getSize().wireValue())));
+        return companyService.toResponses(hits, viewer);
     }
 
     private static <T> List<T> rank(List<T> items, int limit, ToIntFunction<T> scorer) {

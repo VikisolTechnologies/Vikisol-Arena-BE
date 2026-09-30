@@ -160,3 +160,12 @@ The filter reads the path from the servlet path. When that is blank, it uses the
 `AuthService` asks for a code only when the role is `COMPANY_ADMIN` or `PLATFORM_ADMIN` and `totpEnabled` is already true. The column defaults to false. The demo company admin is seeded that way. The setup, enable, disable, and verify endpoints exist. Nothing in this change turns enrollment on, because that would lock every current admin out of the session the test suite uses.
 
 Recommendation: stop at the setup step, and do not issue a normal session, until those two roles finish enrollment. Do that in its own change, with the demo accounts enrolled first.
+
+## 30 Sep 2026 — Performance pass: indexed nearby and a 5-second feed window
+
+Details and numbers: `docs/PERFORMANCE.md`.
+
+- Nearby reads posts through a geohash-prefix index (`V38`) instead of the newest 500 open posts. It now finds older posts nearby, which the old read missed. It reads at most 2,000 candidates per circle, newest first.
+- Feed and trending share one candidate window (posts, jobs, projects) for 5 seconds (`FEED_WINDOW_CACHE_SECONDS`, 0 turns it off). Any post, job or project write clears it after commit. Only engagement counts can lag, and only in ranking, never in what a response shows. This relaxes the earlier "no premature caching" note, because the load test showed this work was the feed's main cost.
+- Search `type=all` reads activities and discussions from one window of 2,000 rows per kind. It can differ from separate reads only when one word matches more live posts than that.
+- The pool stays at HikariCP's 10 (`DB_POOL_SIZE`). The JVM heap is a Railway `JAVA_OPTS` setting to make; the Dockerfile is not changed here.

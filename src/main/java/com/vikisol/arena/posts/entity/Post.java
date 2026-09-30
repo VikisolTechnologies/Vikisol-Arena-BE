@@ -16,6 +16,8 @@ import java.util.List;
 // (post it, it shows in the feed, comments/reactions apply generically to every post type).
 @Entity
 @Table(name = "arena_posts")
+// PERFORMANCE.md: any post write clears the feed/trending candidate cache after commit.
+@jakarta.persistence.EntityListeners(com.vikisol.arena.common.cache.FeedWindowCache.Listener.class)
 @Data
 @Builder
 @NoArgsConstructor

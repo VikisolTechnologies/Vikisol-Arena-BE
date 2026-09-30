@@ -31,4 +31,18 @@ class SearchTextTest {
         assertThat(inTitle).isGreaterThan(partialTitle);
         assertThat(partialTitle).isGreaterThan(inBody);
     }
+
+    // PERFORMANCE.md: wholeWord replaced a regex compiled per post; it must answer the same.
+    @Test
+    void wholeWordMatchesTheRegexItReplaced() {
+        String[] titles = {"react developer", "reactive systems", "pre-react", "c++ dev", "node.js/react",
+                "react", "reactreact react", "नमस्ते react", "x2react", "react²", "café react", "", "re act"};
+        String[] terms = {"react", "c++", "node.js", "act", "re", "नमस्ते", "café"};
+        for (String t : titles) {
+            for (String term : terms) {
+                boolean regex = (" " + t + " ").matches("(?s).*[^\\p{L}\\p{N}]" + java.util.regex.Pattern.quote(term) + "[^\\p{L}\\p{N}].*");
+                assertThat(SearchText.wholeWord(t, term)).as("%s in %s", term, t).isEqualTo(regex);
+            }
+        }
+    }
 }

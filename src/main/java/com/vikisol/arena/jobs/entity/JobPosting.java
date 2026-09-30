@@ -15,6 +15,8 @@ import java.util.List;
 // existed for Job/JobPosting so it's collapsed the same way: one entity, two DTOs/views).
 @Entity
 @Table(name = "arena_job_postings")
+// PERFORMANCE.md: any write clears the feed's cached candidate windows after commit.
+@jakarta.persistence.EntityListeners(com.vikisol.arena.common.cache.FeedWindowCache.Listener.class)
 @Data
 @Builder
 @NoArgsConstructor

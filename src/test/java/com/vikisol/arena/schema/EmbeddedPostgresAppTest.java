@@ -45,6 +45,9 @@ public abstract class EmbeddedPostgresAppTest {
         registry.add("app.storage.root-dir", () -> "target/test-uploads");
         // Lets a test count the SQL statements a call issues (QueryCountTest), to prove N+1 fixes.
         registry.add("spring.jpa.properties.hibernate.generate_statistics", () -> "true");
+        // Test transactions roll back and never commit, so nothing would clear the feed's shared
+        // candidate cache between tests; every test reads the window fresh (TtlCacheTest covers it).
+        registry.add("app.feed.window-cache-seconds", () -> "0");
         registry.add("logging.level.org.hibernate.engine.internal.StatisticalLoggingSessionEventListener", () -> "WARN");
     }
 }

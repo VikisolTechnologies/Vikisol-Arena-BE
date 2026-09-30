@@ -14,6 +14,11 @@ public interface ProjectRepository extends JpaRepository<Project, UUID> {
     @EntityGraph(attributePaths = "postedByUser")
     Page<Project> findByStatus(ProjectStatus status, Pageable pageable);
 
+    // Batched warm-up of `skills` for a list of projects (PERFORMANCE.md).
+    @EntityGraph(attributePaths = "skills")
+    @org.springframework.data.jpa.repository.Query("select p from Project p where p.id in :ids")
+    java.util.List<Project> findByIdInFetchingSkills(@org.springframework.data.repository.query.Param("ids") java.util.Collection<UUID> ids);
+
     @EntityGraph(attributePaths = "postedByUser")
     Page<Project> findByPostedByUserId(UUID userId, Pageable pageable);
 

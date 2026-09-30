@@ -87,7 +87,7 @@ class AnonymityTest extends EmbeddedPostgresAppTest {
         assertThat(profileAsReader).extracting(PostResponse::body).containsExactly("Named question about hiking boots");
         assertThat(posts.getUserPosts(author.getId(), author.getId(), PageRequest.of(0, 20)).content()).hasSize(2);
 
-        var discussions = (java.util.function.Predicate<com.vikisol.arena.posts.entity.Post>) p -> p.getIntentType() == PostIntentType.ASK;
+        var discussions = List.of(PostIntentType.ASK);
         assertThat(posts.search(reader.getId(), SearchText.terms("kavya"), discussions, 20))
                 .extracting(PostResponse::body).containsExactly("Named question about hiking boots");
         assertThat(posts.search(reader.getId(), SearchText.terms("salary negotiation"), discussions, 20)).hasSize(1)

@@ -66,6 +66,16 @@ public class ProjectService {
                 p -> mapper.toResponse(p, bidsByProject.getOrDefault(p.getId(), List.of()), List.of(), viewingUserId, bidderProfiles));
     }
 
+    // A given list of projects, mapped with bids and bidder profiles in batches (search hits).
+    @Transactional(readOnly = true)
+    public List<ProjectResponse> toResponses(List<Project> projects, UUID viewingUserId) {
+        var bidsByProject = batchBidsForProjects(projects);
+        var bidderProfiles = batchBidderProfiles(bidsByProject.values().stream().flatMap(List::stream).toList());
+        return projects.stream()
+                .map(p -> mapper.toResponse(p, bidsByProject.getOrDefault(p.getId(), List.of()), List.of(), viewingUserId, bidderProfiles))
+                .toList();
+    }
+
     @Transactional(readOnly = true)
     public ProjectResponse getProject(UUID id, UUID viewingUserId) {
         Project project = requireProject(id);

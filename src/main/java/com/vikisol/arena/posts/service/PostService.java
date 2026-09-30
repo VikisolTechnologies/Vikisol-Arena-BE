@@ -32,6 +32,7 @@ import com.vikisol.arena.posts.repository.PostCommentRepository;
 import com.vikisol.arena.posts.repository.PostJoinRequestRepository;
 import com.vikisol.arena.posts.repository.PostReactionRepository;
 import com.vikisol.arena.posts.repository.PostRepository;
+import com.vikisol.arena.posts.repository.PostSearchRow;
 import com.vikisol.arena.posts.repository.PostSaveRepository;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
@@ -65,6 +66,7 @@ public class PostService {
     // Discuss thread lists rank ("top") within the newest this-many threads.
     private static final int DISCUSS_WINDOW = 500;
 
+    private final com.vikisol.arena.posts.repository.PostGeoRepository postGeoRepository;
     private final PostRepository postRepository;
     private final com.vikisol.arena.activities.repository.ActivityQuestionRepository activityQuestionRepository;
     private final com.vikisol.arena.activities.repository.ActivityWaitlistRepository activityWaitlistRepository;
@@ -97,25 +99,24 @@ public class PostService {
         return toResponseList(window, viewingUserId);
     }
 
-    // A fully-mapped PostResponse paired with its FeedRankingService score - used by
-    // FeedAggregationService to interleave posts with JobPosting/Project on one merged, ranked
-    // stream (see DECISIONS.md's Step 3 entry).
-    public record ScoredPostResponse(PostResponse response, double score) {
+    // The scored feed window, not yet mapped: FeedAggregationService merges it with jobs and
+    // projects, pages the merged list, and maps only the page (toResponses). Mapping every post
+    // of a 500-post window for a 20-item page was the feed's main cost (PERFORMANCE.md).
+    @Transactional(readOnly = true)
+    public List<FeedRankingService.ScoredPost> getScoredFeedCandidates(UUID viewingUserId) {
+        // Same rules as excludeBlocked, on the ranking rows.
+        Set<UUID> blocked = blockService.blockedEitherDirection(viewingUserId);
+        return feedRankingService.scoredWindow(viewingUserId).stream()
+                .filter(sp -> !sp.post().linkOnly() || sp.post().authorId().equals(viewingUserId))
+                .filter(sp -> !blocked.contains(sp.post().authorId()))
+                .toList();
     }
 
-    // Unpaged, scored+sorted feed posts, fully mapped (comment/reaction counts, join status,
-    // room id - everything getFeed's own responses have). Deliberately bypasses getFeed's own
-    // paging since the caller needs to merge-then-page across all three sources together, not
-    // page each independently and then try to interleave already-paged pages.
+    // Fully mapped posts for a feed page, read fresh in rank order (a post closed since the
+    // candidate window was read is left out), with every count and flag fetched in batches.
     @Transactional(readOnly = true)
-    public List<ScoredPostResponse> getScoredFeed(UUID viewingUserId) {
-        List<FeedRankingService.ScoredPost> scored = feedRankingService.scoredWindow(viewingUserId);
-        List<Post> posts = excludeBlocked(scored.stream().map(FeedRankingService.ScoredPost::post).toList(), viewingUserId);
-        Map<UUID, Double> scoreByPostId = scored.stream()
-                .collect(Collectors.toMap(sp -> sp.post().getId(), FeedRankingService.ScoredPost::score, (a, b) -> a));
-        return toResponseList(posts, viewingUserId).stream()
-                .map(r -> new ScoredPostResponse(r, scoreByPostId.getOrDefault(UUID.fromString(r.id()), 0.0)))
-                .toList();
+    public List<PostResponse> toResponses(List<FeedRankingService.Candidate> page, UUID viewingUserId) {
+        return toResponseList(feedRankingService.openPosts(page), viewingUserId);
     }
 
     // §"trends" - trending posts ranked by recent engagement velocity, reused as a feed sort
@@ -280,30 +281,61 @@ public class PostService {
     // posts for everyone, FOLLOWERS posts only for the author's followers (or the author), and
     // nothing from a blocked/blocking user.
     @Transactional(readOnly = true)
-    public List<PostResponse> search(UUID viewingUserId, List<String> terms, java.util.function.Predicate<Post> kind, int limit) {
-        if (terms.isEmpty()) return List.of();
-        List<Post> window = postRepository.findByStatusInOrderByCreatedAtDesc(
-                List.of(PostStatus.OPEN, PostStatus.FULL), PageRequest.of(0, SEARCH_WINDOW)).getContent();
+    public List<PostResponse> search(UUID viewingUserId, List<String> terms,
+                                     java.util.Collection<com.vikisol.arena.posts.entity.PostIntentType> kinds, int limit) {
+        return search(viewingUserId, terms, List.of(kinds), limit).get(0);
+    }
+
+    // Several kinds of post at once (search "all": activities and discussions) from one candidate
+    // read - one result list per group, each ranked and cut to `limit` on its own. The read is
+    // SEARCH_WINDOW per group, shared: it only differs from separate reads when one word matches
+    // more live posts than that (PERFORMANCE.md).
+    @Transactional(readOnly = true)
+    public List<List<PostResponse>> search(UUID viewingUserId, List<String> terms,
+                                           List<? extends java.util.Collection<com.vikisol.arena.posts.entity.PostIntentType>> groups, int limit) {
+        java.util.Set<com.vikisol.arena.posts.entity.PostIntentType> kinds = groups.stream()
+                .flatMap(java.util.Collection::stream).collect(Collectors.toSet());
+        if (terms.isEmpty() || kinds.isEmpty()) return groups.stream().map(g -> List.<PostResponse>of()).toList();
+        // PERFORMANCE.md: ranking reads light rows (text fields and author), and only the hits are
+        // loaded as posts. When the first word is plain ASCII, the database also narrows the rows
+        // to ones containing it (Postgres and Java lowercase ASCII the same way, so nothing a match
+        // needs is filtered out). Otherwise the newest window is read as before.
+        List<PostStatus> live = List.of(PostStatus.OPEN, PostStatus.FULL);
+        String pattern = SearchText.isAscii(terms.get(0)) ? SearchText.likePattern(terms.get(0)) : null;
+        List<PostSearchRow> window = postRepository.searchRows(live, kinds, pattern,
+                PageRequest.of(0, SEARCH_WINDOW * groups.size()));
         Set<UUID> following = viewingUserId == null ? Set.of()
                 : Set.copyOf(followRepository.findFollowingUserIdsByFollowerUserId(viewingUserId));
-        record Hit(Post post, int score) {
+        Set<UUID> blocked = blockService.blockedEitherDirection(viewingUserId);
+        record Hit(UUID id, com.vikisol.arena.posts.entity.PostIntentType kind, int score) {
         }
-        List<Post> ranked = window.stream()
-                .filter(kind)
-                .filter(p -> p.getAudience() == PostAudience.GLOBAL
-                        || p.getAuthorUser().getId().equals(viewingUserId)
-                        || following.contains(p.getAuthorUser().getId()))
+        List<Hit> ranked = window.stream()
+                .filter(r -> r.audience() == PostAudience.GLOBAL
+                        || r.authorId().equals(viewingUserId)
+                        || following.contains(r.authorId()))
+                // Same rules as excludeBlocked: no blocked people, no link-only unless it's yours.
+                .filter(r -> !blocked.contains(r.authorId()))
+                .filter(r -> !r.linkOnly() || r.authorId().equals(viewingUserId))
                 // An anonymous post is never found by its author's name.
-                .map(p -> new Hit(p, SearchText.score(terms, p.getTitle(), SearchText.haystack(
-                        p.getBody(), p.getLocationText(),
-                        p.isAnonymous() ? null : p.getAuthorUser().getName(),
-                        p.isAnonymous() || p.getAuthorCompany() == null ? null : p.getAuthorCompany().getCompanyName()))))
+                .map(r -> new Hit(r.id(), r.intentType(), SearchText.score(terms, r.title(), SearchText.haystack(
+                        r.body(), r.locationText(),
+                        r.anonymous() ? null : r.authorName(),
+                        r.anonymous() ? null : r.companyName()))))
                 .filter(h -> h.score() > 0)
                 .sorted(java.util.Comparator.comparingInt(Hit::score).reversed())
-                .map(Hit::post)
                 .toList();
-        List<Post> visible = excludeBlocked(ranked, viewingUserId);
-        return toResponseList(visible.subList(0, Math.min(limit, visible.size())), viewingUserId);
+        List<List<UUID>> idsPerGroup = groups.stream()
+                .map(g -> ranked.stream().filter(h -> g.contains(h.kind())).limit(limit).map(Hit::id).toList())
+                .toList();
+        List<UUID> allIds = idsPerGroup.stream().flatMap(List::stream).distinct().toList();
+        if (allIds.isEmpty()) return groups.stream().map(g -> List.<PostResponse>of()).toList();
+        Map<UUID, Post> byId = postRepository.findByIdIn(allIds).stream()
+                .collect(java.util.stream.Collectors.toMap(Post::getId, p -> p));
+        Map<UUID, PostResponse> mapped = toResponseList(allIds.stream().map(byId::get).filter(java.util.Objects::nonNull).toList(),
+                viewingUserId).stream().collect(Collectors.toMap(r -> UUID.fromString(r.id()), r -> r));
+        return idsPerGroup.stream()
+                .map(ids -> ids.stream().map(mapped::get).filter(java.util.Objects::nonNull).toList())
+                .toList();
     }
 
     private List<PostResponse> toResponseList(List<Post> posts, UUID viewingUserId) {
@@ -318,8 +350,18 @@ public class PostService {
         var mediaUrlsByPostId = mapper.batchMediaUrls(postIds);
         var scores = mapper.batchScores(postIds);
         var myVotes = mapper.batchMyVotes(postIds, viewingUserId);
+        // The viewer's join status and each post's room, one query each (PERFORMANCE.md).
+        Map<UUID, String> joinStatuses = new java.util.HashMap<>();
+        if (viewingUserId != null && !postIds.isEmpty()) {
+            for (PostJoinRequest j : postJoinRequestRepository.findByUserIdAndPostIdIn(viewingUserId, postIds)) {
+                if (j.getStatus() != PostJoinStatus.WITHDRAWN) joinStatuses.put(j.getPost().getId(), j.getStatus().wireValue());
+            }
+        }
+        Map<UUID, String> roomIds = roomService.findRoomIdsForPosts(
+                posts.stream().filter(Post::isJoinable).map(Post::getId).toList());
         return posts.stream()
-                .map(p -> mapper.toResponse(p, viewingUserId, myJoinStatus(p, viewingUserId), roomIdFor(p),
+                .map(p -> mapper.toResponse(p, viewingUserId, p.isJoinable() ? joinStatuses.get(p.getId()) : null,
+                        p.isJoinable() ? roomIds.get(p.getId()) : null,
                         authorProfiles, commentCounts, reactionCounts, myReactedIds, authorJoinCounts,
                         tagsByPostId, mediaUrlsByPostId, scores, myVotes))
                 .toList();
@@ -330,13 +372,17 @@ public class PostService {
     // DECISIONS.md for why there's no PostGIS radius query underneath this. Only ACTIVITY/ASK
     // posts with a captured position are candidates; time window filters on startsAt (falls back
     // to createdAt for posts with no explicit start, e.g. an ASK).
+    static final int NEARBY_CANDIDATES = 2000;
+
     @Transactional(readOnly = true)
     public List<PostResponse> getNearby(UUID viewingUserId, double centerLat, double centerLng, double radiusKm,
                                          Integer withinHours, String intentTypeWire) {
         PostIntentType intentFilter = (intentTypeWire == null || intentTypeWire.isBlank())
                 ? null : PostIntentType.valueOf(intentTypeWire.trim().toUpperCase());
-        Pageable window = PageRequest.of(0, 500, Sort.by(Sort.Direction.DESC, "createdAt"));
-        List<Post> candidates = postRepository.findByStatusOrderByCreatedAtDesc(PostStatus.OPEN, window).getContent();
+        // PERFORMANCE.md: only open posts in the geohash cells covering the circle, through an index,
+        // instead of the newest 500 open posts anywhere (which also missed older posts nearby).
+        List<Post> candidates = postGeoRepository.findOpenInCells(
+                GeohashUtil.coverCells(centerLat, centerLng, radiusKm), NEARBY_CANDIDATES);
 
         Instant horizon = withinHours == null ? null : Instant.now().plusSeconds(withinHours * 3600L);
         List<Post> nearby = candidates.stream()
@@ -868,7 +914,10 @@ public class PostService {
         List<Post> discoverable = posts.stream()
                 .filter(p -> !p.isLinkOnly() || p.getAuthorUser().getId().equals(viewingUserId)).toList();
         if (viewingUserId == null) return discoverable;
-        return discoverable.stream().filter(p -> !blockService.isBlockedEitherDirection(viewingUserId, p.getAuthorUser().getId())).toList();
+        // One query for the viewer's blocks, not two per post (PERFORMANCE.md).
+        java.util.Set<UUID> blocked = blockService.blockedEitherDirection(viewingUserId);
+        if (blocked.isEmpty()) return discoverable;
+        return discoverable.stream().filter(p -> !blocked.contains(p.getAuthorUser().getId())).toList();
     }
 
     private String myJoinStatus(Post post, UUID viewingUserId) {

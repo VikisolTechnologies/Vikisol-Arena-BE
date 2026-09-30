@@ -5,6 +5,7 @@ import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtBuilder;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.Jws;
+import io.jsonwebtoken.JwtParser;
 import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +31,8 @@ public class JwtTokenProvider {
     private final String audience;
     private final long jwtExpirationMs;
     private final SecretKey key;
+    // Immutable and thread-safe, so built once (PERFORMANCE.md) - same checks as before.
+    private final JwtParser parser;
 
     private static final String CLAIM_ROLE = "role";
     private static final String CLAIM_USER_ID = "uid";
@@ -57,6 +60,11 @@ public class JwtTokenProvider {
         this.jwtExpirationMs = jwtExpirationMs;
         this.issuer = issuer;
         this.audience = audience;
+        this.parser = Jwts.parser()
+                .verifyWith(key)
+                .requireIssuer(issuer)
+                .requireAudience(audience)
+                .build();
     }
 
     public String generateToken(UUID userId, String email, String name, Role role) {
@@ -116,12 +124,7 @@ public class JwtTokenProvider {
     }
 
     private Claims parseClaims(String token) {
-        Jws<Claims> jws = Jwts.parser()
-                .verifyWith(key)
-                .requireIssuer(issuer)
-                .requireAudience(audience)
-                .build()
-                .parseSignedClaims(token);
+        Jws<Claims> jws = parser.parseSignedClaims(token);
 
         String actualAlgorithm = jws.getHeader().getAlgorithm();
         if (!EXPECTED_ALGORITHM.equals(actualAlgorithm)) {
@@ -129,6 +132,22 @@ public class JwtTokenProvider {
         }
 
         return jws.getPayload();
+    }
+
+    /**
+     * The claims of a valid, full-session token (not an MFA-pending one), verified once - what
+     * JwtAuthenticationFilter needs per request (PERFORMANCE.md: it used to verify the signature
+     * four times). Empty for anything validateToken rejects.
+     */
+    public java.util.Optional<Claims> sessionClaims(String token) {
+        try {
+            Claims claims = parseClaims(token);
+            if (Boolean.TRUE.equals(claims.get(CLAIM_MFA_PENDING, Boolean.class))) return java.util.Optional.empty();
+            return java.util.Optional.of(claims);
+        } catch (JwtException | IllegalArgumentException ex) {
+            log.debug("Invalid JWT token: {}", ex.getMessage());
+            return java.util.Optional.empty();
+        }
     }
 
     public boolean validateToken(String token) {

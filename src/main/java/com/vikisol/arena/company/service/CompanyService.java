@@ -15,6 +15,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -28,6 +29,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CompanyService {
 
+    private final com.vikisol.arena.follows.repository.FollowRepository followRepository;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final JobPostingRepository jobPostingRepository;
     private final JobMapper jobMapper;
@@ -38,7 +40,30 @@ public class CompanyService {
     public PagedResponse<CompanyResponse> listCompanies(String query, UUID viewingUserId, Pageable pageable) {
         String q = (query == null || query.isBlank()) ? "" : query.trim();
         var page = enterpriseProfileRepository.search(q, pageable);
-        return PagedResponse.of(page, c -> toResponse(c, viewingUserId));
+        Map<UUID, CompanyResponse> mapped = toResponses(page.getContent(), viewingUserId).stream()
+                .collect(java.util.stream.Collectors.toMap(r -> UUID.fromString(r.id()), r -> r));
+        return PagedResponse.of(page, c -> mapped.get(c.getId()));
+    }
+
+    // A list of company cards with every count fetched in one query each (PERFORMANCE.md: was
+    // three queries per company).
+    @Transactional(readOnly = true)
+    public java.util.List<CompanyResponse> toResponses(java.util.List<EnterpriseProfile> companies, UUID viewingUserId) {
+        if (companies.isEmpty()) return java.util.List.of();
+        java.util.List<UUID> ids = companies.stream().map(EnterpriseProfile::getId).toList();
+        Map<UUID, Long> jobs = counts(jobPostingRepository.countByEnterpriseIdsAndStatusIn(ids, java.util.List.of(PostingStatus.OPEN, PostingStatus.PAUSED)));
+        Map<UUID, Long> followers = counts(followRepository.countFollowersByCompanyIds(ids));
+        java.util.Set<UUID> mine = viewingUserId == null ? java.util.Set.of()
+                : new java.util.HashSet<>(followRepository.findFollowingCompanyIdsByFollowerUserId(viewingUserId));
+        return companies.stream().map(c -> new CompanyResponse(c.getId().toString(), c.getCompanyName(), c.getLogoEmoji(),
+                c.getIndustry().wireValue(), c.getSize().wireValue(), jobs.getOrDefault(c.getId(), 0L).intValue(),
+                followers.getOrDefault(c.getId(), 0L), viewingUserId == null ? null : mine.contains(c.getId()))).toList();
+    }
+
+    private static Map<UUID, Long> counts(java.util.List<Object[]> rows) {
+        Map<UUID, Long> out = new java.util.HashMap<>();
+        for (Object[] r : rows) out.put((UUID) r[0], (Long) r[1]);
+        return out;
     }
 
     @Transactional(readOnly = true)

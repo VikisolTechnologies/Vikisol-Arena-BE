@@ -19,6 +19,9 @@ public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest
 
     Optional<PostJoinRequest> findByPostIdAndUserId(UUID postId, UUID userId);
 
+    // The viewer's own join on each post of a page, in one query (PERFORMANCE.md).
+    List<PostJoinRequest> findByUserIdAndPostIdIn(UUID userId, java.util.Collection<UUID> postIds);
+
     Optional<PostJoinRequest> findByIdAndPostId(UUID id, UUID postId);
 
     long countByPostIdAndStatus(UUID postId, PostJoinStatus status);

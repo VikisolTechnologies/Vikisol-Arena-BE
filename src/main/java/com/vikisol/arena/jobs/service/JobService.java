@@ -95,6 +95,15 @@ public class JobService {
         return new PageImpl<>(jobs.stream().map(j -> jobMapper.toResponse(j, candidate, extras)).toList(), pageable, page.getTotalElements());
     }
 
+    // A given list of jobs (search hits), mapped with one query per extra.
+    @Transactional(readOnly = true)
+    public List<JobResponse> toResponses(List<JobPosting> jobs, UUID viewingUserId) {
+        CandidateProfile candidate = viewingUserId == null ? null
+                : candidateProfileRepository.findByUserId(viewingUserId).orElse(null);
+        JobMapper.Extras extras = extrasFor(jobs, viewingUserId);
+        return jobs.stream().map(j -> jobMapper.toResponse(j, candidate, extras)).toList();
+    }
+
     public JobMapper.Extras extrasFor(List<JobPosting> jobs, UUID viewingUserId) {
         if (jobs.isEmpty()) return new JobMapper.Extras(Map.of(), Set.of(), Set.of(), viewingUserId != null);
         List<UUID> ids = jobs.stream().map(JobPosting::getId).toList();

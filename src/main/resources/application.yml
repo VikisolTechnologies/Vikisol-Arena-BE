@@ -24,6 +24,10 @@ spring:
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:Welcome@12345#}
     driver-class-name: org.postgresql.Driver
+    # PERFORMANCE.md: HikariCP's own default (10), made adjustable without a code change. Load
+    # tests on 2 vCPU showed no gain from 5 or 20 - the app is CPU-bound, not connection-bound.
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
 
   jpa:
     hibernate:
@@ -65,6 +69,11 @@ spring:
 
 app:
   frontend-url: ${FRONTEND_URL:http://localhost:3000}
+
+  # PERFORMANCE.md: feed and trending share one candidate window for this many seconds (cleared on
+  # every post write after commit). 0 turns the cache off.
+  feed:
+    window-cache-seconds: ${FEED_WINDOW_CACHE_SECONDS:5}
 
   jwt:
     # Local-dev-only fallback, never used in a real deployment - same pattern as HRLMS-BE. A

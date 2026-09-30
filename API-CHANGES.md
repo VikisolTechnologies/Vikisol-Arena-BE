@@ -722,3 +722,13 @@ table added for the new app (V22–V37). `PersonalDataService` lists each one in
 **Not built:** the flow's "candidate data deleted 12 months after a role closes" (flow §8
 Settings). It is a destructive scheduled job on production data, and needs the founder's decision
 (see DECISIONS.md).
+
+## Performance pass (docs/PERFORMANCE.md)
+
+No request or response shape changed. Behaviour notes:
+
+| Endpoint | Change |
+|---|---|
+| `GET /posts/nearby` | Finds open posts inside the circle however old they are (it used to see only the newest 500 open posts anywhere). Capped at the newest 2,000 candidates in the covering cells. |
+| `GET /feed`, `GET /posts/trending`, `GET /posts/feed` | Ranking reads a shared candidate window that is up to 5 s old. Post, job and project writes clear it after commit. Counts in responses are always fresh. A post closed a moment ago is left out of the page instead of shown open. |
+| `GET /search` | Same results. With `type=all`, activities and discussions share one candidate read. |

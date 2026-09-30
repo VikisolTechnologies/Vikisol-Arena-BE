@@ -127,6 +127,15 @@ public class RoomService {
                         .ifPresent(roomMemberRepository::delete));
     }
 
+    // Room ids for a page of posts in one query (PERFORMANCE.md).
+    @Transactional(readOnly = true)
+    public java.util.Map<UUID, String> findRoomIdsForPosts(java.util.Collection<UUID> postIds) {
+        if (postIds.isEmpty()) return java.util.Map.of();
+        java.util.Map<UUID, String> out = new java.util.HashMap<>();
+        for (Room r : roomRepository.findByPostIdIn(postIds)) out.put(r.getPost().getId(), r.getId().toString());
+        return out;
+    }
+
     @Transactional(readOnly = true)
     public Optional<String> findRoomIdForPost(UUID postId) {
         return roomRepository.findByPostId(postId).map(r -> r.getId().toString());
