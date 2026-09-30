@@ -32,7 +32,6 @@ import com.vikisol.arena.profile.entity.AutonomyLevel;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.entity.CandidateSkill;
 import com.vikisol.arena.profile.entity.ConsentSettings;
-import com.vikisol.arena.profile.entity.Industry;
 import com.vikisol.arena.profile.entity.LocationConsent;
 import com.vikisol.arena.profile.entity.OpenTo;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
@@ -51,6 +50,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CandidateProfileService {
 
+    private final com.vikisol.arena.profile.industry.IndustryCatalogue industryCatalogue;
     private final com.vikisol.arena.privacy.PersonalDataService personalDataService;
     private final CandidateProfileRepository candidateProfileRepository;
     private final CandidateProfileMapper mapper;
@@ -98,7 +98,7 @@ public class CandidateProfileService {
         CandidateProfile profile = getEntityForUser(userId);
         profile.setName(name);
         profile.setTitle(title);
-        profile.setIndustry(Industry.fromWireValue(industry));
+        profile.setIndustry(industryCatalogue.resolveForWrite(industry, profile.getIndustry()));
         profile.setExperienceYears(experienceYears);
         profile.setRateFloor(rateFloor);
         // Hibernate's @ElementCollection needs a mutable backing list to manage - Stream.toList()

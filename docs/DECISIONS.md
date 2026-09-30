@@ -229,3 +229,12 @@ Founder decision: Jenny always prepares and the person approves each action.
   - The seeders no longer hand it out.
 - **Backend approval path (unchanged, already in place):** Jenny's proposed actions are stored as `PENDING` (`AgentAction`) and run only after the person's `PUT /agent/actions/{id}` with `approve: true`. The autonomy level is never sent to Jenny.
 - **What Arena can't see:** a service token's write means JennySol already holds an approval. Arena can't see that approval itself, so keeping it per-action is JennySol's side of `JENNY-ARENA-CONTRACT.md`.
+
+## 30 Sep 2026 — Industries are an open, staff-managed list
+
+Architect decision (FE-API-GAPS row 62): the industry list is no longer the closed five.
+
+- **Storage:** V44 adds `arena_industries (key, label, active, position)`, seeded with the five. The V1 check constraints go, and the three `industry` columns (candidate profiles, companies, jobs) become foreign keys to it, so the database still refuses a value nobody listed.
+- **Keys never change; labels can.** The stored value stays the key (`ENGINEERING`), so no existing row moves and a rename needs no data migration. The API keeps sending the label.
+- **Retire, don't delete.** A deactivated industry stays valid for rows that already use it and can't be newly picked. Deleting would orphan profiles and jobs.
+- **In code,** `Industry` is a small value class instead of an enum, keeping the five constants for the seeders. `IndustryCatalogue` resolves incoming values and refreshes the label cache when a change commits. Arena runs one instance today; with more than one, the others would show a rename only after a restart. That's acceptable for a rarely changed list, and the fix, if needed, is a short cache expiry.

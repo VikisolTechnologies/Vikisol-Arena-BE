@@ -28,7 +28,6 @@ public class EnterpriseProfile extends BaseEntity {
     @Column(nullable = false)
     private String logoEmoji;
 
-    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Industry industry;
 

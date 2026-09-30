@@ -39,6 +39,8 @@ public final class AuditActions {
     public static final String DEMO_CONTENT_REMOVED = "demo.removed";
     public static final String SUBSCRIPTION_ADJUSTED = "subscription.adjusted";
     public static final String FLAG_TOGGLED = "flag.toggled";
+    public static final String INDUSTRY_ADDED = "industry.added";
+    public static final String INDUSTRY_UPDATED = "industry.updated";
     public static final String CONSENT_CHANGED = "consent.changed";
     public static final String DATA_EXPORTED = "data.exported";
     public static final String ACCOUNT_DELETED = "account.deleted";

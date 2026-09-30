@@ -821,3 +821,23 @@ Suspend, ban, restore, warn and force sign-out answer 400 for a staff account, y
 - In `GET /admin/moderation` the item has `contentType: "user"`, a summary of "Report about <name>", and a new field `reportedUserId` (null on other reports).
 - Admins act with `PUT /admin/moderation/{id}/warn|suspend|ban`. `…/takedown` answers 400 (there is no content to take down), and `…/dismiss` works as usual.
 - V43 adds `arena_moderation_items.reported_user_id`.
+
+## Open industry list — FE-API-GAPS row 62
+
+The five industries were fixed in code and in the database. They are now rows in `arena_industries` (V44) that staff manage. Every existing response keeps its shape: `industry` is still the label, e.g. `"Engineering"`.
+
+| Endpoint | Body | Response |
+|---|---|---|
+| `GET /public/industries` (no sign-in) | | `[{ key, label }]`, active only, in display order. Use it for every industry picker and filter instead of a hard-coded list. |
+| `GET /admin/industries` | | `[{ key, label, active, position }]`, including retired ones. |
+| `POST /admin/industries` | `{ label, position? }` | The new row. The key is made from the label (`"Real estate"` → `REAL_ESTATE`) and never changes. 400 for a blank label, more than 80 characters, or a label or key that already exists (any case). |
+| `PUT /admin/industries/{key}` | `{ label?, active?, position? }` | The updated row. 404 for an unknown key; 400 for a label another industry has. |
+
+- **Retiring:** industries are never deleted. `active: false` hides one from `GET /public/industries` and stops anyone newly picking it; profiles, companies and jobs that already have it keep it, and can be saved again unchanged. A renamed industry shows its new label everywhere at once.
+- **Where an industry is sent** (`PUT /profile/me/details`, the company profile, job create/edit, the talent search `industry` filter), the label or the key is accepted, in any case. ⚠ An unknown value now answers 400 with `industry: unknown value …`; it used to be a 500. Picking a retired one answers 400 `… is no longer offered`.
+- Staff changes are audited as `industry.added` and `industry.updated`, and go through the admin 2FA check like the rest of `/admin`.
+- Frontend: the `Industry` union in `src/lib/types.ts` (Vikisol-Arena-FE) becomes a plain `string`, and pickers load `GET /public/industries`.
+
+## Preflight caching
+
+Every CORS answer now carries `Access-Control-Max-Age: 3600`, so a browser asks the preflight `OPTIONS` once an hour per endpoint instead of before every call with an `Authorization` header. Set with `app.cors.max-age-seconds`; no response shape changes.

@@ -134,7 +134,7 @@ public class SearchService {
         String first = terms.get(0);
         List<JobPosting> candidates = SearchText.isAscii(first)
                 ? jobPostingRepository.searchCandidates(PostingStatus.OPEN, SearchText.likePattern(first),
-                        java.util.Arrays.stream(com.vikisol.arena.profile.entity.Industry.values())
+                        com.vikisol.arena.profile.entity.Industry.values().stream()
                                 .filter(i -> i.wireValue().toLowerCase(java.util.Locale.ROOT).contains(first)).toList(),
                         java.util.Arrays.stream(com.vikisol.arena.jobs.entity.EmploymentType.values())
                                 .filter(t -> t.wireValue().toLowerCase(java.util.Locale.ROOT).contains(first)).toList(),

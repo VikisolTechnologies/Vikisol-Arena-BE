@@ -74,6 +74,7 @@ closes it. Source: branch `local/wip-2026-09-29` of Vikisol-Arena-FE, together w
 | 53 | Account — Edit profile | PATCH with interests and photo | `PATCH /profile/me` takes `interests`. `photoUrl: ""` removes the photo; a new photo is uploaded with `POST /profile/me/photo`, never set from a URL. | Built |
 | 54 | Neighbour profile | Visibility on the public profile | `GET /profile/{id}` answers 404 to anyone but the owner when: <ul><li>the profile is hidden;</li><li>it is `nearby` and the viewer is a guest;</li><li>either side blocked the other;</li><li>the account is deleted or banned.</li></ul> | Built |
 | 61 | Report a person | Report a person, not a post | `POST /profile/{id}/report { reason, evidenceUrls? }`. It lands in the admin queue as a `user` report; admins warn, suspend or ban (row 50). | Built |
+| 62 | Industries | An open, admin-managed list instead of a closed five | `GET /public/industries` for pickers; `GET/POST /admin/industries`, `PUT /admin/industries/{key} { label?, active?, position? }`, audited. Retired industries stay on existing profiles, companies and jobs (V44). | Built |
 
 **Summary:**
 - **Built:** 35 rows.
