@@ -86,7 +86,8 @@ class PersonalDataTest extends EmbeddedPostgresAppTest {
             "arena_job_screening_questions", "the company's job content",
             "arena_project_roles", "part of the project post",
             "arena_project_details", "part of the project post (category, cover, outcome)",
-            "arena_business_verifications", "the company's record; the submitter's work email is handled in erase()");
+            "arena_business_verifications", "the company's record; the submitter's work email is handled in erase()",
+            "arena_industries", "the staff-managed industry list (V44): reference data, no person's entries");
 
     @BeforeEach
     void setUp() {
