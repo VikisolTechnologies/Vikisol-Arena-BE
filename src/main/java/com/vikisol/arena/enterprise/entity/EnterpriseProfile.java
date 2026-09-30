@@ -87,4 +87,8 @@ public class EnterpriseProfile extends BaseEntity {
 
     @Column(length = 500)
     private String logoUrl;
+
+    // V39: set when company_verification_required is switched on and this company wasn't
+    // verified yet - it keeps publishing as "verified-legacy" until an admin reviews it.
+    private java.time.Instant verificationGrandfatheredAt;
 }

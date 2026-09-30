@@ -18,7 +18,11 @@ Branch `feature/be-fe-gaps`. The task was:
   - at 50 users with 3 cores for the app, six of the eight endpoints are under 300 ms.
 - **Pool and JVM:**
   - Keep the pool at 10. It is now adjustable with `DB_POOL_SIZE`.
-  - Heap: the live set is about 120 MB. Set `JAVA_OPTS` on Railway (below) so the JVM doesn't size its heap at a quarter of the container.
+  - Heap: the live set is about 120 MB. The `Dockerfile` now defaults `JAVA_OPTS` to 60% of the container's memory, and the service gets 1 GB.
+- **Follow-up (architect review, 30 Sep):** no extra CPU for launch.
+  - Search now has trigram indexes (V40), which save about 12 ms per search.
+  - Re-measured on a new, noisier host: every endpoint is under 300 ms at 30 users. At 40 users search is over (343 and 454 ms in two runs), and in the second run trending, feed and nearby were over too.
+  - Scale-up trigger: real p95 over 300 ms, or about 30 concurrent users.
 
 ## Method
 
@@ -152,31 +156,76 @@ A bigger pool doesn't add CPU. **Keep 10** for one instance. Railway Postgres al
 
 ## JVM memory
 
-The `Dockerfile` sets `JAVA_OPTS=""`, and this pass does not touch it. With no flags, Java 21 in a container caps the heap at 25% of the container's memory: 512 MB on a 2 GB service, or 128 MB on a 512 MB one.
-
 Measured under load with `-Xmx512m`:
 - **Heap:** live data after a young GC is about 118 MB, and the young generation fills to about 307 MB.
 - **GC:** a young pause every 0.6 s, 9–13 ms each, which is under 2% of the time. There were no full GCs.
 - **Memory outside the heap:** metaspace is 135 MB, and the process RSS is about 720 MB.
 
-Recommendation: set this as a Railway environment variable on `arena-api`. It is a deployment setting, so it is not changed here.
+The `Dockerfile` used to set `JAVA_OPTS=""`. With no flags, Java 21 in a container caps the heap at 25% of the container's memory: 512 MB on a 2 GB service, or 128 MB on a 512 MB one.
+
+Architect decision (30 Sep): the `Dockerfile` now defaults to:
 
 ```
 JAVA_OPTS=-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError
 ```
 
+The founder sets `arena-api` to 1 GB in Railway. A `JAVA_OPTS` variable on the Railway service still replaces the default. `railway.toml` is unchanged.
 - On a 1 GB service that is about a 600 MB heap. The rest covers metaspace, threads and buffers.
-- Give the service **at least 1 GB**. Under 768 MB, RSS runs close to the limit.
+- Under 768 MB, RSS runs close to the limit.
 - `ExitOnOutOfMemoryError` makes Railway restart a broken JVM instead of leaving it half-alive.
 - The default G1 collector is fine at this heap size.
 
+## Follow-up after the architect's review (30 Sep)
+
+**Decision: no extra CPU and no second instance for now.** 30 to 40 concurrent users under 300 ms is enough for the Gachibowli launch.
+
+**Search trigram index (`V40__search_trigram_indexes.sql`, additive).**
+- **Indexes:** GIN `pg_trgm` indexes on:
+  - the posts' lowercased title, body and place, as one text;
+  - people's names;
+  - company names.
+- **Query:** search now reads its candidate rows in one plain SQL query (`PostSearchRepository`), whose LIKE conditions each use one of those indexes. `EXPLAIN` shows a Bitmap Index Scan on `idx_posts_search_text_trgm`.
+- **Results unchanged:** search words never contain a space, so matching the joined text is the same as matching each field. `DiscoveryReadsTest` checks that `type=all` still equals the separate searches, and that the indexes exist.
+- **Safe to deploy:** if the database role may not create the `pg_trgm` extension, the migration skips the indexes with a notice and search keeps working the slower way.
+- **Cost:** on the seeded database both migrations (V39 and V40) applied in 0.9 s.
+
+**Re-measure.** After the worker restart this session ran on a different sandbox host (a new kernel build). There, even the endpoints this change doesn't touch were about 20% slower than the day before, so the numbers below are not comparable with the tables above.
+- **Search with and without the indexes**, same build, back to back, median of 40 warm sequential requests:
+
+| Search | Without trigram indexes | With |
+|---|---|---|
+| a rare word ("zebra") | 30 ms | 18 ms |
+| a word in 1 in 5 posts ("chess") | 67 ms | 55 ms |
+| a job word ("engineer") | 48 ms | 37 ms |
+| a word in every author's name ("person") | 107 ms | 101 ms |
+| control: `/messages/conversations` | 13 ms | 12 ms |
+
+- **k6 on the final build**, p95 in ms, app on 2 cores. **Bold** means under 300 ms.
+
+| Users | Feed | Trending | Search | Nearby | Jobs | Job | Conversations | Messages | requests/s |
+|---|---|---|---|---|---|---|---|---|---|
+| 30 | **147** | **130** | **241** | **171** | **107** | **89** | **90** | **75** | 142 |
+| 40 | **256** | **235** | 343 | **270** | **216** | **202** | **183** | **181** | 153 |
+| 50 | 601 | 576 | 708 | 639 | 528 | 497 | 473 | 452 | 116 |
+
+A second 40-user run on this host, minutes earlier, was slower: search 454, nearby 365, trending 336 and feed 327, with the rest under 300. Run-to-run noise here is larger than the day before. Search is the endpoint closest to the limit: its load-test words are common, each matching up to a fifth of all posts, so each request still ranks up to 4,000 candidate rows.
+
+**Scale-up trigger.** Add CPU (or a second instance) when either happens in production:
+- the real p95 of any endpoint above goes over 300 ms;
+- concurrent active users reach about 30.
+
+Watch both from Railway's metrics or the request logs. On today's host, 30 closed-loop users is the last point where every endpoint was under 300 ms.
+
+**Messaging reads.** The conversation list and threads (GET) now have their own limit of 60 per minute per user (`RATE_LIMIT_MESSAGING_READ_PER_MIN`). Sending stays at 30 per minute. The frontend polls:
+- the open thread every 5 s, only while it is visible (12 per minute);
+- the conversation list every 30 s (2 per minute).
+
 ## What is left, in order of value
 
-1. **More CPU, or a second instance.** This is the cheapest way to reach p95 under 300 ms at 50 closed-loop users. By the sweep, 3–4 vCPU is enough.
+1. **More CPU, or a second instance,** when the scale-up trigger above fires. By the sweep, 3–4 vCPU holds 50 closed-loop users.
 2. **Search.**
-   - It is the slowest endpoint. Each request runs a LIKE scan over live posts (10–17 ms in Postgres) and returns up to 2,000 rows to rank.
-   - A `pg_trgm` GIN index on the searched text would make rare words fast.
-   - Common words would still return many rows. Postgres full-text search with ranking in SQL is the real fix, and `SearchText`'s comment already expects that swap.
+   - Rare words are now found through the trigram indexes.
+   - Common words still return many rows to rank in Java. Postgres full-text search with ranking in SQL is the real fix, and `SearchText`'s comment already expects that swap.
 3. **Per-request fixed cost.** On every request:
    - `loadUserByUsername` reads the user from the database;
    - two Redis calls run (rate limit and token denylist);
@@ -184,12 +233,11 @@ JAVA_OPTS=-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError
 
    Upgrading to Hibernate 6.6+ with `hibernate.criteria.plan_cache_enabled`, and a short-TTL principal cache, would each cut a few ms.
 4. **Short-TTL response caching** for guest or anonymous feed, trending and jobs pages, if traffic grows before CPU does.
-5. **The messaging rate limit.** 30 per minute per user, shared by the conversation list and threads, could throttle a frontend that polls both every few seconds. Worth checking against the frontend's polling interval.
 
 ## Reproducing
 
 1. Run `perf/seed.py` to write the CSVs.
 2. Apply the Flyway migrations to an empty local Postgres, then run `psql -f perf/load.sql` from the CSV directory.
-3. Start the jar with dummy env values: a local `DB_URL`, a throwaway `JWT_SECRET`, and raised rate limits.
-4. Mint an HS256 token for each of the first 50 people with that throwaway secret. Use the claims `JwtTokenProvider` issues: `sub` = email, `uid`, `name`, `role`, and the `iss`/`aud` from `application.yml`. Write them as `[{"token": ...}]`.
+3. Start the jar with dummy env values: a local `DB_URL`, a throwaway `JWT_SECRET`, and raised rate limits (`RATE_LIMIT_DEFAULT_PER_MIN`, `RATE_LIMIT_MESSAGING_PER_MIN`, `RATE_LIMIT_MESSAGING_READ_PER_MIN`).
+4. Mint an HS256 token for each of the first 50 people with that throwaway secret, using the claims `JwtTokenProvider` issues. `perf/mint.py` refreshes an existing `tokens.json` for 24 hours. Access tokens last 15 minutes in the app, so mint them just before a run.
 5. Run `VUS=50 HOLD=90s k6 run perf/load.js`.

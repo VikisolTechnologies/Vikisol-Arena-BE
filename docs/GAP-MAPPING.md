@@ -46,7 +46,7 @@ closes it. Source: branch `local/wip-2026-09-29` of Vikisol-Arena-FE, together w
 | 32 | Pipeline | Shared evidence; notice period | G26 evidence (`GET /enterprise/applicants/{id}/evidence`) + career per the flow: `career.noticePeriod` on applicants | Built (evidence at G26's path, not inside the applicant) |
 | 33 | Interview feedback | Per must-have, no score | Jobs per the flow: `mustHaves` on `POST /interviews/{id}/feedback`, `rating` optional | Built |
 | 34 | Talent | Connect requests; messaging after accept | People app: `POST /enterprise/talent/{id}/connect`, `/connect-requests`, the messaging rule | Built |
-| 35 | Billing | Payment checkout; Owner/Interviewer roles | Paid service (founder-gated); new account roles need an auth-model decision | Not built |
+| 35 | Billing | Payment checkout; Owner/Interviewer roles | Decided 30 Sep: billing is display-only for launch (no payments, no self-service plan change); "owner" is an alias of company admin; "interviewer" deferred to hiring managers (DECISIONS.md) | Decided, display-only |
 | 36 | Passwords | 8-character minimum | Gaps 1–5 work: `@Size(min = 8)` on sign-up, reset and change | Built |
 | 37 | Inbox | Last message preview | People app: `lastMessagePreview` on conversations | Built |
 | 38 | Feed need cards | Offer count and faces | Needs per the flow: `offerCount`, `offerAvatars` on `ask` feed items | Built |
@@ -57,11 +57,11 @@ closes it. Source: branch `local/wip-2026-09-29` of Vikisol-Arena-FE, together w
 **Summary:**
 - **Built:** 35 rows.
 - **Partly built:** row 27 (all but the radius).
-- **Not built:** rows 6, 9, 24, 35 and 40.
+- **Decided, display-only:** row 35 (architect, 30 Sep: no payments at launch; "owner" = company admin; no interviewer role).
+- **Not built:** rows 6, 9, 24 and 40.
   - Row 6 is frontend config.
   - Rows 9 and 40 wait on the messaging review.
   - Row 24 is JennySol's side.
-  - Row 35 is paid and founder-gated.
 
 **Also built from the flow doc (no FE row):**
 - Admin verification queue (§9).

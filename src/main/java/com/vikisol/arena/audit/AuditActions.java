@@ -45,4 +45,8 @@ public final class AuditActions {
 
     // G27: a company admin confirmed the domain code.
     public static final String BUSINESS_VERIFIED = "business.verified";
+    // Verification grandfathering (V39): companies marked verified-legacy when the flag went on,
+    // and an admin ending one company's legacy status after review.
+    public static final String BUSINESS_GRANDFATHERED = "business.grandfathered";
+    public static final String BUSINESS_LEGACY_ENDED = "business.legacy_ended";
 }

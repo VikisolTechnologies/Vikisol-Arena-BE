@@ -22,7 +22,9 @@ public enum Role {
         return switch (value) {
             case "talent" -> TALENT;
             case "recruiter" -> RECRUITER;
-            case "company_admin" -> COMPANY_ADMIN;
+            // "Owner" is the company admin under another name (DECISIONS.md, 30 Sep 2026), not
+            // a separate permission set.
+            case "company_admin", "owner" -> COMPANY_ADMIN;
             case "hiring_manager" -> HIRING_MANAGER;
             case "platform_admin" -> PLATFORM_ADMIN;
             // Enterprise signup always creates the tenant's first user, i.e. an admin.

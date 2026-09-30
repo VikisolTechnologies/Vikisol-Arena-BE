@@ -198,10 +198,12 @@ public class JobPostingService {
     // Flow §8 B2: "Jobs can be drafted but not published" until an Arena admin verifies the
     // company. Behind the company_verification_required feature flag (off unless an admin turns
     // it on), so companies that were hiring before verification existed aren't cut off by a deploy.
-    static final String VERIFICATION_FLAG = "company_verification_required";
+    // Companies already here when the flag goes on are grandfathered (verified-legacy, V39).
+    public static final String VERIFICATION_FLAG = "company_verification_required";
 
     private void requirePublishAllowed(EnterpriseProfile tenant) {
-        if (featureFlagService.isEnabled(VERIFICATION_FLAG) && !verificationRepository.findByTenantId(tenant.getId())
+        if (featureFlagService.isEnabled(VERIFICATION_FLAG) && tenant.getVerificationGrandfatheredAt() == null
+                && !verificationRepository.findByTenantId(tenant.getId())
                 .map(v -> v.getStatus() == com.vikisol.arena.business.entity.BusinessVerification.Status.VERIFIED).orElse(false)) {
             throw new BadRequestException("Your company needs to be verified before jobs go live. You can save this as a draft meanwhile.");
         }

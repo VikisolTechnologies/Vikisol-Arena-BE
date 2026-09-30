@@ -102,4 +102,12 @@ class DiscoveryReadsTest extends EmbeddedPostgresAppTest {
         assertThat(postService.search(viewer.getId(), SearchText.terms("asha chess"), List.of(PostIntentType.ACTIVITY), 50))
                 .hasSize(12);
     }
+
+    // V40: search's LIKE lookups have trigram indexes (the embedded Postgres ships pg_trgm).
+    @Test
+    void searchHasTrigramIndexes() {
+        assertThat(em.createNativeQuery("select count(*) from pg_indexes where indexname in "
+                + "('idx_posts_search_text_trgm', 'idx_users_name_trgm', 'idx_enterprise_company_name_trgm')")
+                .getSingleResult()).isEqualTo(3L);
+    }
 }

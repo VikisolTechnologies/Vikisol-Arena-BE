@@ -195,6 +195,41 @@ public class BusinessVerificationService {
         return toQueueItem(v);
     }
 
+    // --- verification grandfathering (V39, DECISIONS.md 30 Sep 2026) --------------------------
+
+    // When company_verification_required switches on, every company not verified yet becomes
+    // "verified-legacy": it keeps publishing, and only companies created after this must verify.
+    // Runs inside the flag change's own transaction.
+    @org.springframework.context.event.EventListener
+    public void onFlagSwitchedOn(com.vikisol.arena.platform.service.FeatureFlagService.FlagSwitchedOn event) {
+        if (!com.vikisol.arena.enterprise.service.JobPostingService.VERIFICATION_FLAG.equals(event.key())) return;
+        int n = enterpriseProfileRepository.grandfatherUnverified(Instant.now());
+        auditService.record(null, event.actorUserId(), AuditActions.BUSINESS_GRANDFATHERED,
+                n + " compan" + (n == 1 ? "y" : "ies") + " marked verified-legacy");
+    }
+
+    @Transactional(readOnly = true)
+    public Page<LegacyCompany> legacyCompanies(Pageable pageable) {
+        return enterpriseProfileRepository.findByVerificationGrandfatheredAtIsNotNullOrderByVerificationGrandfatheredAtAscIdAsc(pageable)
+                .map(t -> new LegacyCompany(t.getId().toString(), t.getCompanyName(), t.getHqCity(),
+                        t.getVerificationGrandfatheredAt().toString(),
+                        repository.findByTenantId(t.getId()).map(v -> v.getStatus().name().toLowerCase(Locale.ROOT)).orElse("none")));
+    }
+
+    // After review: the company must verify like a new one before its next publish. Jobs already
+    // live stay live.
+    @Transactional
+    public void endLegacy(UUID platformAdminId, UUID companyId) {
+        EnterpriseProfile t = enterpriseProfileRepository.findById(companyId)
+                .orElseThrow(() -> new ResourceNotFoundException("Company not found: " + companyId));
+        if (t.getVerificationGrandfatheredAt() == null) throw new BadRequestException("This company isn't verified-legacy");
+        t.setVerificationGrandfatheredAt(null);
+        enterpriseProfileRepository.save(t);
+        auditService.record(t.getId(), platformAdminId, AuditActions.BUSINESS_LEGACY_ENDED, t.getCompanyName());
+        notificationService.notifyJob(t.getUser(), "Please verify your company",
+                "Arena now asks every company to verify before new jobs go live. Your current jobs stay up.");
+    }
+
     @Transactional(readOnly = true)
     public boolean isVerified(UUID tenantId) {
         return repository.findByTenantId(tenantId).map(v -> v.getStatus() == BusinessVerification.Status.VERIFIED).orElse(false);
@@ -229,7 +264,8 @@ public class BusinessVerificationService {
     public VerificationView mine(UUID memberId) {
         EnterpriseProfile tenant = enterpriseProfileService.getEntityForUser(memberId);
         return repository.findByTenantId(tenant.getId()).map(this::toView)
-                .orElse(new VerificationView("none", null, null, null, null, null, null, null, false, null));
+                .orElse(new VerificationView(tenant.getVerificationGrandfatheredAt() != null ? "verified_legacy" : "none",
+                        null, null, null, null, null, null, null, false, null, tenant.getVerificationGrandfatheredAt() != null));
     }
 
     // Public badge on a company page.
@@ -262,7 +298,8 @@ public class BusinessVerificationService {
                 mask(v.getWorkEmail()), v.getSubmitterRole().name().toLowerCase(Locale.ROOT),
                 v.getStatus() == BusinessVerification.Status.PENDING && v.getCodeExpiresAt() != null ? v.getCodeExpiresAt().toString() : null,
                 v.getVerifiedAt() == null ? null : v.getVerifiedAt().toString(),
-                v.getDomainConfirmedAt() != null, v.getReviewNote());
+                v.getDomainConfirmedAt() != null, v.getReviewNote(),
+                v.getStatus() != BusinessVerification.Status.VERIFIED && v.getTenant().getVerificationGrandfatheredAt() != null);
     }
 
     private static String mask(String email) {

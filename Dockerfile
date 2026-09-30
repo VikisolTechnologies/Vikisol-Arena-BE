@@ -42,5 +42,8 @@ USER arena
 
 # Railway injects PORT; application.yml already reads it (server.port: ${PORT:8081}).
 EXPOSE 8081
-ENV JAVA_OPTS=""
+# PERFORMANCE.md: size the heap from the container's memory (60%, about 600 MB on a 1 GB service)
+# and exit on OutOfMemoryError so Railway restarts a broken JVM. A JAVA_OPTS variable set on the
+# Railway service replaces this default.
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError"
 ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

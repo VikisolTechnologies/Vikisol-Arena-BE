@@ -26,41 +26,20 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
     Page<Post> findByStatusOrderByCreatedAtDesc(PostStatus status, Pageable pageable);
 
-    // Search candidates - live posts only (open or full), newest first. Authors fetched with the
-    // window: search matches on the author's name (PERFORMANCE.md: was one query per post).
-    // PERFORMANCE.md: search candidates narrowed in the database to posts containing the query's
-    // first word in any field search reads (title, body, place, and the author or company name
-    // when the post isn't anonymous) - a superset of what SearchText can match. `pattern` is
-    // '%word%', already lowercase.
-    @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
-    @Query("""
-            select p from Post p left join p.authorUser u left join p.authorCompany c
-            where p.status in :statuses
-              and (lower(coalesce(p.title, '')) like :pattern or lower(p.body) like :pattern
-                   or lower(coalesce(p.locationText, '')) like :pattern
-                   or (p.anonymous = false and (lower(u.name) like :pattern or lower(coalesce(c.companyName, '')) like :pattern)))
-            order by p.createdAt desc
-            """)
-    List<Post> searchCandidates(@Param("statuses") java.util.Collection<PostStatus> statuses, @Param("pattern") String pattern, Pageable pageable);
-
     // PERFORMANCE.md: search scores these light rows instead of whole Post entities, then loads
-    // only the hits. Same candidate rules as searchCandidates; `pattern` null = no narrowing.
-
+    // only the hits. This is the unnarrowed window (newest live posts of these kinds), used when
+    // the first query word isn't plain ASCII; otherwise PostSearchRepository narrows it in the database.
     @Query("""
             select new com.vikisol.arena.posts.repository.PostSearchRow(
                 p.id, p.intentType, p.audience, p.anonymous, p.linkOnly, u.id, u.name, c.companyName,
                 p.title, p.body, p.locationText)
             from Post p join p.authorUser u left join p.authorCompany c
             where p.status in :statuses and p.intentType in :types
-              and (:pattern is null
-                   or lower(coalesce(p.title, '')) like :pattern or lower(p.body) like :pattern
-                   or lower(coalesce(p.locationText, '')) like :pattern
-                   or (p.anonymous = false and (lower(u.name) like :pattern or lower(coalesce(c.companyName, '')) like :pattern)))
             order by p.createdAt desc
             """)
     List<PostSearchRow> searchRows(@Param("statuses") java.util.Collection<PostStatus> statuses,
-                               @Param("types") java.util.Collection<com.vikisol.arena.posts.entity.PostIntentType> types,
-                               @Param("pattern") String pattern, Pageable pageable);
+                                   @Param("types") java.util.Collection<com.vikisol.arena.posts.entity.PostIntentType> types,
+                                   Pageable pageable);
 
     // PERFORMANCE.md: the feed/trending candidate window as light rows (FeedWindowCache).
     @Query("""

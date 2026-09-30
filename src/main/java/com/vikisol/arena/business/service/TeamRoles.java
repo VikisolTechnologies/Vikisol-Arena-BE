@@ -11,7 +11,7 @@ public final class TeamRoles {
     }
 
     public static final List<RoleView> CATALOGUE = List.of(
-            new RoleView("company_admin", "Company admin", List.of(
+            new RoleView("company_admin", "Owner (company admin)", List.of(
                     "post_and_manage_jobs",        // JobPostingController: RECRUITER, COMPANY_ADMIN
                     "review_candidates",           // ApplicantController, HiringController: RECRUITER, COMPANY_ADMIN
                     "search_and_unlock_talent",    // TalentSearchController: RECRUITER, COMPANY_ADMIN

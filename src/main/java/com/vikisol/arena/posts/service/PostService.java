@@ -68,6 +68,7 @@ public class PostService {
 
     private final com.vikisol.arena.posts.repository.PostGeoRepository postGeoRepository;
     private final PostRepository postRepository;
+    private final com.vikisol.arena.posts.repository.PostSearchRepository postSearchRepository;
     private final com.vikisol.arena.activities.repository.ActivityQuestionRepository activityQuestionRepository;
     private final com.vikisol.arena.activities.repository.ActivityWaitlistRepository activityWaitlistRepository;
     private final com.vikisol.arena.activities.repository.ActivityAttendanceRepository activityAttendanceRepository;
@@ -301,9 +302,14 @@ public class PostService {
         // to ones containing it (Postgres and Java lowercase ASCII the same way, so nothing a match
         // needs is filtered out). Otherwise the newest window is read as before.
         List<PostStatus> live = List.of(PostStatus.OPEN, PostStatus.FULL);
-        String pattern = SearchText.isAscii(terms.get(0)) ? SearchText.likePattern(terms.get(0)) : null;
-        List<PostSearchRow> window = postRepository.searchRows(live, kinds, pattern,
-                PageRequest.of(0, SEARCH_WINDOW * groups.size()));
+        int windowSize = SEARCH_WINDOW * groups.size();
+        List<PostSearchRow> window;
+        if (SearchText.isAscii(terms.get(0))) {
+            // Narrowed through the trigram indexes (V40).
+            window = postSearchRepository.matching(live, kinds, SearchText.likePattern(terms.get(0)), windowSize);
+        } else {
+            window = postRepository.searchRows(live, kinds, PageRequest.of(0, windowSize));
+        }
         Set<UUID> following = viewingUserId == null ? Set.of()
                 : Set.copyOf(followRepository.findFollowingUserIdsByFollowerUserId(viewingUserId));
         Set<UUID> blocked = blockService.blockedEitherDirection(viewingUserId);

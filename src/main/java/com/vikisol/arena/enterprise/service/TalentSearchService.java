@@ -131,7 +131,7 @@ public class TalentSearchService {
         }
         if (enterprise.getUnlockCreditsUsed() >= enterprise.getUnlockCreditsTotal()) {
             throw new BadRequestException("You're out of unlock credits on the " + enterprise.getPlan().wireValue()
-                    + " plan. Upgrade your plan to unlock more candidate profiles.");
+                    + " plan. Write to Arena's team for more unlocks.");
         }
         CandidateProfile candidate = candidateProfileRepository.findById(candidateId)
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate not found: " + candidateId));

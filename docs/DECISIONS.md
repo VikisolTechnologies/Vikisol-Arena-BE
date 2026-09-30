@@ -169,3 +169,32 @@ Details and numbers: `docs/PERFORMANCE.md`.
 - Feed and trending share one candidate window (posts, jobs, projects) for 5 seconds (`FEED_WINDOW_CACHE_SECONDS`, 0 turns it off). Any post, job or project write clears it after commit. Only engagement counts can lag, and only in ranking, never in what a response shows. This relaxes the earlier "no premature caching" note, because the load test showed this work was the feed's main cost.
 - Search `type=all` reads activities and discussions from one window of 2,000 rows per kind. It can differ from separate reads only when one word matches more live posts than that.
 - The pool stays at HikariCP's 10 (`DB_POOL_SIZE`). The JVM heap is a Railway `JAVA_OPTS` setting to make; the Dockerfile is not changed here.
+
+## 30 Sep 2026 — Architect decisions: roles, billing, retention, verification, capacity
+
+**Billing and roles (row 35).**
+- Billing stays display-only for launch, with no payments. `GET /enterprise/admin/billing` shows the plan, seats and credits, and an empty invoice list. It used to show two made-up "paid" invoices.
+- `PUT /enterprise/admin/billing/plan` refuses any change (400). It used to grant a paid plan's seats and credits for free. Arena's team sets plans until checkout exists.
+- The "upgrade your plan" errors (seats, unlocks) now point to Arena's team.
+- "Owner" is the existing company admin role under another name, not a new permission set. `owner` is accepted wherever a role is sent (`Role.fromWireValue`), and the role catalogue labels `company_admin` as "Owner (company admin)".
+- "Interviewer" is deferred; hiring managers cover it.
+
+**Deleting candidate data 12 months after a role closes.**
+- `CandidateRetentionService` runs daily at 03:40 UTC, behind the flag `candidate_retention_enabled`, which ships OFF. A missing flag counts as off.
+- **While the flag is off** each run is a dry run. It counts what it would delete and logs only the counts (applications, postings, answers, evidence, notes, events, interviews, slots), never names, emails or text.
+- **The report:** `GET /admin/retention` (platform admin, 2FA) returns the same counts on demand and never deletes.
+- **With the flag on**, it deletes every application to a posting closed more than 12 months ago, with its answers, evidence and assessments, notes, timeline, interviews and interview slots. The posting itself is the company's and stays.
+- **The clock:** `arena_job_postings.closed_at` (V39) records when a posting was last closed. Reopening clears it. Postings closed before V39 get their last update time.
+- **Switching on:** after launch, once the architect has checked the dry-run report.
+
+**Company verification flag.**
+- `company_verification_required` stays OFF now.
+- **Switching it on** (off to on, through the admin flag endpoints) marks every company that isn't verified yet as verified-legacy (`verification_grandfathered_at`, V39). Legacy companies keep publishing; only companies created after the switch must verify first. The switch writes one audit entry with the count.
+- **Legacy is not the public verified badge.** The company's own view shows status `verified_legacy` and `legacy: true`.
+- **Admin review:** admins list legacy companies at `GET /admin/verifications/legacy`. `PUT /admin/verifications/legacy/{companyId}/end` ends one company's legacy status after review; the company is notified and must verify before its next publish, and jobs already live stay live. Each end is audited.
+- Switching the flag off and on again also grandfathers companies created while it was off.
+
+**Capacity, JVM, messaging.**
+- No extra CPU or second instance for launch. The search trigram index (V40) and the scale-up trigger are in `docs/PERFORMANCE.md`.
+- The `Dockerfile` defaults `JAVA_OPTS` to `-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError`. The founder sets the service to 1 GB. `railway.toml` is unchanged.
+- Reading messages (GET conversations and threads) has its own limit of 60 per minute per user. Sending stays at 30.

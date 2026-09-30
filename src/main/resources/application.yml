@@ -163,6 +163,9 @@ app:
     upload-per-minute: ${RATE_LIMIT_UPLOAD_PER_MIN:5}
     unlock-per-minute: ${RATE_LIMIT_UNLOCK_PER_MIN:20}
     messaging-per-minute: ${RATE_LIMIT_MESSAGING_PER_MIN:30}
+    # Reading conversations and threads (GET), per user. The frontend polls the open thread every
+    # 5 s while it is visible and the conversation list every 30 s (API-CHANGES.md).
+    messaging-read-per-minute: ${RATE_LIMIT_MESSAGING_READ_PER_MIN:60}
     # ARENA-V2-PRODUCT-ARCHITECTURE.md §4 (Phase B).
     post-creation-per-minute: ${RATE_LIMIT_POST_CREATION_PER_MIN:5}
     join-request-per-minute: ${RATE_LIMIT_JOIN_REQUEST_PER_MIN:10}

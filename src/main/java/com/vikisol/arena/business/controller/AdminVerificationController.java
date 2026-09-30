@@ -1,5 +1,6 @@
 package com.vikisol.arena.business.controller;
 
+import com.vikisol.arena.business.dto.BusinessDtos.LegacyCompany;
 import com.vikisol.arena.business.dto.BusinessDtos.QueueItem;
 import com.vikisol.arena.business.dto.BusinessDtos.RejectRequest;
 import com.vikisol.arena.business.service.BusinessVerificationService;
@@ -32,6 +33,20 @@ public class AdminVerificationController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         return PageLimits.ok(verificationService.queue(status, PageLimits.of(page, size)));
+    }
+
+    // Verified-legacy companies (grandfathered when verification became required), oldest first.
+    @GetMapping("/legacy")
+    public ResponseEntity<ApiResponse<List<LegacyCompany>>> legacy(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size) {
+        return PageLimits.ok(verificationService.legacyCompanies(PageLimits.of(page, size)));
+    }
+
+    @PutMapping("/legacy/{companyId}/end")
+    public ResponseEntity<ApiResponse<Void>> endLegacy(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID companyId) {
+        verificationService.endLegacy(principal.getId(), companyId);
+        return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
     @PutMapping("/{id}/approve")

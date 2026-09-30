@@ -24,6 +24,11 @@ public class FeatureFlagService {
 
     private final FeatureFlagRepository featureFlagRepository;
     private final AuditService auditService;
+    private final org.springframework.context.ApplicationEventPublisher events;
+
+    /** Published (in the same transaction) when a flag goes from off, or missing, to on. */
+    public record FlagSwitchedOn(String key, UUID actorUserId) {
+    }
 
     @Transactional(readOnly = true)
     public List<FeatureFlagResponse> list() {
@@ -39,6 +44,7 @@ public class FeatureFlagService {
                 .key(request.key()).label(request.label()).description(request.description())
                 .enabled(request.enabled()).build());
         auditService.record(null, actorUserId, AuditActions.FLAG_TOGGLED, flag.getKey() + " created (enabled=" + flag.isEnabled() + ")");
+        if (flag.isEnabled()) events.publishEvent(new FlagSwitchedOn(flag.getKey(), actorUserId));
         return toResponse(flag);
     }
 
@@ -46,9 +52,11 @@ public class FeatureFlagService {
     public FeatureFlagResponse setEnabled(UUID actorUserId, UUID id, boolean enabled) {
         FeatureFlag flag = featureFlagRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Flag not found: " + id));
+        boolean wasEnabled = flag.isEnabled();
         flag.setEnabled(enabled);
         featureFlagRepository.save(flag);
         auditService.record(null, actorUserId, AuditActions.FLAG_TOGGLED, flag.getKey() + " -> " + enabled);
+        if (enabled && !wasEnabled) events.publishEvent(new FlagSwitchedOn(flag.getKey(), actorUserId));
         return toResponse(flag);
     }
 

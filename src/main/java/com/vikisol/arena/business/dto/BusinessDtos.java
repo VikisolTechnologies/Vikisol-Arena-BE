@@ -41,7 +41,10 @@ public final class BusinessDtos {
             // Row 29 (added): the code was confirmed (waiting for the admin), and the admin's
             // reason on a rejection.
             boolean domainConfirmed,
-            String reviewNote
+            String reviewNote,
+            // V39: the company was here before verification became required, so it can publish
+            // while unverified ("verified-legacy") until an admin reviews it.
+            boolean legacy
     ) {
     }
 
@@ -66,6 +69,11 @@ public final class BusinessDtos {
     }
 
     public record RejectRequest(@NotBlank(message = "is required") @Size(max = 500, message = "must be at most 500 characters") String note) {
+    }
+
+    // Admin review of grandfathered ("verified-legacy") companies.
+    public record LegacyCompany(String companyId, String companyName, String hqCity, String grandfatheredAt,
+                                String verificationStatus) {
     }
 
     // What anyone can see on a company: a badge, and the domain it was proven for.

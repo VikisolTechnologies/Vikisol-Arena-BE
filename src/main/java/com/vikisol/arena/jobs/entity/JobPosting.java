@@ -65,6 +65,18 @@ public class JobPosting extends BaseEntity {
     @Builder.Default
     private PostingStatus status = PostingStatus.OPEN;
 
+    // V39: when the posting was last closed; cleared if it reopens. The candidate-retention job
+    // counts 12 months from here (CandidateRetentionService). Set only through setStatus.
+    @Setter(lombok.AccessLevel.NONE)
+    private java.time.Instant closedAt;
+
+    // Every close path (the company, an admin takedown) goes through here, so closedAt can't drift.
+    public void setStatus(PostingStatus status) {
+        if (status == PostingStatus.CLOSED && this.status != PostingStatus.CLOSED) closedAt = java.time.Instant.now();
+        if (status != PostingStatus.CLOSED) closedAt = null;
+        this.status = status;
+    }
+
     // Rows 28/41 (V34). workMode is kept in step with `remote` (remote == REMOTE).
     public enum WorkMode { ONSITE, HYBRID, REMOTE }
 

@@ -732,3 +732,18 @@ No request or response shape changed. Behaviour notes:
 | `GET /posts/nearby` | Finds open posts inside the circle however old they are (it used to see only the newest 500 open posts anywhere). Capped at the newest 2,000 candidates in the covering cells. |
 | `GET /feed`, `GET /posts/trending`, `GET /posts/feed` | Ranking reads a shared candidate window that is up to 5 s old. Post, job and project writes clear it after commit. Counts in responses are always fresh. A post closed a moment ago is left out of the page instead of shown open. |
 | `GET /search` | Same results. With `type=all`, activities and discussions share one candidate read. |
+
+## Architect decisions, 30 Sep 2026 (DECISIONS.md)
+
+| Endpoint | Change |
+|---|---|
+| `GET /enterprise/admin/billing` | ⚠ `invoices` is always empty (it used to list two made-up "paid" invoices). Plan, seats and credits are unchanged. |
+| `PUT /enterprise/admin/billing/plan` | ⚠ Display-only for launch: any change of plan answers 400 "Plan changes aren't available in the app yet…". Sending the current plan still answers 200. |
+| Team invite and role change (`role`) | `owner` is accepted and means `company_admin`. `GET /enterprise/team/roles` labels `company_admin` "Owner (company admin)". There is no `interviewer` role (400). |
+| `GET /enterprise/verification` | New field `legacy` (boolean). New status `verified_legacy` when the company was grandfathered and never submitted verification. |
+| `GET /admin/verifications/legacy?page&size` | New, platform admin. Verified-legacy companies, oldest first: `{ companyId, companyName, hqCity, grandfatheredAt, verificationStatus }`. |
+| `PUT /admin/verifications/legacy/{companyId}/end` | New, platform admin. Ends legacy status after review (audited, company notified). 400 if the company isn't legacy. |
+| `POST /admin/flags`, `PUT /admin/flags/{id}` | Switching `company_verification_required` on grandfathers every unverified company (one audit entry). The response is unchanged. |
+| `GET /admin/retention` | New, platform admin. Candidate-retention dry-run counts: `{ enabled, deleted, cutoff, postings, applications, screeningAnswers, evidence, notes, events, interviews, interviewSlots }`. Never deletes. |
+| `/messages/**` rate limit | GET (conversation list, threads) now has its own limit of 60 per minute per user (`RATE_LIMIT_MESSAGING_READ_PER_MIN`); sending stays at 30 (`RATE_LIMIT_MESSAGING_PER_MIN`). Polling plan: the open thread every 5 s only while it is visible, the conversation list every 30 s. Over the limit answers 429. |
+| `GET /search` | Same results; posts are found through trigram indexes (V40). |

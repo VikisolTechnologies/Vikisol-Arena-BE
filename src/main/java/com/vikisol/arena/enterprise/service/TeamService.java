@@ -96,7 +96,7 @@ public class TeamService {
         long pendingInvites = invitationRepository.findByTenantIdAndStatus(tenant.getId(), InvitationStatus.PENDING).size();
         if (activeMembers + pendingInvites >= tenant.getSeatsTotal()) {
             throw new BadRequestException("Your " + tenant.getPlan().wireValue() + " plan allows "
-                    + tenant.getSeatsTotal() + " seats - upgrade your plan to invite more people.");
+                    + tenant.getSeatsTotal() + " seats. Write to Arena's team to add seats.");
         }
 
         Invitation invitation = invitationRepository.save(Invitation.builder()
