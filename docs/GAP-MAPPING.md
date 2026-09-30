@@ -54,6 +54,29 @@ closes it. Source: branch `local/wip-2026-09-29` of Vikisol-Arena-FE, together w
 | 40 | Coordination room | Files tab | Needs the messaging-architecture review first (mission step 9), like row 9 | Not built |
 | 41 | Work → Jobs | Save; hybrid | Jobs per the flow: saved jobs, `workMode: hybrid` | Built |
 
+**Canonical numbering (Mission B7, 1 Oct 2026).** The canonical list is `docs/FE-API-GAPS.md` on
+Vikisol-Arena-FE `feature/arena-vnext-mobile-jenny`. It numbers rows differently from the B+ branches
+used below, so rows are matched by endpoint:
+
+| Canonical row | Endpoint | B+ row below | Where |
+|---|---|---|---|
+| 42–47 | `/agent/v2/*` (interpret, queue, brief, explain, recipes, job-search) | — | Not built in Arena: marked PROPOSED for the JennySol gateway, and Arena holds no AI logic. Decisions still go through Arena's live `POST/PUT /agent/actions/{id}`. |
+| 48 | `GET /admin/metrics/launch` | 42 | PR #4 |
+| 49 | `/admin/verification` queue, approve, reject | 43 | PR #3 (queue), PR #4 (alias, fields, reason) |
+| 50 | `/admin/content`, takedown | 44 | PR #4 |
+| 51 | `GET /admin/catalog/activity-types` | 45 | PR #4 |
+| 52 | `/admin/disputes`, resolve | 46 | PR #3 (queue), PR #4 (statuses, deadline, resolve) |
+| 53 | `/admin/jenny/actions`, `/providers` | 47 | PR #4. `/automations` and `/covers` are JennySol's data: not built. |
+| 54 | `GET /admin/audit` (+ CSV) | 48 | PR #4 |
+| 55 | `GET /admin/team` | 49 | PR #4 |
+| 56 | `PUT /admin/moderation/{id}/warn\|suspend\|ban` | 50 | PR #4 |
+| 57 | `/admin/users/{id}`, suspend, restore, force sign-out | 51 | PR #4 |
+| 58 | `GET/PUT /notifications/preferences` | 52 | PR #3 (base), PR #4 (all six categories) |
+| 59 | `PATCH /profile/me` | 53 | PR #3 (base), PR #4 (interests, photo) |
+| 60 | Visibility on `GET /profile/{id}`, `PUT /profile/me/visibility` | 54 | PR #3 (setting), PR #4 (honoured on the public read) |
+| 61 | `POST /profile/{id}/report` | 61 | PR #4 |
+| 62 | No `agent_autopilot`; open industry list | 62 | PR #4 |
+
 **Rows 42–54** come from the B+ branches `feature/arena-admin-bplus` (42–51) and
 `feature/arena-account-bplus` (52–54). Every `/admin` path needs the platform-admin role and
 2FA, and every admin action writes an audit entry, with its reason when one is given.
