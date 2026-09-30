@@ -811,3 +811,13 @@ Suspend, ban, restore, warn and force sign-out answer 400 for a staff account, y
 | `PUT /profile/me/autonomy` | ⚠ `autopilot` is refused (400); the values are `manual` and `supervised`. Stored `autopilot` profiles now read `supervised` (V42). |
 | `GET /profile/me` | `autonomy` is only ever `manual` or `supervised`. Same field. |
 | `POST /admin/flags` | ⚠ The key `agent_autopilot` (or `autopilot`) is refused (400), and V42 deleted any existing row. |
+
+## Report a person — FE-API-GAPS row 61
+
+| Endpoint | Body | Response |
+|---|---|---|
+| `POST /profile/{id}/report` (signed in) | `{ reason, evidenceUrls? }`. `id` is the user id or profile id, as for `GET /profile/{id}`. Evidence works as for post reports: upload with `POST /reports/evidence` first. | 200 "Report submitted". 400 when reporting yourself, or when your earlier report of this person is still open. 404 for an unknown or deleted account. |
+
+- In `GET /admin/moderation` the item has `contentType: "user"`, a summary of "Report about <name>", and a new field `reportedUserId` (null on other reports).
+- Admins act with `PUT /admin/moderation/{id}/warn|suspend|ban`. `…/takedown` answers 400 (there is no content to take down), and `…/dismiss` works as usual.
+- V43 adds `arena_moderation_items.reported_user_id`.

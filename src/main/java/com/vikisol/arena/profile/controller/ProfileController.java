@@ -36,6 +36,7 @@ import java.util.UUID;
 public class ProfileController {
 
     private final CandidateProfileService profileService;
+    private final com.vikisol.arena.platform.service.ModerationService moderationService;
 
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<CandidateProfileResponse>> getMyProfile(@AuthenticationPrincipal UserPrincipal principal) {
@@ -55,6 +56,15 @@ public class ProfileController {
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
         UUID viewerId = principal == null ? null : principal.getId();
         return ResponseEntity.ok(ApiResponse.ok(profileService.getPublicProfile(id, viewerId)));
+    }
+
+    // FE-API-GAPS row 61: report a person. `id` is their user id or profile id, as for GET above.
+    // Evidence files work as for post reports (POST /reports/evidence first).
+    @PostMapping("/{id}/report")
+    public ResponseEntity<ApiResponse<Void>> reportPerson(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+                                                          @Valid @RequestBody com.vikisol.arena.posts.dto.ReportPostRequest request) {
+        moderationService.fileUserReport(principal.getId(), profileService.resolveUserId(id), request.reason(), request.evidenceUrls());
+        return ResponseEntity.ok(ApiResponse.ok("Report submitted", null));
     }
 
     // --- FE-API-GAPS 1-5: onboarding basics (see API-CHANGES.md) ---

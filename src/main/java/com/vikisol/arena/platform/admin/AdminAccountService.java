@@ -62,9 +62,9 @@ public class AdminAccountService {
                 left join arena_rooms r on r.id = m.room_id
                 left join arena_posts rp on rp.id = r.post_id
                 left join arena_conversations c on c.id = m.conversation_id
-                where p.author_user_id = ? or rp.author_user_id = ?
+                where p.author_user_id = ? or rp.author_user_id = ? or m.reported_user_id = ?
                    or (m.conversation_id is not null and m.reporter_user_id <> ? and (c.user_a_id = ? or c.user_b_id = ?))
-                """, userId, userId, userId, userId, userId);
+                """, userId, userId, userId, userId, userId, userId);
         return new AccountDetail(u.getId().toString(), u.getName(), u.getEmail(), u.getHandle(), u.getRole().wireValue(),
                 status(u), u.getCreatedAt().toString(), str(u.getLastActiveAt()), u.isTotpEnabled(), u.isPhoneVerified(),
                 u.getVerificationLevel().wireValue(), str(u.getSuspendedUntil()), u.getSuspensionReason(), str(u.getBannedAt()),
@@ -147,6 +147,10 @@ public class AdminAccountService {
             case POST -> item.getPost().getAuthorUser();
             case ROOM -> item.getRoom().getPost().getAuthorUser();
             case JOB_POSTING -> item.getJobPosting().getEnterprise().getUser();
+            case USER -> {
+                if (item.getReportedUser() == null) throw new BadRequestException("That account no longer exists");
+                yield item.getReportedUser();
+            }
             case CONVERSATION -> {
                 var c = item.getConversation();
                 yield item.getReporter() != null && c.getUserA().getId().equals(item.getReporter().getId()) ? c.getUserB() : c.getUserA();

@@ -425,6 +425,14 @@ public class CandidateProfileService {
                 List.copyOf(profile.getAvailability()));
     }
 
+    // A person's user id from either their user id or their profile id (the ids GET /profile/{id} takes).
+    @Transactional(readOnly = true)
+    public UUID resolveUserId(UUID userOrProfileId) {
+        if (userRepository.existsById(userOrProfileId)) return userOrProfileId;
+        return candidateProfileRepository.findById(userOrProfileId).map(p -> p.getUser().getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Person not found"));
+    }
+
     // FE-API-GAPS row 54 (with row 18's setting): the owner always sees their profile. Anyone
     // else gets the same 404 as for a missing profile when it is hidden, when it is "nearby" and
     // they aren't signed in, when either of them blocked the other, or when the account was

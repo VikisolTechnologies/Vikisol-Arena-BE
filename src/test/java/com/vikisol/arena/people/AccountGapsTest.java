@@ -57,6 +57,7 @@ class AccountGapsTest extends EmbeddedPostgresAppTest {
     @Autowired JdbcTemplate jdbc;
     @Autowired EntityManager em;
     @MockBean TokenDenylistService denylist;
+    @MockBean com.vikisol.arena.security.jwt.RefreshTokenService refreshTokens; // suspending revokes them (Redis)
 
     private User staff, asha, ravi;
 
@@ -172,6 +173,31 @@ class AccountGapsTest extends EmbeddedPostgresAppTest {
         mvc.perform(get(url)).andExpect(status().isOk());
         call(asha, post("/blocks/" + ravi.getId()), null).andExpect(status().isOk());
         call(ravi, get(url), null).andExpect(status().isNotFound());
+    }
+
+    // Row 61.
+    @Test
+    void aPersonCanBeReportedAndActedOn() throws Exception {
+        String profileId = profiles.findByUserId(ravi.getId()).orElseThrow().getId().toString();
+        call(asha, post("/profile/" + asha.getId() + "/report"), "{\"reason\":\"Me\"}").andExpect(status().isBadRequest());
+        call(asha, post("/profile/" + UUID.randomUUID() + "/report"), "{\"reason\":\"Who\"}").andExpect(status().isNotFound());
+        call(asha, post("/profile/" + ravi.getId() + "/report"), "{}").andExpect(status().isBadRequest());
+        mvc.perform(post("/profile/" + ravi.getId() + "/report").contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"x\"}"))
+                .andExpect(status().isUnauthorized());
+        // By profile id works too; a second open report from the same person is refused.
+        call(asha, post("/profile/" + profileId + "/report"), "{\"reason\":\"Keeps messaging me after I said no\"}")
+                .andExpect(status().isOk());
+        call(asha, post("/profile/" + ravi.getId() + "/report"), "{\"reason\":\"Again\"}").andExpect(status().isBadRequest());
+
+        JsonNode item = body(call(staff, get("/admin/moderation"), null)).path("data").path("content").get(0);
+        assertThat(item.path("contentType").asText()).isEqualTo("user");
+        assertThat(item.path("reportedUserId").asText()).isEqualTo(ravi.getId().toString());
+        assertThat(item.path("reason").asText()).isEqualTo("Keeps messaging me after I said no");
+        String id = item.path("id").asText();
+        call(staff, put("/admin/moderation/" + id + "/takedown"), null).andExpect(status().isBadRequest());
+        call(staff, put("/admin/moderation/" + id + "/suspend"), "{\"reason\":\"Harassment\",\"durationDays\":3}")
+                .andExpect(jsonPath("$.data.id").value(ravi.getId().toString()))
+                .andExpect(jsonPath("$.data.reportsAgainst").value(1));
     }
 
     private User talent(String name) {

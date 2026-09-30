@@ -152,6 +152,29 @@ public class ModerationService {
                 .build());
     }
 
+    // FE-API-GAPS row 61: report a person. You can't report yourself, and a second report of the
+    // same person while yours is still open is refused (add to the open one's evidence instead).
+    @Transactional
+    public void fileUserReport(UUID reporterUserId, UUID reportedUserId, String reason, List<String> evidence) {
+        if (reporterUserId.equals(reportedUserId)) {
+            throw new com.vikisol.arena.common.exception.BadRequestException("You can't report yourself");
+        }
+        User reported = userRepository.findById(reportedUserId).filter(u -> u.getDeletedAt() == null)
+                .orElseThrow(() -> new ResourceNotFoundException("Person not found"));
+        if (moderationItemRepository.existsByContentTypeAndReporterIdAndReportedUserIdAndStatus(
+                ModerationContentType.USER, reporterUserId, reportedUserId, ModerationStatus.PENDING)) {
+            throw new com.vikisol.arena.common.exception.BadRequestException("You've already reported this person; Arena's team is looking at it");
+        }
+        moderationItemRepository.save(ModerationItem.builder()
+                .contentType(ModerationContentType.USER)
+                .reportedUser(reported)
+                .reporter(userRepository.getReferenceById(reporterUserId))
+                .reason(reason.trim())
+                .status(ModerationStatus.PENDING)
+                .evidenceJson(evidenceJson(reporterUserId, evidence))
+                .build());
+    }
+
     // Row 15: evidence files for a report. Each must be one the reporter uploaded with
     // POST /reports/evidence; at most 4.
     public static final String EVIDENCE_MODULE = "report-evidence";
@@ -221,6 +244,10 @@ public class ModerationService {
     @Transactional
     public void takedown(UUID actorUserId, UUID itemId, String reason) {
         ModerationItem item = requireItem(itemId);
+        if (item.getContentType() == ModerationContentType.USER) {
+            throw new com.vikisol.arena.common.exception.BadRequestException(
+                    "A person can't be taken down: warn, suspend or ban them instead");
+        }
         item.setStatus(ModerationStatus.TAKEN_DOWN);
         item.setResolvedBy(userRepository.getReferenceById(actorUserId));
         item.setResolvedAt(Instant.now());
@@ -251,6 +278,9 @@ public class ModerationService {
                 postRepository.save(post);
                 auditService.record(null, actorUserId, AuditActions.MODERATION_TAKEDOWN, "post " + post.getId(), reasonOrNull(reason));
             }
+            case USER -> {
+                // Refused above.
+            }
             case CONVERSATION -> {
                 // Closes the chat for both sides, recorded as closed by the reporter - so the
                 // reported person also can't open a new anonymous chat with them.
@@ -274,13 +304,13 @@ public class ModerationService {
                 Room room = item.getRoom();
                 yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
                         null, room.getPost().getBody(), null, room.getId().toString(), reporterName,
-                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null, evidence(item));
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null, evidence(item), null);
             }
             case POST -> {
                 Post post = item.getPost();
                 yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
                         null, post.getBody(), null, null, reporterName,
-                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), post.getId().toString(), evidence(item));
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), post.getId().toString(), evidence(item), null);
             }
             case CONVERSATION -> {
                 // Admins see the real accounts and the latest messages - anonymity is a display
@@ -294,13 +324,21 @@ public class ModerationService {
                         + (recent.isEmpty() ? "" : " - latest: " + String.join(" | ", recent.reversed()));
                 yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
                         null, summary, null, null, reporterName,
-                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null, evidence(item));
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null, evidence(item), null);
+            }
+            case USER -> {
+                User u = item.getReportedUser();
+                String summary = u == null ? "A person (account removed)" : "Report about " + u.getName();
+                yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
+                        null, summary, null, null, reporterName,
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null, evidence(item),
+                        u == null ? null : u.getId().toString());
             }
             case JOB_POSTING -> {
                 JobPosting p = item.getJobPosting();
                 yield new ModerationItemResponse(item.getId().toString(), item.getContentType().wireValue(),
                         p.getId().toString(), p.getTitle(), p.getEnterprise().getCompanyName(), null, null,
-                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null, evidence(item));
+                        item.getReason(), item.getStatus().wireValue(), item.getCreatedAt().toString(), null, evidence(item), null);
             }
         };
     }
