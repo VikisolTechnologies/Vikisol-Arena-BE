@@ -214,3 +214,18 @@ Details and numbers: `docs/PERFORMANCE.md`.
 - **Every admin action writes an audit entry.** This now includes moderation dismiss and takedown on posts, rooms and chats, dispute decisions, and demo-content seeding and removal.
 - **Audit CSV exports neutralise spreadsheet formulas.** This covers the company export as well as the new platform one.
 - **`GET /profile/{id}`** answers the same 404 as for a missing profile whenever the viewer may not see it, so the answer never reveals that the person is on Arena.
+
+## 30 Sep 2026 — No agent autopilot
+
+Founder decision: Jenny always prepares and the person approves each action.
+
+- **There is no `agent_autopilot` flag.**
+  - V42 deletes the row if an admin ever created one.
+  - `POST /admin/flags` refuses that key (and `autopilot`) with 400.
+  - The only place the flag existed was the frontend's mock flag list (`src/lib/api/platformAdmin.ts` in Vikisol-Arena-FE); it must be removed there too.
+- **`AutonomyLevel` loses `AUTOPILOT`.**
+  - V42 moves any stored `AUTOPILOT` profile to `SUPERVISED` (the default), and the column's check constraint no longer allows the value.
+  - `PUT /profile/me/autonomy` answers 400 for `autopilot`.
+  - The seeders no longer hand it out.
+- **Backend approval path (unchanged, already in place):** Jenny's proposed actions are stored as `PENDING` (`AgentAction`) and run only after the person's `PUT /agent/actions/{id}` with `approve: true`. The autonomy level is never sent to Jenny.
+- **What Arena can't see:** a service token's write means JennySol already holds an approval. Arena can't see that approval itself, so keeping it per-action is JennySol's side of `JENNY-ARENA-CONTRACT.md`.

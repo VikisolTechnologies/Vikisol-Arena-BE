@@ -256,7 +256,7 @@ public class DemoContentService {
                 profile.setRateFloor(IndianData.intBetween(6, 35));
                 profile.setOpenTo(IndianData.pickN(List.of(OpenTo.FULL_TIME, OpenTo.CONTRACT, OpenTo.PROJECTS), IndianData.intBetween(1, 2)));
                 profile.setConsent(new ConsentSettings(IndianData.RANDOM.nextDouble() < 0.6, true));
-                profile.setAutonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED, AutonomyLevel.AUTOPILOT)));
+                profile.setAutonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED)));
                 profile.setBio(experienceYears + "+ years in " + industry.wireValue().toLowerCase() + ", " + home.name() + ".");
                 // Real, live gap found and fixed here (2026-09-15): PostService.requireAdult()
                 // 400s "Add your date of birth in Settings" on every create/join of an Activity

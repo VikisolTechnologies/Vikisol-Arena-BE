@@ -803,3 +803,11 @@ Suspend, ban, restore, warn and force sign-out answer 400 for a staff account, y
   - the URL already on file is a no-op;
   - anything else is 400: upload with `POST /profile/me/photo`.
 - **Company audit CSV export:** same columns; cells that start like a formula now get a leading `'`.
+
+## No agent autopilot (DECISIONS.md, 30 Sep 2026)
+
+| Endpoint | Change |
+|---|---|
+| `PUT /profile/me/autonomy` | ⚠ `autopilot` is refused (400); the values are `manual` and `supervised`. Stored `autopilot` profiles now read `supervised` (V42). |
+| `GET /profile/me` | `autonomy` is only ever `manual` or `supervised`. Same field. |
+| `POST /admin/flags` | ⚠ The key `agent_autopilot` (or `autopilot`) is refused (400), and V42 deleted any existing row. |
