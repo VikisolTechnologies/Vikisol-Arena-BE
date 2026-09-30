@@ -18,6 +18,10 @@ public class UserPrincipal implements UserDetails {
     private final String passwordHash;
     private final String name;
     private final com.vikisol.arena.auth.entity.Role role;
+    // Rows 50-51: read when the principal is loaded (every request), so a suspension, ban,
+    // erasure or force sign-out takes effect on the next request (JwtAuthenticationFilter).
+    private final boolean blocked;
+    private final java.time.Instant sessionsRevokedAt;
 
     public UserPrincipal(User user) {
         this.id = user.getId();
@@ -25,6 +29,14 @@ public class UserPrincipal implements UserDetails {
         this.passwordHash = user.getPasswordHash();
         this.name = user.getName();
         this.role = user.getRole();
+        this.blocked = user.getDeletedAt() != null || user.isBlocked(java.time.Instant.now());
+        this.sessionsRevokedAt = user.getSessionsRevokedAt();
+    }
+
+    /** False when the account is blocked, or the token was issued before a force sign-out. */
+    public boolean acceptsTokenIssuedAt(java.util.Date issuedAt) {
+        if (blocked) return false;
+        return sessionsRevokedAt == null || issuedAt == null || !issuedAt.toInstant().isBefore(sessionsRevokedAt);
     }
 
     @Override

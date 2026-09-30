@@ -44,6 +44,20 @@ public class AdminDisputeController {
         return ResponseEntity.ok(ApiResponse.ok(disputeService.decide(principal.getId(), attendanceId, false, request.note())));
     }
 
+    // Row 46: side "joiner" = the dispute is upheld (they're marked present); "host" = the no-show stands.
+    @PutMapping("/{attendanceId}/resolve")
+    public ResponseEntity<ApiResponse<AdminDisputeService.DisputeView>> resolve(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID attendanceId, @Valid @RequestBody ResolveRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(disputeService.decide(principal.getId(), attendanceId,
+                "joiner".equalsIgnoreCase(request.side()), request.reason())));
+    }
+
+    public record ResolveRequest(
+            @jakarta.validation.constraints.NotBlank(message = "is required")
+            @jakarta.validation.constraints.Pattern(regexp = "(?i)host|joiner", message = "must be host or joiner") String side,
+            @jakarta.validation.constraints.NotBlank(message = "is required") @Size(max = 500, message = "must be at most 500 characters") String reason) {
+    }
+
     public record NoteRequest(@Size(max = 500, message = "must be at most 500 characters") String note) {
     }
 }

@@ -190,25 +190,36 @@ public class ModerationService {
         return PagedResponse.of(moderationItemRepository.findByStatusOrderByCreatedAtDesc(status, pageable), this::toResponse);
     }
 
-    @Transactional
     public void dismiss(UUID actorUserId, UUID itemId) {
+        dismiss(actorUserId, itemId, null);
+    }
+
+    // Every decision is audited (FE-API-GAPS row 48), with the admin's reason when given.
+    @Transactional
+    public void dismiss(UUID actorUserId, UUID itemId, String reason) {
         ModerationItem item = requireItem(itemId);
         item.setStatus(ModerationStatus.DISMISSED);
         item.setResolvedBy(userRepository.getReferenceById(actorUserId));
         item.setResolvedAt(Instant.now());
         moderationItemRepository.save(item);
 
-        if (item.getContentType() == ModerationContentType.JOB_POSTING) {
-            auditService.record(item.getJobPosting().getEnterprise().getId(), actorUserId,
-                    AuditActions.MODERATION_DISMISSED, item.getJobPosting().getTitle());
-        }
-        // ROOM/POST-type items have no tenant (candidate-to-candidate, not enterprise-scoped) -
-        // no audit call, same "nothing to audit" treatment ConversationService.sendMessage
-        // already gives a candidate-sent message with no resolvable tenant.
+        // ROOM/POST/CONVERSATION items have no tenant (candidate-to-candidate): audited platform-wide.
+        UUID tenant = item.getContentType() == ModerationContentType.JOB_POSTING ? item.getJobPosting().getEnterprise().getId() : null;
+        String target = item.getContentType() == ModerationContentType.JOB_POSTING ? item.getJobPosting().getTitle()
+                : "report " + item.getId() + " (" + item.getContentType().wireValue() + ")";
+        auditService.record(tenant, actorUserId, AuditActions.MODERATION_DISMISSED, target, reasonOrNull(reason));
+    }
+
+    private static String reasonOrNull(String reason) {
+        return reason == null || reason.isBlank() ? null : reason.trim();
+    }
+
+    public void takedown(UUID actorUserId, UUID itemId) {
+        takedown(actorUserId, itemId, null);
     }
 
     @Transactional
-    public void takedown(UUID actorUserId, UUID itemId) {
+    public void takedown(UUID actorUserId, UUID itemId, String reason) {
         ModerationItem item = requireItem(itemId);
         item.setStatus(ModerationStatus.TAKEN_DOWN);
         item.setResolvedBy(userRepository.getReferenceById(actorUserId));
@@ -220,7 +231,7 @@ public class ModerationService {
                 JobPosting posting = item.getJobPosting();
                 posting.setStatus(PostingStatus.CLOSED);
                 jobPostingRepository.save(posting);
-                auditService.record(posting.getEnterprise().getId(), actorUserId, AuditActions.MODERATION_TAKEDOWN, posting.getTitle());
+                auditService.record(posting.getEnterprise().getId(), actorUserId, AuditActions.MODERATION_TAKEDOWN, posting.getTitle(), reasonOrNull(reason));
             }
             case ROOM -> {
                 // Cancels the underlying Post directly (not via PostService - see this class's
@@ -232,11 +243,13 @@ public class ModerationService {
                 Post post = item.getRoom().getPost();
                 post.setStatus(PostStatus.CANCELLED);
                 postRepository.save(post);
+                auditService.record(null, actorUserId, AuditActions.MODERATION_TAKEDOWN, "room of post " + post.getId(), reasonOrNull(reason));
             }
             case POST -> {
                 Post post = item.getPost();
                 post.setStatus(PostStatus.CANCELLED);
                 postRepository.save(post);
+                auditService.record(null, actorUserId, AuditActions.MODERATION_TAKEDOWN, "post " + post.getId(), reasonOrNull(reason));
             }
             case CONVERSATION -> {
                 // Closes the chat for both sides, recorded as closed by the reporter - so the
@@ -244,6 +257,7 @@ public class ModerationService {
                 var conversation = item.getConversation();
                 conversation.setClosedAt(Instant.now());
                 conversation.setClosedBy(item.getReporter());
+                auditService.record(null, actorUserId, AuditActions.MODERATION_TAKEDOWN, "conversation " + conversation.getId(), reasonOrNull(reason));
             }
         }
     }

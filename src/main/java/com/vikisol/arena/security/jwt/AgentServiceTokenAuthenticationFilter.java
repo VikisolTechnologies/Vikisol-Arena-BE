@@ -86,7 +86,9 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
                 String endpointKey = request.getMethod() + " " + path;
                 String requiredScope = requiredScopeFor(request.getMethod(), path);
                 if (requiredScope != null && claims.scope().contains(requiredScope)) {
-                    var user = userRepository.findById(claims.userId());
+                    // Rows 50-51: Jenny can't act for a suspended, banned or erased account.
+                    var user = userRepository.findById(claims.userId())
+                            .filter(u -> u.getDeletedAt() == null && !u.isBlocked(java.time.Instant.now()));
                     if (user.isPresent()) {
                         UserPrincipal principal = new UserPrincipal(user.get());
                         UsernamePasswordAuthenticationToken authentication =
@@ -100,7 +102,7 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
                         // where a real tenant-scoped audit entry, if any, belongs.
                         auditService.record(null, claims.userId(), AuditActions.AGENT_ACTION_AUTHORIZED, endpointKey);
                     } else {
-                        log.warn("Agent service token named a user id that no longer exists: {}", claims.userId());
+                        log.warn("Agent service token named a user id that no longer exists or is blocked: {}", claims.userId());
                     }
                 } else if (requiredScope != null) {
                     log.warn("Agent service token presented for {} but its scope did not authorize it", endpointKey);

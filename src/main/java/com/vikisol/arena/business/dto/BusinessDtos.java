@@ -64,11 +64,25 @@ public final class BusinessDtos {
             String status,
             String domainConfirmedAt,
             String reviewNote,
-            String reviewedAt
+            String reviewedAt,
+            // Row 43: when it was submitted, and whether the work-email code proved the domain.
+            String submittedAt,
+            boolean domainMatch
     ) {
     }
 
-    public record RejectRequest(@NotBlank(message = "is required") @Size(max = 500, message = "must be at most 500 characters") String note) {
+    // `note`, or `reason` as FE-API-GAPS row 43 sends it.
+    public record RejectRequest(@Size(max = 500, message = "must be at most 500 characters") String note,
+                                @Size(max = 500, message = "must be at most 500 characters") String reason) {
+        @jakarta.validation.constraints.AssertTrue(message = "a note or reason is required")
+        public boolean isGiven() {
+            return text() != null;
+        }
+
+        public String text() {
+            if (note != null && !note.isBlank()) return note;
+            return reason != null && !reason.isBlank() ? reason : null;
+        }
     }
 
     // Admin review of grandfathered ("verified-legacy") companies.

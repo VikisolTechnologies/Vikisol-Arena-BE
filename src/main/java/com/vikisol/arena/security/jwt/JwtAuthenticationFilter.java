@@ -43,6 +43,13 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (!tokenDenylistService.isDenylisted(jti)) {
                 String email = claims.get().getSubject();
                 UserDetails userDetails = userDetailsService.loadUserByUsername(email);
+                // Rows 50-51: a suspended, banned or erased account, or a token from before a
+                // force sign-out, is treated as signed out (401 on protected endpoints).
+                if (userDetails instanceof com.vikisol.arena.security.service.UserPrincipal p
+                        && !p.acceptsTokenIssuedAt(claims.get().getIssuedAt())) {
+                    filterChain.doFilter(request, response);
+                    return;
+                }
 
                 UsernamePasswordAuthenticationToken authentication =
                         new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());

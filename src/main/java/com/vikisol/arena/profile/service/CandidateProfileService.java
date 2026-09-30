@@ -64,6 +64,7 @@ public class CandidateProfileService {
     private final JwtTokenProvider jwtTokenProvider;
     private final FollowService followService;
     private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
+    private final com.vikisol.arena.follows.service.BlockService blockService;
 
     // FE-API-GAPS 1 and 5: the closed vocabularies the onboarding screens send.
     static final Set<String> INTENTS = Set.of("activities", "meet", "ask", "offer", "job", "hire", "projects", "explore");
@@ -293,7 +294,21 @@ public class CandidateProfileService {
         if (request.availability() != null) {
             profile.setAvailability(new ArrayList<>(vocabulary(request.availability(), AVAILABILITY, "availability")));
         }
+        if (request.interests() != null) setInterests(userId, request.interests());
+        if (request.photoUrl() != null) {
+            if (request.photoUrl().isBlank()) return deletePhoto(userId);
+            String current = profile.getPhotoUrl() == null ? null : fileSigningService.sign(profile.getPhotoUrl());
+            boolean same = profile.getPhotoUrl() != null && (request.photoUrl().equals(profile.getPhotoUrl())
+                    || stripQuery(request.photoUrl()).equals(stripQuery(current)));
+            if (!same) throw new BadRequestException("Upload a new photo with POST /profile/me/photo");
+        }
         return toBasics(candidateProfileRepository.save(profile));
+    }
+
+    private static String stripQuery(String url) {
+        if (url == null) return "";
+        int q = url.indexOf('?');
+        return q < 0 ? url : url.substring(0, q);
     }
 
     @Transactional
@@ -395,6 +410,7 @@ public class CandidateProfileService {
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate not found"));
         User user = profile.getUser();
         UUID targetUserId = user.getId();
+        requireVisibleTo(profile, viewingUserId);
         FollowCountsResponse counts = followService.getCounts(targetUserId, viewingUserId);
         String homeCity = profile.getLocationConsent() == LocationConsent.OFF ? null : profile.getHomeCity();
         return new PublicCandidateProfileResponse(
@@ -407,6 +423,23 @@ public class CandidateProfileService {
                 counts.followerCount(), counts.followingCount(), counts.viewerFollows(),
                 fileSigningService.sign(profile.getPhotoUrl()), List.copyOf(profile.getInterests()),
                 List.copyOf(profile.getAvailability()));
+    }
+
+    // FE-API-GAPS row 54 (with row 18's setting): the owner always sees their profile. Anyone
+    // else gets the same 404 as for a missing profile when it is hidden, when it is "nearby" and
+    // they aren't signed in, when either of them blocked the other, or when the account was
+    // deleted or banned - so the answer never reveals that the person is on Arena.
+    private void requireVisibleTo(CandidateProfile profile, UUID viewingUserId) {
+        User user = profile.getUser();
+        if (user.getId().equals(viewingUserId)) return;
+        boolean visible = user.getDeletedAt() == null && user.getBannedAt() == null
+                && switch (profile.getProfileVisibility()) {
+                    case EVERYONE -> true;
+                    case NEARBY -> viewingUserId != null;
+                    case HIDDEN -> false;
+                }
+                && (viewingUserId == null || !blockService.isBlockedEitherDirection(viewingUserId, user.getId()));
+        if (!visible) throw new ResourceNotFoundException("Candidate not found");
     }
 
     @Transactional

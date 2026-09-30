@@ -77,6 +77,7 @@ public class AuthService {
     private final EmailProvider emailProvider;
     private final PhoneOtpProvider phoneOtpProvider;
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     // application.yml's actual key is "app.frontend-url" (hyphenated) - a dotted
     // "app.frontend.url" here silently resolves to the fallback rather than erroring, which is
@@ -559,11 +560,17 @@ public class AuthService {
     /** Rotates the presented refresh token and mints a fresh access token. Throws
      * BadCredentialsException (translated to 401) if the refresh token is invalid, expired, or a
      * detected reuse - callers should treat that as "the session is over," not retry. */
-    @Transactional(readOnly = true)
+    @Transactional
     public RefreshResult refreshAccessToken(String refreshToken) {
         RefreshTokenService.Result rotated = refreshTokenService.rotate(refreshToken);
         User user = userRepository.findById(rotated.userId())
                 .orElseThrow(() -> new BadCredentialsException("Account not found"));
+        // Rows 50-51: a suspended, banned or erased account's session ends here.
+        if (user.getDeletedAt() != null || user.isBlocked(Instant.now())) {
+            refreshTokenService.revokeAllForUser(user.getId());
+            throw new BadCredentialsException("This account can't sign in");
+        }
+        recordActive(user);
         String accessToken = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
         return new RefreshResult(accessToken, rotated.token());
     }
@@ -635,7 +642,15 @@ public class AuthService {
         userRepository.save(user);
     }
 
+    // Every way into a session ends here, so a suspended or banned account is refused on all of
+    // them (password, code, Google, phone, 2FA). Rows 50-51.
     private SignInOutcome.Success issueSession(User user) {
+        if (user.isBlocked(Instant.now())) {
+            throw new BadRequestException(user.getBannedAt() != null
+                    ? "This account has been closed by Arena's team."
+                    : "This account is suspended. Contact Vikisol support for help.");
+        }
+        recordActive(user);
         // See currentSession()'s comment - this is the User.id, not the CandidateProfile PK.
         String candidateId = user.getRole() == Role.TALENT ? user.getId().toString() : null;
         String accessToken = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
@@ -647,6 +662,15 @@ public class AuthService {
                 user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), accessToken,
                 enrollmentRequired, user.isTotpEnabled());
         return new SignInOutcome.Success(session, refreshToken);
+    }
+
+    // Rows 42 and 49: last activity, and one row per active day for the launch return rates.
+    // Written in the caller's transaction (every caller is a writable one).
+    private void recordActive(User user) {
+        user.setLastActiveAt(Instant.now());
+        userRepository.saveAndFlush(user); // the insert below references the row
+        jdbc.update("insert into arena_user_active_days (user_id, day) values (?, (now() at time zone 'utc')::date) on conflict do nothing",
+                user.getId());
     }
 
     private User requireUser(UUID userId) {

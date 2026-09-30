@@ -16,4 +16,9 @@ public interface ActivityAttendanceRepository extends JpaRepository<ActivityAtte
     @org.springframework.data.jpa.repository.EntityGraph(attributePaths = {"joinRequest", "joinRequest.user", "joinRequest.post", "joinRequest.post.authorUser"})
     org.springframework.data.domain.Page<ActivityAttendance> findByDisputeStatusOrderByDisputedAtAscIdAsc(
             com.vikisol.arena.activities.entity.DisputeStatus status, org.springframework.data.domain.Pageable pageable);
+
+    // FE-API-GAPS row 46: open disputes past the 72-hour review window.
+    org.springframework.data.domain.Page<com.vikisol.arena.activities.entity.ActivityAttendance> findByDisputeStatusAndDisputedAtBeforeOrderByDisputedAtAscIdAsc(
+            com.vikisol.arena.activities.entity.DisputeStatus status, java.time.Instant before, org.springframework.data.domain.Pageable pageable);
+
 }

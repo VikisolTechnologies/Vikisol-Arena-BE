@@ -54,6 +54,26 @@ closes it. Source: branch `local/wip-2026-09-29` of Vikisol-Arena-FE, together w
 | 40 | Coordination room | Files tab | Needs the messaging-architecture review first (mission step 9), like row 9 | Not built |
 | 41 | Work → Jobs | Save; hybrid | Jobs per the flow: saved jobs, `workMode: hybrid` | Built |
 
+**Rows 42–54** come from the B+ branches `feature/arena-admin-bplus` (42–51) and
+`feature/arena-account-bplus` (52–54). Every `/admin` path needs the platform-admin role and
+2FA, and every admin action writes an audit entry, with its reason when one is given.
+
+| # | Screen | What's needed | What closes it | Status |
+|---|---|---|---|---|
+| 42 | Admin — Overview | Launch metrics | `GET /admin/metrics/launch?sinceDays=`. `onboardingCompleted` stays null (nothing records it). D1/D7 return rates come from activity tracked since V41; they are null until a cohort is old enough. Demo rows and staff are left out. | Built |
+| 43 | Admin — Verification | Queue, approve, reject | The existing queue, now also at `/admin/verification`. Adds `status=approved` (= verified), the fields `submittedAt` and `domainMatch`, and `{ reason }` on reject. | Built |
+| 44 | Admin — Content | Browse and take down | `GET /admin/content?kind=activity\|need\|job&query=`, `PUT /admin/content/{id}/takedown { reason }`. The post is cancelled or the job closed, open reports on it are resolved, and the owner is notified. | Built |
+| 45 | Admin — Content | Activity catalogue | `GET /admin/catalog/activity-types` | Built |
+| 46 | Admin — Disputes | Queue with SLA; resolve | The existing queue takes `status=open\|expired\|resolved_host\|resolved_joiner`, with the fields `id, activityTitle, hostName, joinerName, openedAt, deadlineAt (opened + 72 h), state, note`. `PUT /admin/disputes/{id}/resolve { side, reason }` | Built |
+| 47 | Admin — Jenny & AI | Automations, covers, providers, action log | `GET /admin/jenny/actions` (Jenny's service-token actions from the audit log) and `GET /admin/jenny/providers` (configured or not, never a key). Automations and cover flags live in JennySol, not Arena. | Partly (actions, providers) |
+| 48 | Admin — Audit log | Platform-wide audit with reasons | `GET /admin/audit?sinceDays=&action=&actorId=&page=&size=`, `GET /admin/audit/export` (CSV that can't run as spreadsheet formulas) | Built |
+| 49 | Admin — Team | Staff, 2FA, launch areas | `GET /admin/team`, `PUT /admin/team/{id}/launch-areas { areas }` | Built |
+| 50 | Admin — Moderation | Warn, suspend, ban | `PUT /admin/moderation/{id}/warn\|suspend\|ban`, acting on the account behind the report. Dismiss and takedown now take an optional `{ reason }` and are audited. | Built |
+| 51 | Admin — Users | Detail, suspend, restore, force sign-out, export/delete flags | `GET /admin/users/{id}`, `PUT …/suspend { reason, durationDays? }`, `PUT …/restore`, `POST …/force-signout`. The detail has `lastDataExportAt` and `deletionRequested`, and never any secret. | Built |
+| 52 | Account — Notifications | Persist toggles | `GET/PUT /notifications/preferences` also takes and returns `messages, activities, needs, jobs`, plus `jenny` and `marketing` (opt-in) | Built |
+| 53 | Account — Edit profile | PATCH with interests and photo | `PATCH /profile/me` takes `interests`. `photoUrl: ""` removes the photo; a new photo is uploaded with `POST /profile/me/photo`, never set from a URL. | Built |
+| 54 | Neighbour profile | Visibility on the public profile | `GET /profile/{id}` answers 404 to anyone but the owner when: <ul><li>the profile is hidden;</li><li>it is `nearby` and the viewer is a guest;</li><li>either side blocked the other;</li><li>the account is deleted or banned.</li></ul> | Built |
+
 **Summary:**
 - **Built:** 35 rows.
 - **Partly built:** row 27 (all but the radius).

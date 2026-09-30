@@ -42,14 +42,22 @@ import org.springframework.web.bind.annotation.RestController;
 public class DemoContentController {
 
     private final DemoContentService demoContentService;
+    private final com.vikisol.arena.audit.AuditService auditService;
 
+    // Both are audited (every admin action is, FE-API-GAPS row 48).
     @PostMapping
-    public ResponseEntity<ApiResponse<DemoContentService.SeedSummary>> seed() {
-        return ResponseEntity.ok(ApiResponse.ok("Demo content seeded", demoContentService.seed()));
+    public ResponseEntity<ApiResponse<DemoContentService.SeedSummary>> seed(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal com.vikisol.arena.security.service.UserPrincipal principal) {
+        DemoContentService.SeedSummary summary = demoContentService.seed();
+        auditService.record(null, principal.getId(), com.vikisol.arena.audit.AuditActions.DEMO_CONTENT_SEEDED, "demo content", summary.toString());
+        return ResponseEntity.ok(ApiResponse.ok("Demo content seeded", summary));
     }
 
     @DeleteMapping
-    public ResponseEntity<ApiResponse<DemoContentService.RemovalSummary>> removeAll() {
-        return ResponseEntity.ok(ApiResponse.ok("Demo content removed", demoContentService.removeAll()));
+    public ResponseEntity<ApiResponse<DemoContentService.RemovalSummary>> removeAll(
+            @org.springframework.security.core.annotation.AuthenticationPrincipal com.vikisol.arena.security.service.UserPrincipal principal) {
+        DemoContentService.RemovalSummary summary = demoContentService.removeAll();
+        auditService.record(null, principal.getId(), com.vikisol.arena.audit.AuditActions.DEMO_CONTENT_REMOVED, "demo content", summary.toString());
+        return ResponseEntity.ok(ApiResponse.ok("Demo content removed", summary));
     }
 }

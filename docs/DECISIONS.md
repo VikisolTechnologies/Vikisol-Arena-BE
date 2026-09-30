@@ -198,3 +198,19 @@ Details and numbers: `docs/PERFORMANCE.md`.
 - No extra CPU or second instance for launch. The search trigram index (V40) and the scale-up trigger are in `docs/PERFORMANCE.md`.
 - The `Dockerfile` defaults `JAVA_OPTS` to `-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError`. The founder sets the service to 1 GB. `railway.toml` is unchanged.
 - Reading messages (GET conversations and threads) has its own limit of 60 per minute per user. Sending stays at 30.
+
+## 30 Sep 2026 — Admin and account gaps (FE-API-GAPS rows 42–54)
+
+- **Suspensions, bans and force sign-out take effect on the next request.**
+  - The JWT filter already loads the account on every request. It now treats a suspended, banned or erased account as signed out.
+  - It also rejects a token issued before the account's `sessions_revoked_at`.
+  - Every way of getting a session (password, codes, Google, 2FA, refresh) refuses a blocked account, and so does a Jenny service token acting for one.
+  - Suspending or banning also revokes the refresh tokens.
+- **Erased accounts are now signed out at once.** Previously their access token kept working until it expired (up to 15 minutes).
+- **Admins can't act on staff accounts or their own.** Staff (platform admin) accounts are managed separately.
+- **Activity tracking for D1/D7 (row 42)** is one row per person per day, written at sign-in and at session refresh, not on every request. It stores no content, and it is in the person's export and erasure. The return rates count only people who signed up after tracking began, so older accounts don't pull them down.
+- **`onboardingCompleted` is null** rather than a guess: nothing records a finished onboarding yet.
+- **Jenny automations and cover flags (row 47) are JennySol's**, so they are not in Arena. Arena shows the actions Jenny took through service tokens (already audited) and whether each outside provider is configured, without calling it.
+- **Every admin action writes an audit entry.** This now includes moderation dismiss and takedown on posts, rooms and chats, dispute decisions, and demo-content seeding and removal.
+- **Audit CSV exports neutralise spreadsheet formulas.** This covers the company export as well as the new platform one.
+- **`GET /profile/{id}`** answers the same 404 as for a missing profile whenever the viewer may not see it, so the answer never reveals that the person is on Arena.

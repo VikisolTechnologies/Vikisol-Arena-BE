@@ -83,14 +83,20 @@ public class PersonalDataService {
         // People app (V37)
         EXPORT.put("connectRequestsReceived", "select e.company_name, c.note, c.status, c.created_at, c.decided_at from arena_connect_requests c join arena_enterprise_profiles e on e.id = c.tenant_id where c.candidate_user_id = :u");
         EXPORT.put("connectRequestsSent", "select e.company_name, c.note, c.status, c.created_at from arena_connect_requests c join arena_enterprise_profiles e on e.id = c.tenant_id where c.sender_user_id = :u");
-        EXPORT.put("notificationPreferences", "select activity, need, job, message from arena_notification_preferences where user_id = :u");
+        EXPORT.put("notificationPreferences", "select activity, need, job, message, jenny, marketing from arena_notification_preferences where user_id = :u");
+        // V41: the days they were active (sign-in or session refresh), and staff launch areas.
+        EXPORT.put("activeDays", "select day from arena_user_active_days where user_id = :u order by day");
+        EXPORT.put("staffLaunchAreas", "select area from arena_staff_launch_areas where user_id = :u");
         EXPORT.put("reportEvidence", "select id as report_id, reason, evidence_json, created_at from arena_moderation_items where reporter_user_id = :u and evidence_json <> '[]'");
     }
 
-    @Transactional(readOnly = true)
+    // Both export endpoints come through here; the time is shown to admins (row 51 flags).
+    @Transactional
     public Map<String, List<Map<String, Object>>> export(UUID userId) {
         entityManager.flush(); // SQL below must see this transaction's pending JPA writes
         MapSqlParameterSource p = new MapSqlParameterSource("u", userId);
+        var user = entityManager.find(com.vikisol.arena.auth.entity.User.class, userId);
+        if (user != null) user.setLastDataExportAt(java.time.Instant.now());
         Map<String, List<Map<String, Object>>> out = new LinkedHashMap<>();
         EXPORT.forEach((section, sql) -> out.put(section, jdbc.queryForList(sql, p).stream().map(PersonalDataService::plain).toList()));
         return out;
@@ -150,6 +156,8 @@ public class PersonalDataService {
                 "delete from arena_connect_requests where candidate_user_id = :u",
                 "update arena_connect_requests set sender_user_id = null where sender_user_id = :u",
                 "delete from arena_notification_preferences where user_id = :u",
+                "delete from arena_user_active_days where user_id = :u",
+                "delete from arena_staff_launch_areas where user_id = :u",
                 "delete from arena_notifications where user_id = :u",
                 "update arena_moderation_items set evidence_json = '[]' where reporter_user_id = :u",
                 // Company verification they submitted: the work email is theirs

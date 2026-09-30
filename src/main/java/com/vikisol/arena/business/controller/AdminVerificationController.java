@@ -20,7 +20,8 @@ import java.util.UUID;
 // ARENA-APP-FLOW §9 verification queue (FE-API-GAPS row 29). Under /admin, so the platform-admin
 // role and the admin 2FA filter (PlatformAdminMfaFilter) apply exactly as for the other admin pages.
 @RestController
-@RequestMapping("/admin/verifications")
+// Also served at /admin/verification (FE-API-GAPS row 43 names it that way).
+@RequestMapping({"/admin/verifications", "/admin/verification"})
 @RequiredArgsConstructor
 @PreAuthorize("hasRole('PLATFORM_ADMIN')")
 public class AdminVerificationController {
@@ -57,6 +58,6 @@ public class AdminVerificationController {
     @PutMapping("/{id}/reject")
     public ResponseEntity<ApiResponse<QueueItem>> reject(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody RejectRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok(verificationService.reject(principal.getId(), id, request.note())));
+        return ResponseEntity.ok(ApiResponse.ok(verificationService.reject(principal.getId(), id, request.text())));
     }
 }
