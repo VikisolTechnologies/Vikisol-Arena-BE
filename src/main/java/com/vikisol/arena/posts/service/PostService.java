@@ -1,5 +1,9 @@
 package com.vikisol.arena.posts.service;
 
+import com.vikisol.arena.activities.entity.ActivityAttendance;
+import com.vikisol.arena.activities.entity.ActivityWaitlistEntry;
+import com.vikisol.arena.activities.entity.DisputeStatus;
+import com.vikisol.arena.activities.entity.WaitlistStatus;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.entity.VerificationLevel;
 import com.vikisol.arena.auth.repository.UserRepository;
@@ -28,6 +32,7 @@ import com.vikisol.arena.posts.repository.PostCommentRepository;
 import com.vikisol.arena.posts.repository.PostJoinRequestRepository;
 import com.vikisol.arena.posts.repository.PostReactionRepository;
 import com.vikisol.arena.posts.repository.PostRepository;
+import com.vikisol.arena.posts.repository.PostSearchRow;
 import com.vikisol.arena.posts.repository.PostSaveRepository;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
@@ -61,7 +66,13 @@ public class PostService {
     // Discuss thread lists rank ("top") within the newest this-many threads.
     private static final int DISCUSS_WINDOW = 500;
 
+    private final com.vikisol.arena.posts.repository.PostGeoRepository postGeoRepository;
     private final PostRepository postRepository;
+    private final com.vikisol.arena.posts.repository.PostSearchRepository postSearchRepository;
+    private final com.vikisol.arena.activities.repository.ActivityQuestionRepository activityQuestionRepository;
+    private final com.vikisol.arena.activities.repository.ActivityWaitlistRepository activityWaitlistRepository;
+    private final com.vikisol.arena.activities.repository.ActivityAttendanceRepository activityAttendanceRepository;
+    private final com.vikisol.arena.activities.service.ReminderService reminderService;
     private final PostJoinRequestRepository postJoinRequestRepository;
     private final UserRepository userRepository;
     private final CandidateProfileRepository candidateProfileRepository;
@@ -89,25 +100,24 @@ public class PostService {
         return toResponseList(window, viewingUserId);
     }
 
-    // A fully-mapped PostResponse paired with its FeedRankingService score - used by
-    // FeedAggregationService to interleave posts with JobPosting/Project on one merged, ranked
-    // stream (see DECISIONS.md's Step 3 entry).
-    public record ScoredPostResponse(PostResponse response, double score) {
+    // The scored feed window, not yet mapped: FeedAggregationService merges it with jobs and
+    // projects, pages the merged list, and maps only the page (toResponses). Mapping every post
+    // of a 500-post window for a 20-item page was the feed's main cost (PERFORMANCE.md).
+    @Transactional(readOnly = true)
+    public List<FeedRankingService.ScoredPost> getScoredFeedCandidates(UUID viewingUserId) {
+        // Same rules as excludeBlocked, on the ranking rows.
+        Set<UUID> blocked = blockService.blockedEitherDirection(viewingUserId);
+        return feedRankingService.scoredWindow(viewingUserId).stream()
+                .filter(sp -> !sp.post().linkOnly() || sp.post().authorId().equals(viewingUserId))
+                .filter(sp -> !blocked.contains(sp.post().authorId()))
+                .toList();
     }
 
-    // Unpaged, scored+sorted feed posts, fully mapped (comment/reaction counts, join status,
-    // room id - everything getFeed's own responses have). Deliberately bypasses getFeed's own
-    // paging since the caller needs to merge-then-page across all three sources together, not
-    // page each independently and then try to interleave already-paged pages.
+    // Fully mapped posts for a feed page, read fresh in rank order (a post closed since the
+    // candidate window was read is left out), with every count and flag fetched in batches.
     @Transactional(readOnly = true)
-    public List<ScoredPostResponse> getScoredFeed(UUID viewingUserId) {
-        List<FeedRankingService.ScoredPost> scored = feedRankingService.scoredWindow(viewingUserId);
-        List<Post> posts = excludeBlocked(scored.stream().map(FeedRankingService.ScoredPost::post).toList(), viewingUserId);
-        Map<UUID, Double> scoreByPostId = scored.stream()
-                .collect(Collectors.toMap(sp -> sp.post().getId(), FeedRankingService.ScoredPost::score, (a, b) -> a));
-        return toResponseList(posts, viewingUserId).stream()
-                .map(r -> new ScoredPostResponse(r, scoreByPostId.getOrDefault(UUID.fromString(r.id()), 0.0)))
-                .toList();
+    public List<PostResponse> toResponses(List<FeedRankingService.Candidate> page, UUID viewingUserId) {
+        return toResponseList(feedRankingService.openPosts(page), viewingUserId);
     }
 
     // §"trends" - trending posts ranked by recent engagement velocity, reused as a feed sort
@@ -149,7 +159,7 @@ public class PostService {
             throw new BadRequestException("Only a need can be marked resolved");
         }
         if (post.getStatus() != PostStatus.CLOSED) {
-            if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL) {
+            if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL && post.getStatus() != PostStatus.PAUSED) {
                 throw new BadRequestException("This need is already " + post.getStatus().wireValue());
             }
             post.setStatus(PostStatus.CLOSED);
@@ -170,8 +180,12 @@ public class PostService {
         var page = postRepository.findByAuthorUserIdOrderByCreatedAtDesc(targetUserId, pageable);
         var visible = page.getContent().stream()
                 .filter(p -> p.getStatus() != PostStatus.CANCELLED)
+                // A paused post is hidden from everyone but its owner (row 39).
+                .filter(p -> isSelf || p.getStatus() != PostStatus.PAUSED)
                 // An anonymous post never appears on its author's profile for anyone else.
                 .filter(p -> isSelf || !p.isAnonymous())
+                // A link-only activity isn't listed on the host's profile either.
+                .filter(p -> isSelf || !p.isLinkOnly())
                 .filter(p -> isSelf || p.getAudience() == PostAudience.GLOBAL
                         || (p.getAudience() == PostAudience.FOLLOWERS && viewerFollowsTarget))
                 .toList();
@@ -268,30 +282,66 @@ public class PostService {
     // posts for everyone, FOLLOWERS posts only for the author's followers (or the author), and
     // nothing from a blocked/blocking user.
     @Transactional(readOnly = true)
-    public List<PostResponse> search(UUID viewingUserId, List<String> terms, java.util.function.Predicate<Post> kind, int limit) {
-        if (terms.isEmpty()) return List.of();
-        List<Post> window = postRepository.findByStatusInOrderByCreatedAtDesc(
-                List.of(PostStatus.OPEN, PostStatus.FULL), PageRequest.of(0, SEARCH_WINDOW)).getContent();
+    public List<PostResponse> search(UUID viewingUserId, List<String> terms,
+                                     java.util.Collection<com.vikisol.arena.posts.entity.PostIntentType> kinds, int limit) {
+        return search(viewingUserId, terms, List.of(kinds), limit).get(0);
+    }
+
+    // Several kinds of post at once (search "all": activities and discussions) from one candidate
+    // read - one result list per group, each ranked and cut to `limit` on its own. The read is
+    // SEARCH_WINDOW per group, shared: it only differs from separate reads when one word matches
+    // more live posts than that (PERFORMANCE.md).
+    @Transactional(readOnly = true)
+    public List<List<PostResponse>> search(UUID viewingUserId, List<String> terms,
+                                           List<? extends java.util.Collection<com.vikisol.arena.posts.entity.PostIntentType>> groups, int limit) {
+        java.util.Set<com.vikisol.arena.posts.entity.PostIntentType> kinds = groups.stream()
+                .flatMap(java.util.Collection::stream).collect(Collectors.toSet());
+        if (terms.isEmpty() || kinds.isEmpty()) return groups.stream().map(g -> List.<PostResponse>of()).toList();
+        // PERFORMANCE.md: ranking reads light rows (text fields and author), and only the hits are
+        // loaded as posts. When the first word is plain ASCII, the database also narrows the rows
+        // to ones containing it (Postgres and Java lowercase ASCII the same way, so nothing a match
+        // needs is filtered out). Otherwise the newest window is read as before.
+        List<PostStatus> live = List.of(PostStatus.OPEN, PostStatus.FULL);
+        int windowSize = SEARCH_WINDOW * groups.size();
+        List<PostSearchRow> window;
+        if (SearchText.isAscii(terms.get(0))) {
+            // Narrowed through the trigram indexes (V40).
+            window = postSearchRepository.matching(live, kinds, SearchText.likePattern(terms.get(0)), windowSize);
+        } else {
+            window = postRepository.searchRows(live, kinds, PageRequest.of(0, windowSize));
+        }
         Set<UUID> following = viewingUserId == null ? Set.of()
                 : Set.copyOf(followRepository.findFollowingUserIdsByFollowerUserId(viewingUserId));
-        record Hit(Post post, int score) {
+        Set<UUID> blocked = blockService.blockedEitherDirection(viewingUserId);
+        record Hit(UUID id, com.vikisol.arena.posts.entity.PostIntentType kind, int score) {
         }
-        List<Post> ranked = window.stream()
-                .filter(kind)
-                .filter(p -> p.getAudience() == PostAudience.GLOBAL
-                        || p.getAuthorUser().getId().equals(viewingUserId)
-                        || following.contains(p.getAuthorUser().getId()))
+        List<Hit> ranked = window.stream()
+                .filter(r -> r.audience() == PostAudience.GLOBAL
+                        || r.authorId().equals(viewingUserId)
+                        || following.contains(r.authorId()))
+                // Same rules as excludeBlocked: no blocked people, no link-only unless it's yours.
+                .filter(r -> !blocked.contains(r.authorId()))
+                .filter(r -> !r.linkOnly() || r.authorId().equals(viewingUserId))
                 // An anonymous post is never found by its author's name.
-                .map(p -> new Hit(p, SearchText.score(terms, p.getTitle(), SearchText.haystack(
-                        p.getBody(), p.getLocationText(),
-                        p.isAnonymous() ? null : p.getAuthorUser().getName(),
-                        p.isAnonymous() || p.getAuthorCompany() == null ? null : p.getAuthorCompany().getCompanyName()))))
+                .map(r -> new Hit(r.id(), r.intentType(), SearchText.score(terms, r.title(), SearchText.haystack(
+                        r.body(), r.locationText(),
+                        r.anonymous() ? null : r.authorName(),
+                        r.anonymous() ? null : r.companyName()))))
                 .filter(h -> h.score() > 0)
                 .sorted(java.util.Comparator.comparingInt(Hit::score).reversed())
-                .map(Hit::post)
                 .toList();
-        List<Post> visible = excludeBlocked(ranked, viewingUserId);
-        return toResponseList(visible.subList(0, Math.min(limit, visible.size())), viewingUserId);
+        List<List<UUID>> idsPerGroup = groups.stream()
+                .map(g -> ranked.stream().filter(h -> g.contains(h.kind())).limit(limit).map(Hit::id).toList())
+                .toList();
+        List<UUID> allIds = idsPerGroup.stream().flatMap(List::stream).distinct().toList();
+        if (allIds.isEmpty()) return groups.stream().map(g -> List.<PostResponse>of()).toList();
+        Map<UUID, Post> byId = postRepository.findByIdIn(allIds).stream()
+                .collect(java.util.stream.Collectors.toMap(Post::getId, p -> p));
+        Map<UUID, PostResponse> mapped = toResponseList(allIds.stream().map(byId::get).filter(java.util.Objects::nonNull).toList(),
+                viewingUserId).stream().collect(Collectors.toMap(r -> UUID.fromString(r.id()), r -> r));
+        return idsPerGroup.stream()
+                .map(ids -> ids.stream().map(mapped::get).filter(java.util.Objects::nonNull).toList())
+                .toList();
     }
 
     private List<PostResponse> toResponseList(List<Post> posts, UUID viewingUserId) {
@@ -306,8 +356,18 @@ public class PostService {
         var mediaUrlsByPostId = mapper.batchMediaUrls(postIds);
         var scores = mapper.batchScores(postIds);
         var myVotes = mapper.batchMyVotes(postIds, viewingUserId);
+        // The viewer's join status and each post's room, one query each (PERFORMANCE.md).
+        Map<UUID, String> joinStatuses = new java.util.HashMap<>();
+        if (viewingUserId != null && !postIds.isEmpty()) {
+            for (PostJoinRequest j : postJoinRequestRepository.findByUserIdAndPostIdIn(viewingUserId, postIds)) {
+                if (j.getStatus() != PostJoinStatus.WITHDRAWN) joinStatuses.put(j.getPost().getId(), j.getStatus().wireValue());
+            }
+        }
+        Map<UUID, String> roomIds = roomService.findRoomIdsForPosts(
+                posts.stream().filter(Post::isJoinable).map(Post::getId).toList());
         return posts.stream()
-                .map(p -> mapper.toResponse(p, viewingUserId, myJoinStatus(p, viewingUserId), roomIdFor(p),
+                .map(p -> mapper.toResponse(p, viewingUserId, p.isJoinable() ? joinStatuses.get(p.getId()) : null,
+                        p.isJoinable() ? roomIds.get(p.getId()) : null,
                         authorProfiles, commentCounts, reactionCounts, myReactedIds, authorJoinCounts,
                         tagsByPostId, mediaUrlsByPostId, scores, myVotes))
                 .toList();
@@ -318,13 +378,17 @@ public class PostService {
     // DECISIONS.md for why there's no PostGIS radius query underneath this. Only ACTIVITY/ASK
     // posts with a captured position are candidates; time window filters on startsAt (falls back
     // to createdAt for posts with no explicit start, e.g. an ASK).
+    static final int NEARBY_CANDIDATES = 2000;
+
     @Transactional(readOnly = true)
     public List<PostResponse> getNearby(UUID viewingUserId, double centerLat, double centerLng, double radiusKm,
                                          Integer withinHours, String intentTypeWire) {
         PostIntentType intentFilter = (intentTypeWire == null || intentTypeWire.isBlank())
                 ? null : PostIntentType.valueOf(intentTypeWire.trim().toUpperCase());
-        Pageable window = PageRequest.of(0, 500, Sort.by(Sort.Direction.DESC, "createdAt"));
-        List<Post> candidates = postRepository.findByStatusOrderByCreatedAtDesc(PostStatus.OPEN, window).getContent();
+        // PERFORMANCE.md: only open posts in the geohash cells covering the circle, through an index,
+        // instead of the newest 500 open posts anywhere (which also missed older posts nearby).
+        List<Post> candidates = postGeoRepository.findOpenInCells(
+                GeohashUtil.coverCells(centerLat, centerLng, radiusKm), NEARBY_CANDIDATES);
 
         Instant horizon = withinHours == null ? null : Instant.now().plusSeconds(withinHours * 3600L);
         List<Post> nearby = candidates.stream()
@@ -447,8 +511,120 @@ public class PostService {
         postRepository.save(post);
     }
 
+    // FE-API-GAPS rows 14/39, flow A10: the owner edits a live post. People who joined are told
+    // what changed, and reminders follow a new start time.
+    @Transactional
+    public PostResponse update(UUID userId, UUID postId, com.vikisol.arena.posts.dto.UpdatePostRequest request) {
+        Post post = requireLockedPost(postId);
+        if (!post.getAuthorUser().getId().equals(userId)) {
+            throw new AccessDeniedException("Not your post");
+        }
+        if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL && post.getStatus() != PostStatus.PAUSED) {
+            throw new BadRequestException("Only a live post can be edited. This one is " + post.getStatus().wireValue());
+        }
+        List<String> changed = new java.util.ArrayList<>();
+        if (request.title() != null && !java.util.Objects.equals(blankToNull(request.title()), post.getTitle())) {
+            post.setTitle(blankToNull(request.title()));
+            changed.add("title");
+        }
+        if (request.body() != null && !request.body().equals(post.getBody())) {
+            if (request.body().isBlank()) throw new BadRequestException("body can't be empty");
+            post.setBody(request.body());
+            changed.add("description");
+        }
+        Instant startsAt = request.startsAt() == null ? post.getStartsAt() : parseInstant(request.startsAt(), "startsAt");
+        Instant endsAt = request.endsAt() == null ? post.getEndsAt() : parseInstant(request.endsAt(), "endsAt");
+        if (startsAt != null && endsAt != null && !endsAt.isAfter(startsAt)) {
+            throw new BadRequestException("The end must be after the start");
+        }
+        boolean startMoved = !java.util.Objects.equals(startsAt, post.getStartsAt());
+        if (startMoved) {
+            if (startsAt != null && !startsAt.isAfter(Instant.now())) throw new BadRequestException("The new start must be in the future");
+            post.setStartsAt(startsAt);
+            changed.add("start time");
+        }
+        if (!java.util.Objects.equals(endsAt, post.getEndsAt())) {
+            post.setEndsAt(endsAt);
+            changed.add("end time");
+        }
+        if (request.locationText() != null && !java.util.Objects.equals(blankToNull(request.locationText()), post.getLocationText())) {
+            post.setLocationText(blankToNull(request.locationText()));
+            changed.add("place");
+        }
+        if (request.exactMeetingPoint() != null && !java.util.Objects.equals(blankToNull(request.exactMeetingPoint()), post.getExactMeetingPoint())) {
+            post.setExactMeetingPoint(blankToNull(request.exactMeetingPoint()));
+            changed.add("meeting point");
+        }
+        if (request.tags() != null) {
+            List<String> tags = request.tags().stream().filter(t -> t != null && !t.isBlank()).map(String::trim).distinct().toList();
+            if (!tags.equals(post.getTags())) {
+                post.getTags().clear();
+                post.getTags().addAll(tags);
+                changed.add("tags");
+            }
+        }
+        if (changed.isEmpty()) return mapper.toResponse(post, userId, null, roomIdFor(post));
+
+        if (changed.contains("description") || changed.contains("tags")) {
+            post.setEmbedding(EmbeddingUtil.encode(embedOrNull(post.getBody() + " " + String.join(" ", post.getTags()))));
+        }
+        post.setEditedAt(Instant.now());
+        post = postRepository.save(post);
+        if (changed.contains("description")) moderationService.autoFlag(post);
+        if (startMoved) reminderService.reschedule(post);
+        String what = String.join(", ", changed);
+        for (PostJoinRequest join : postJoinRequestRepository.findByPostIdAndStatusOrderByCreatedAtAscIdAsc(postId, PostJoinStatus.APPROVED)) {
+            notificationService.notifyActivity(join.getUser(), "Changes to something you joined",
+                    "The host changed the " + what + " of \"" + preview(post) + "\".");
+        }
+        return mapper.toResponse(post, userId, null, roomIdFor(post));
+    }
+
+    // FE-API-GAPS row 39: PUT /posts/{id}/status { status }. "paused" hides a need or offer from
+    // feeds and search and stops new offers/joins; "open" brings it back; "closed" (or no body,
+    // the original behaviour) resolves a need.
+    @Transactional
+    public PostResponse setStatus(UUID userId, UUID postId, String status) {
+        if (status == null || status.isBlank() || status.trim().equalsIgnoreCase("closed")) return closeAsResolved(userId, postId);
+        Post post = requireLockedPost(postId);
+        if (!post.getAuthorUser().getId().equals(userId)) {
+            throw new AccessDeniedException("Not your post");
+        }
+        if (post.getIntentType() != PostIntentType.ASK && post.getIntentType() != PostIntentType.OFFER) {
+            throw new BadRequestException("Only a need or an offer can be paused");
+        }
+        switch (status.trim().toLowerCase()) {
+            case "paused" -> {
+                if (post.getStatus() != PostStatus.PAUSED) {
+                    if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL) {
+                        throw new BadRequestException("This post is already " + post.getStatus().wireValue());
+                    }
+                    post.setStatus(PostStatus.PAUSED);
+                }
+            }
+            case "open" -> {
+                if (post.getStatus() == PostStatus.PAUSED) {
+                    boolean full = post.getCapacity() != null && post.getSpotsFilled() >= post.getCapacity();
+                    post.setStatus(full ? PostStatus.FULL : PostStatus.OPEN);
+                } else if (post.getStatus() != PostStatus.OPEN && post.getStatus() != PostStatus.FULL) {
+                    throw new BadRequestException("This post is already " + post.getStatus().wireValue());
+                }
+            }
+            default -> throw new BadRequestException("status must be one of paused, open, closed");
+        }
+        postRepository.save(post);
+        return mapper.toResponse(post, userId, myJoinStatus(post, userId), roomIdFor(post));
+    }
+
     @Transactional
     public PostResponse cancel(UUID userId, UUID postId) {
+        return cancel(userId, postId, null);
+    }
+
+    // Flow A11: the reason goes to everyone who joined. Optional on the API so existing callers
+    // keep working; the app's cancel sheet requires it.
+    @Transactional
+    public PostResponse cancel(UUID userId, UUID postId, String reason) {
         Post post = requireLockedPost(postId);
         if (!post.getAuthorUser().getId().equals(userId)) {
             throw new AccessDeniedException("Not your post");
@@ -457,6 +633,7 @@ public class PostService {
             throw new BadRequestException("This post is already " + post.getStatus().wireValue());
         }
         post.setStatus(PostStatus.CANCELLED);
+        post.setCancelReason(blankToNull(reason));
         postRepository.save(post);
         roomService.notifyRoomOfCancellation(post);
         return mapper.toResponse(post, userId, null, roomIdFor(post));
@@ -491,6 +668,14 @@ public class PostService {
 
     @Transactional
     public PostJoinRequestResponse requestJoin(UUID userId, UUID postId) {
+        return requestJoin(userId, postId, false, null);
+    }
+
+    // ActivitiesService.join saves the answers to the host's questions first, then calls this with
+    // answersSaved = true. The plain POST /posts/{id}/joins can't carry answers, so it is refused
+    // for an activity whose host asks a required question (G8).
+    @Transactional
+    public PostJoinRequestResponse requestJoin(UUID userId, UUID postId, boolean answersSaved, String note) {
         Post post = requireLockedPost(postId);
         if (!post.isJoinable()) {
             throw new BadRequestException("This post doesn't accept join requests");
@@ -501,6 +686,10 @@ public class PostService {
         PostJoinRequest existing = postJoinRequestRepository.findByPostIdAndUserId(postId, userId).orElse(null);
         if (existing != null && existing.getStatus() != PostJoinStatus.WITHDRAWN && existing.getStatus() != PostJoinStatus.DECLINED) {
             throw new BadRequestException("You've already requested to join this post");
+        }
+        if (!answersSaved && post.getIntentType() == PostIntentType.ACTIVITY
+                && activityQuestionRepository.existsByPostIdAndRequiredTrue(postId)) {
+            throw new BadRequestException("The host asks a question before you join. Answer it to send your request.");
         }
         requireOpenCapacity(post);
         if (blockService.isBlockedEitherDirection(userId, post.getAuthorUser().getId())) {
@@ -519,7 +708,17 @@ public class PostService {
         PostJoinRequest joinRequest = existing != null ? existing : PostJoinRequest.builder().post(post).user(user).build();
         joinRequest.setStatus(autoApprove ? PostJoinStatus.APPROVED : PostJoinStatus.PENDING);
         joinRequest.setDecidedAt(autoApprove ? Instant.now() : null);
+        joinRequest.setNote(note);
+        joinRequest.setDecisionNote(null);
         joinRequest = postJoinRequestRepository.save(joinRequest);
+        // Got in (or asked) directly: any place they held in the queue is used up.
+        activityWaitlistRepository.findByPostIdAndUserId(postId, userId)
+                .filter(w -> w.getStatus() == WaitlistStatus.WAITING)
+                .ifPresent(w -> {
+                    w.setStatus(WaitlistStatus.PROMOTED);
+                    w.setPromotedAt(Instant.now());
+                    activityWaitlistRepository.save(w);
+                });
 
         if (autoApprove) {
             onJoinApproved(post, joinRequest);
@@ -531,6 +730,12 @@ public class PostService {
 
     @Transactional
     public PostJoinRequestResponse decideJoin(UUID userId, UUID postId, UUID joinRequestId, boolean approve) {
+        return decideJoin(userId, postId, joinRequestId, approve, null);
+    }
+
+    // Row 23: the host can add a note to the decision; the joiner sees it with the result.
+    @Transactional
+    public PostJoinRequestResponse decideJoin(UUID userId, UUID postId, UUID joinRequestId, boolean approve, String note) {
         Post post = requireLockedPost(postId);
         if (!post.getAuthorUser().getId().equals(userId)) {
             throw new AccessDeniedException("Not your post");
@@ -554,12 +759,16 @@ public class PostService {
         }
 
         joinRequest.setStatus(approve ? PostJoinStatus.APPROVED : PostJoinStatus.DECLINED);
+        joinRequest.setDecisionNote(note == null || note.isBlank() ? null : note.trim());
         joinRequest.setDecidedAt(Instant.now());
         postJoinRequestRepository.save(joinRequest);
 
         if (approve) {
             onJoinApproved(post, joinRequest);
         } else {
+            if (joinRequest.getDecisionNote() != null) {
+                notificationService.notifyActivity(joinRequest.getUser(), "A note from the host", joinRequest.getDecisionNote());
+            }
             notificationService.notifyPostJoinDeclined(joinRequest);
         }
         return mapper.toResponse(joinRequest);
@@ -584,6 +793,7 @@ public class PostService {
             postRepository.save(post);
         }
         notificationService.notifyPostJoinWithdrawn(post, joinRequest.getUser().getName(), hadJoined);
+        if (hadJoined) promoteFromWaitlist(post);
         return mapper.toResponse(joinRequest);
     }
 
@@ -607,6 +817,19 @@ public class PostService {
         if (joinRequest.getStatus() != PostJoinStatus.APPROVED) {
             throw new BadRequestException("Only someone who joined can be marked present or absent");
         }
+        // G11: when it was recorded starts the 72h dispute window. A dispute the host already
+        // accepted can't be turned back into a no-show; marking present accepts an open one.
+        ActivityAttendance attendance = activityAttendanceRepository.findByJoinRequestId(joinRequest.getId())
+                .orElseGet(() -> ActivityAttendance.builder().joinRequest(joinRequest).build());
+        if (outcome == PostJoinOutcome.NO_SHOW && attendance.getDisputeStatus() == DisputeStatus.ACCEPTED) {
+            throw new BadRequestException("You accepted this person's dispute, so they stay marked present");
+        }
+        if (outcome == PostJoinOutcome.ATTENDED && attendance.getDisputeStatus() == DisputeStatus.OPEN) {
+            attendance.setDisputeStatus(DisputeStatus.ACCEPTED);
+            attendance.setDisputeResolvedAt(Instant.now());
+        }
+        attendance.setOutcomeRecordedAt(Instant.now());
+        activityAttendanceRepository.save(attendance);
         joinRequest.setOutcome(outcome);
         postJoinRequestRepository.save(joinRequest);
         notificationService.notifyJoinOutcome(joinRequest);
@@ -638,6 +861,47 @@ public class PostService {
         postRepository.save(post);
 
         notificationService.notifyPostJoinApproved(joinRequest);
+        if (post.getIntentType() == PostIntentType.ACTIVITY) reminderService.addDefaults(post, joinRequest.getUser());
+    }
+
+    // G9: a spot opened (someone who had joined left). The first eligible person in the queue
+    // gets it: straight in for an open activity, or a request to the host for an approval one.
+    // One spot, one promotion; people who can no longer join are skipped, not left blocking.
+    private void promoteFromWaitlist(Post post) {
+        if (post.getIntentType() != PostIntentType.ACTIVITY || post.getStatus() != PostStatus.OPEN) return;
+        if (post.getStartsAt() != null && !post.getStartsAt().isAfter(Instant.now())) return;
+        for (ActivityWaitlistEntry entry : activityWaitlistRepository
+                .findByPostIdAndStatusOrderByJoinedAtAscIdAsc(post.getId(), WaitlistStatus.WAITING)) {
+            User user = entry.getUser();
+            boolean eligible = !blockService.isBlockedEitherDirection(user.getId(), post.getAuthorUser().getId())
+                    && user.getDateOfBirth() != null && AgeUtil.isAdult(user.getDateOfBirth())
+                    && user.getDeletedAt() == null
+                    && (post.getRequiredVerificationLevel() == null || user.getVerificationLevel().atLeast(post.getRequiredVerificationLevel()));
+            if (!eligible) {
+                entry.setStatus(WaitlistStatus.SKIPPED);
+                activityWaitlistRepository.save(entry);
+                continue;
+            }
+            entry.setStatus(WaitlistStatus.PROMOTED);
+            entry.setPromotedAt(Instant.now());
+            activityWaitlistRepository.save(entry);
+
+            PostJoinRequest joinRequest = postJoinRequestRepository.findByPostIdAndUserId(post.getId(), user.getId())
+                    .orElseGet(() -> PostJoinRequest.builder().post(post).user(user).build());
+            boolean autoApprove = post.getVisibility() == PostVisibility.PUBLIC;
+            joinRequest.setStatus(autoApprove ? PostJoinStatus.APPROVED : PostJoinStatus.PENDING);
+            joinRequest.setDecidedAt(autoApprove ? Instant.now() : null);
+            joinRequest.setOutcome(null);
+            joinRequest = postJoinRequestRepository.save(joinRequest);
+            if (autoApprove) {
+                onJoinApproved(post, joinRequest);
+            } else {
+                notificationService.notifyPostJoinRequested(post, joinRequest);
+                notificationService.notifyActivity(user, "A spot opened up",
+                        "You were next on the waitlist. Your request is now with the host.");
+            }
+            return;
+        }
     }
 
     private void requireAdult(User user) {
@@ -649,9 +913,17 @@ public class PostService {
         }
     }
 
+    // Every discovery list (feed, trending, discussions, search, nearby) goes through here: no
+    // blocked people, and no link-only activity (row 23 reach "link") unless it's the viewer's own.
     private List<Post> excludeBlocked(List<Post> posts, UUID viewingUserId) {
-        if (viewingUserId == null || posts.isEmpty()) return posts;
-        return posts.stream().filter(p -> !blockService.isBlockedEitherDirection(viewingUserId, p.getAuthorUser().getId())).toList();
+        if (posts.isEmpty()) return posts;
+        List<Post> discoverable = posts.stream()
+                .filter(p -> !p.isLinkOnly() || p.getAuthorUser().getId().equals(viewingUserId)).toList();
+        if (viewingUserId == null) return discoverable;
+        // One query for the viewer's blocks, not two per post (PERFORMANCE.md).
+        java.util.Set<UUID> blocked = blockService.blockedEitherDirection(viewingUserId);
+        if (blocked.isEmpty()) return discoverable;
+        return discoverable.stream().filter(p -> !blocked.contains(p.getAuthorUser().getId())).toList();
     }
 
     private String myJoinStatus(Post post, UUID viewingUserId) {
@@ -733,6 +1005,24 @@ public class PostService {
     // follow the same contract. A post with a null embedding just falls out of similarity-based
     // ranking until the next successful embed, which is a much smaller failure than blocking
     // post creation entirely.
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
+    }
+
+    private static Instant parseInstant(String value, String label) {
+        if (value.isBlank()) return null;
+        try {
+            return Instant.parse(value);
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new BadRequestException(label + " must be an ISO-8601 instant");
+        }
+    }
+
+    private static String preview(Post post) {
+        String text = post.getTitle() != null ? post.getTitle() : post.getBody();
+        return text.length() > 60 ? text.substring(0, 60) + "…" : text;
+    }
+
     private float[] embedOrNull(String text) {
         try {
             return embeddingProvider.embed(text);

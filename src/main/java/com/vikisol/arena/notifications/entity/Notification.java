@@ -31,4 +31,11 @@ public class Notification extends BaseEntity {
     @Column(nullable = false)
     @Builder.Default
     private boolean read = false;
+
+    // Row 16 (V37): activity | need | job | message | safety, or null when it fits none; and a
+    // snooze - hidden from the list until then.
+    @Column(length = 16)
+    private String category;
+
+    private java.time.Instant snoozedUntil;
 }

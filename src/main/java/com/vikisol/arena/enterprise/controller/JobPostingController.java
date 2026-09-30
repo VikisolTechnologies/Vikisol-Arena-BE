@@ -48,6 +48,14 @@ public class JobPostingController {
         return ResponseEntity.ok(ApiResponse.ok("Posting created", jobPostingService.createPosting(principal.getId(), request)));
     }
 
+    // Row 28: edit in place.
+    @PatchMapping("/{id}")
+    public ResponseEntity<ApiResponse<JobPostingResponse>> updatePosting(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+            @Valid @RequestBody com.vikisol.arena.enterprise.dto.UpdatePostingRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Posting updated", jobPostingService.updatePosting(principal.getId(), id, request)));
+    }
+
     @PutMapping("/{id}/status")
     public ResponseEntity<ApiResponse<Void>> setStatus(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody SetPostingStatusRequest request) {

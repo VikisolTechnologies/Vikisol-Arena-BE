@@ -27,6 +27,8 @@ public class PlatformUserService {
     private final MembershipRepository membershipRepository;
     private final CandidateProfileService candidateProfileService;
     private final AuditService auditService;
+    private final com.vikisol.arena.privacy.PersonalDataService personalDataService;
+    private final com.vikisol.arena.security.jwt.RefreshTokenService refreshTokenService;
 
     @Transactional(readOnly = true)
     public PagedResponse<PlatformUserResponse> search(String query, String roleWire, Pageable pageable) {
@@ -55,10 +57,23 @@ public class PlatformUserService {
     public void eraseAccount(UUID actorUserId, UUID targetUserId) {
         User target = userRepository.findById(targetUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found: " + targetUserId));
-        if (target.getRole() != Role.TALENT) {
-            throw new BadRequestException("Only talent accounts can be erased this way - " + target.getRole().wireValue() + " accounts aren't supported.");
-        }
         String targetDescription = target.getName() + " (" + target.getEmail() + ")";
+        if (target.getRole() == Role.RECRUITER || target.getRole() == Role.HIRING_MANAGER) {
+            // Architect item 4: a team member's own entries (recruiter notes, assessments, stage
+            // messages, connect requests) are erased with the account. The company's records -
+            // postings, pipeline stages - stay with the company.
+            personalDataService.erase(targetUserId);
+            target.setName("Deleted user");
+            target.setDeletedAt(java.time.Instant.now());
+            userRepository.save(target);
+            refreshTokenService.revokeAllForUser(targetUserId);
+            auditService.record(null, actorUserId, AuditActions.ACCOUNT_ERASED_BY_ADMIN, targetDescription);
+            return;
+        }
+        if (target.getRole() != Role.TALENT) {
+            throw new BadRequestException("Only talent, recruiter and hiring manager accounts can be erased this way - "
+                    + target.getRole().wireValue() + " accounts aren't supported.");
+        }
         candidateProfileService.eraseAccountAsAdmin(targetUserId);
         auditService.record(null, actorUserId, AuditActions.ACCOUNT_ERASED_BY_ADMIN, targetDescription);
     }

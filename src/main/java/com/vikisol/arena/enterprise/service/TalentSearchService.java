@@ -3,6 +3,7 @@ package com.vikisol.arena.enterprise.service;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.audit.AuditActions;
 import com.vikisol.arena.audit.AuditService;
+import com.vikisol.arena.career.service.CompensationPolicy;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.common.exception.BadRequestException;
@@ -70,8 +71,10 @@ public class TalentSearchService {
         batchFetchSkillsAndOpenTo(candidateIds);
         Set<UUID> unlockedIds = batchUnlockedCandidateIds(enterprise.getId(), candidateIds);
         Set<UUID> appliedIds = batchAppliedCandidateIds(enterprise.getId(), candidateIds);
+        Set<UUID> ctcShared = candidateIds.isEmpty() ? Set.of()
+                : new HashSet<>(applicationRepository.findCandidateIdsSharingCtcWithEnterprise(candidateIds, enterprise.getId()));
 
-        return PagedResponse.of(page, c -> toResult(c, unlockedIds, appliedIds));
+        return PagedResponse.of(page, c -> toResult(c, unlockedIds, appliedIds, ctcShared));
     }
 
     private void batchFetchSkillsAndOpenTo(List<UUID> candidateIds) {
@@ -108,7 +111,10 @@ public class TalentSearchService {
         CandidateProfile candidate = candidateProfileRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate not found: " + id));
         EnterpriseProfile enterprise = requireEnterprise(enterpriseUserId);
-        return redactIfLocked(candidateProfileMapper.toResponse(candidate), enterprise, candidate.getId());
+        boolean unlocked = unlockedCandidateRepository.existsByEnterpriseIdAndCandidateId(enterprise.getId(), candidate.getId());
+        boolean applied = applicationRepository.existsByCandidateIdAndJobPostingEnterpriseId(candidate.getId(), enterprise.getId());
+        boolean pay = CompensationPolicy.employerMaySee(applicationRepository.ctcSharedWithEnterprise(candidate.getId(), enterprise.getId()));
+        return redactIfLocked(candidateProfileMapper.toResponse(candidate), unlocked || applied, pay);
     }
 
     @Transactional
@@ -125,7 +131,7 @@ public class TalentSearchService {
         }
         if (enterprise.getUnlockCreditsUsed() >= enterprise.getUnlockCreditsTotal()) {
             throw new BadRequestException("You're out of unlock credits on the " + enterprise.getPlan().wireValue()
-                    + " plan. Upgrade your plan to unlock more candidate profiles.");
+                    + " plan. Write to Arena's team for more unlocks.");
         }
         CandidateProfile candidate = candidateProfileRepository.findById(candidateId)
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate not found: " + candidateId));
@@ -158,46 +164,25 @@ public class TalentSearchService {
 
     // Batched call site (search) - unlocked/applied state precomputed for the whole page, see
     // batchUnlockedCandidateIds/batchAppliedCandidateIds.
-    private TalentSearchResult toResult(CandidateProfile candidate, Set<UUID> unlockedIds, Set<UUID> appliedIds) {
+    private TalentSearchResult toResult(CandidateProfile candidate, Set<UUID> unlockedIds, Set<UUID> appliedIds,
+                                        Set<UUID> ctcShared) {
         boolean unlocked = unlockedIds.contains(candidate.getId());
+        boolean applied = appliedIds.contains(candidate.getId());
         int matchPercentage = scoringService.computeMatchPercentage(candidate, Set.of(), null);
-        boolean fullAccess = unlocked || appliedIds.contains(candidate.getId());
+        boolean pay = CompensationPolicy.employerMaySee(ctcShared.contains(candidate.getId()));
         return new TalentSearchResult(
-                redactIfLocked(candidateProfileMapper.toResponse(candidate), fullAccess), matchPercentage,
+                redactIfLocked(candidateProfileMapper.toResponse(candidate), unlocked || applied, pay), matchPercentage,
                 IndianData.pick(FIT_BLURBS), String.join(", ", candidate.getOpenTo().stream().map(o -> o.wireValue()).toList()),
                 unlocked);
     }
 
-    // Single-item call site (getCandidateDetail) - two queries, fine for a one-off lookup outside
-    // the paginated search hot path.
-    private CandidateProfileResponse redactIfLocked(CandidateProfileResponse response, EnterpriseProfile enterprise, UUID candidateId) {
-        boolean fullAccess = unlockedCandidateRepository.existsByEnterpriseIdAndCandidateId(enterprise.getId(), candidateId)
-                || applicationRepository.existsByCandidateIdAndJobPostingEnterpriseId(candidateId, enterprise.getId());
-        return redactIfLocked(response, fullAccess);
-    }
-
-    // The only actually-paywalled field: the CV file link. Everything else (skills, title,
-    // location, career health) is meant to be visible pre-unlock so a recruiter can decide
-    // whether a candidate is worth a credit at all - only the resume itself is gated.
-    //
-    // Phase B geo fields (homeCity/approxLat/approxLng) are ALWAYS stripped here, regardless of
-    // unlock status - ARENA-V2-PRODUCT-ARCHITECTURE.md §5's location consent is scoped to
-    // peer-to-peer activity discovery (Feed/Map), never to enterprise recruiter search, and no
-    // unlock-credit "pays for" a candidate's approximate home location. locationConsent (just
-    // the tier label, e.g. "off"/"city"/"precise") is harmless to leave visible on its own.
-    private CandidateProfileResponse redactIfLocked(CandidateProfileResponse response, boolean fullAccess) {
-        return new CandidateProfileResponse(
-                response.id(), response.name(), response.avatarEmoji(), response.title(), response.industry(),
-                response.location(), response.remote(), response.skills(), response.experienceYears(), response.rateFloor(),
-                response.openTo(), response.careerHealth(), response.consent(), response.autonomy(), response.bio(),
-                fullAccess ? response.cvUrl() : null, fullAccess ? response.cvFileName() : null,
-                response.locationConsent(), null, null, null,
-                response.cameForJob(),
-                fullAccess ? response.organization() : null,
-                fullAccess ? response.currentCtc() : null,
-                fullAccess ? response.expectedCtc() : null,
-                fullAccess ? response.preferredLocation() : null,
-                fullAccess);
+    // The only actually-paywalled field is the CV file link; everything else (skills, title,
+    // location, career health) is visible pre-unlock so a recruiter can decide whether a candidate
+    // is worth a credit. Pay follows CompensationPolicy (private unless the candidate chose
+    // otherwise, G21) and the approximate home location is never shown to an enterprise - see
+    // CandidateProfileMapper.forEmployer.
+    private CandidateProfileResponse redactIfLocked(CandidateProfileResponse response, boolean fullAccess, boolean compensationVisible) {
+        return candidateProfileMapper.forEmployer(response, fullAccess, compensationVisible);
     }
 
     private EnterpriseProfile requireEnterprise(UUID userId) {

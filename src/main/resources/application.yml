@@ -24,6 +24,10 @@ spring:
     username: ${DB_USERNAME:postgres}
     password: ${DB_PASSWORD:Welcome@12345#}
     driver-class-name: org.postgresql.Driver
+    # PERFORMANCE.md: HikariCP's own default (10), made adjustable without a code change. Load
+    # tests on 2 vCPU showed no gain from 5 or 20 - the app is CPU-bound, not connection-bound.
+    hikari:
+      maximum-pool-size: ${DB_POOL_SIZE:10}
 
   jpa:
     hibernate:
@@ -65,6 +69,11 @@ spring:
 
 app:
   frontend-url: ${FRONTEND_URL:http://localhost:3000}
+
+  # PERFORMANCE.md: feed and trending share one candidate window for this many seconds (cleared on
+  # every post write after commit). 0 turns the cache off.
+  feed:
+    window-cache-seconds: ${FEED_WINDOW_CACHE_SECONDS:5}
 
   jwt:
     # Local-dev-only fallback, never used in a real deployment - same pattern as HRLMS-BE. A
@@ -154,6 +163,9 @@ app:
     upload-per-minute: ${RATE_LIMIT_UPLOAD_PER_MIN:5}
     unlock-per-minute: ${RATE_LIMIT_UNLOCK_PER_MIN:20}
     messaging-per-minute: ${RATE_LIMIT_MESSAGING_PER_MIN:30}
+    # Reading conversations and threads (GET), per user. The frontend polls the open thread every
+    # 5 s while it is visible and the conversation list every 30 s (API-CHANGES.md).
+    messaging-read-per-minute: ${RATE_LIMIT_MESSAGING_READ_PER_MIN:60}
     # ARENA-V2-PRODUCT-ARCHITECTURE.md §4 (Phase B).
     post-creation-per-minute: ${RATE_LIMIT_POST_CREATION_PER_MIN:5}
     join-request-per-minute: ${RATE_LIMIT_JOIN_REQUEST_PER_MIN:10}

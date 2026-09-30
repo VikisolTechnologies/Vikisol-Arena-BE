@@ -127,6 +127,15 @@ public class RoomService {
                         .ifPresent(roomMemberRepository::delete));
     }
 
+    // Room ids for a page of posts in one query (PERFORMANCE.md).
+    @Transactional(readOnly = true)
+    public java.util.Map<UUID, String> findRoomIdsForPosts(java.util.Collection<UUID> postIds) {
+        if (postIds.isEmpty()) return java.util.Map.of();
+        java.util.Map<UUID, String> out = new java.util.HashMap<>();
+        for (Room r : roomRepository.findByPostIdIn(postIds)) out.put(r.getPost().getId(), r.getId().toString());
+        return out;
+    }
+
     @Transactional(readOnly = true)
     public Optional<String> findRoomIdForPost(UUID postId) {
         return roomRepository.findByPostId(postId).map(r -> r.getId().toString());
@@ -208,6 +217,11 @@ public class RoomService {
 
     @Transactional
     public void report(UUID userId, UUID roomId, String reason) {
+        report(userId, roomId, reason, null);
+    }
+
+    @Transactional
+    public void report(UUID userId, UUID roomId, String reason, java.util.List<String> evidence) {
         Room room = requireRoom(roomId);
         assertRoomMember(userId, room);
         User reporter = requireUser(userId);
@@ -215,7 +229,7 @@ public class RoomService {
         // makes this actionable in the platform-admin queue - ARENA-V2-PRODUCT-ARCHITECTURE.md
         // §4's explicit "wired into the platform-admin moderation queue" requirement.
         roomReportRepository.save(RoomReport.builder().room(room).reporter(reporter).reason(reason).build());
-        moderationService.fileRoomReport(room, reporter, reason);
+        moderationService.fileRoomReport(room, reporter, reason, evidence);
     }
 
     @Transactional

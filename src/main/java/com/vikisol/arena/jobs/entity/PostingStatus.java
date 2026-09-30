@@ -1,8 +1,9 @@
 package com.vikisol.arena.jobs.entity;
 
 // Mirrors arena-web's `PostingStatus` type ("open" | "paused" | "closed").
+// DRAFT (row 28): written but not published - only the company team sees it.
 public enum PostingStatus {
-    OPEN, PAUSED, CLOSED;
+    DRAFT, OPEN, PAUSED, CLOSED;
 
     public String wireValue() {
         return name().toLowerCase();

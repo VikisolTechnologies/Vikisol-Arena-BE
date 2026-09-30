@@ -53,6 +53,10 @@ public class RateLimitFilter extends OncePerRequestFilter {
     private int unlockPerMinute;
     @Value("${app.rate-limit.messaging-per-minute:30}")
     private int messagingPerMinute;
+    // Reads (GET) get their own, larger bucket: polling a thread every 5 s and the list every
+    // 30 s must not use up the allowance for sending (architect decision, 30 Sep 2026).
+    @Value("${app.rate-limit.messaging-read-per-minute:60}")
+    private int messagingReadPerMinute;
     // ARENA-V2-PRODUCT-ARCHITECTURE.md §4 "rate limits on posting and joining" (Phase B).
     @Value("${app.rate-limit.post-creation-per-minute:5}")
     private int postCreationPerMinute;
@@ -92,9 +96,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
         chain.doFilter(request, response);
     }
 
-    private record Bucket(String name, int limit) {}
+    record Bucket(String name, int limit) {}
 
-    private Bucket bucketFor(HttpServletRequest request) {
+    Bucket bucketFor(HttpServletRequest request) {
         String path = request.getRequestURI();
         if (path.contains("/auth/signin") || path.contains("/auth/signup") || path.contains("/auth/refresh")
                 || path.contains("/auth/2fa/") || path.contains("/auth/google") || path.contains("/auth/phone/")
@@ -112,7 +116,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
             return new Bucket("unlock", unlockPerMinute);
         }
         if (path.contains("/messages/")) {
-            return new Bucket("messaging", messagingPerMinute);
+            return "GET".equalsIgnoreCase(request.getMethod())
+                    ? new Bucket("messaging-read", messagingReadPerMinute)
+                    : new Bucket("messaging", messagingPerMinute);
         }
         if (path.endsWith("/joins") && "POST".equalsIgnoreCase(request.getMethod())) {
             return new Bucket("join-request", joinRequestPerMinute);

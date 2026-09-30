@@ -7,6 +7,9 @@ public final class AuditActions {
 
     public static final String POSTING_CREATED = "posting.created";
     public static final String POSTING_CLOSED = "posting.closed";
+    public static final String POSTING_UPDATED = "posting.updated";
+    public static final String BUSINESS_DOMAIN_CONFIRMED = "business.domain_confirmed";
+    public static final String BUSINESS_REJECTED = "business.rejected";
     public static final String CANDIDATE_UNLOCKED = "candidate.unlocked";
     public static final String CREDIT_SPENT = "credit.spent";
     public static final String CREDIT_GRANTED = "credit.granted";
@@ -39,4 +42,11 @@ public final class AuditActions {
     // this on a user's behalf," per ADR-003's own re-derive-authorization-independently principle.
     public static final String AGENT_ACTION_AUTHORIZED = "agent.action.authorized";
     public static final String AGENT_ACTION_DENIED = "agent.action.denied";
+
+    // G27: a company admin confirmed the domain code.
+    public static final String BUSINESS_VERIFIED = "business.verified";
+    // Verification grandfathering (V39): companies marked verified-legacy when the flag went on,
+    // and an admin ending one company's legacy status after review.
+    public static final String BUSINESS_GRANDFATHERED = "business.grandfathered";
+    public static final String BUSINESS_LEGACY_ENDED = "business.legacy_ended";
 }

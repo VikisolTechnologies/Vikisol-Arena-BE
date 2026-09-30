@@ -1,5 +1,7 @@
 package com.vikisol.arena.enterprise.service;
 
+import com.vikisol.arena.business.service.BusinessVerificationService;
+import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.dto.EnterpriseProfileResponse;
 import com.vikisol.arena.enterprise.dto.UpdateEnterpriseProfileRequest;
@@ -26,6 +28,7 @@ public class EnterpriseProfileService {
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final MembershipRepository membershipRepository;
     private final EnterpriseProfileMapper mapper;
+    private final com.vikisol.arena.common.service.FileStorageService fileStorageService;
 
     // Single source of truth for "which tenant does this enterprise-ish user belong to" -
     // resolves via Membership (recruiter/company_admin/hiring_manager all covered uniformly),
@@ -84,6 +87,37 @@ public class EnterpriseProfileService {
         profile.setIndustry(Industry.fromWireValue(request.industry()));
         profile.setSize(CompanySize.fromWireValue(request.size()));
         profile.setHiringFor(request.hiringFor());
+        if (request.website() != null) {
+            String w = request.website().trim();
+            if (!w.isEmpty() && !w.matches("(https?://)?[A-Za-z0-9.-]+\\.[A-Za-z]{2,}(/\\S*)?")) throw new BadRequestException("That website doesn't look right");
+            profile.setWebsite(w.isEmpty() ? null : w);
+        }
+        if (request.gstin() != null) profile.setGstin(BusinessVerificationService.companyId(request.gstin(), BusinessVerificationService.GSTIN, "GSTIN"));
+        if (request.cin() != null) profile.setCin(BusinessVerificationService.companyId(request.cin(), BusinessVerificationService.CIN, "CIN"));
+        if (request.hqCity() != null) profile.setHqCity(request.hqCity().isBlank() ? null : request.hqCity().trim());
+        return mapper.toResponse(enterpriseProfileRepository.save(profile));
+    }
+
+    // Row 29: the company logo, an image uploaded like a profile photo. The old file is removed.
+    @Transactional
+    public EnterpriseProfileResponse uploadLogo(UUID userId, org.springframework.web.multipart.MultipartFile file) {
+        String name = file == null ? null : file.getOriginalFilename();
+        String extension = name != null && name.contains(".") ? name.substring(name.lastIndexOf('.')).toLowerCase(java.util.Locale.ROOT) : "";
+        if (!java.util.Set.of(".png", ".jpg", ".jpeg", ".webp").contains(extension)) {
+            throw new BadRequestException("A logo must be a PNG, JPG or WebP image");
+        }
+        EnterpriseProfile profile = getEntityForUser(userId);
+        var stored = fileStorageService.store(file, "company-logo", profile.getId().toString(), "logo");
+        if (profile.getLogoUrl() != null) fileStorageService.delete(profile.getLogoUrl());
+        profile.setLogoUrl(stored.url());
+        return mapper.toResponse(enterpriseProfileRepository.save(profile));
+    }
+
+    @Transactional
+    public EnterpriseProfileResponse deleteLogo(UUID userId) {
+        EnterpriseProfile profile = getEntityForUser(userId);
+        if (profile.getLogoUrl() != null) fileStorageService.delete(profile.getLogoUrl());
+        profile.setLogoUrl(null);
         return mapper.toResponse(enterpriseProfileRepository.save(profile));
     }
 }

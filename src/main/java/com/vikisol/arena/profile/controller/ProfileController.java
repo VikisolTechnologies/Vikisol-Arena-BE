@@ -6,6 +6,9 @@ import com.vikisol.arena.profile.dto.CandidateDataExport;
 import com.vikisol.arena.profile.dto.CandidateProfileResponse;
 import com.vikisol.arena.profile.dto.ConsentDto;
 import com.vikisol.arena.profile.dto.LocationConsentRequest;
+import com.vikisol.arena.profile.dto.PatchProfileRequest;
+import com.vikisol.arena.profile.dto.ProfileBasicsResponse;
+import com.vikisol.arena.profile.dto.ProfileListRequest;
 import com.vikisol.arena.profile.dto.PublicCandidateProfileResponse;
 import com.vikisol.arena.profile.dto.UpdateAutonomyRequest;
 import com.vikisol.arena.profile.dto.UpdateProfileDetailsRequest;
@@ -52,6 +55,56 @@ public class ProfileController {
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
         UUID viewerId = principal == null ? null : principal.getId();
         return ResponseEntity.ok(ApiResponse.ok(profileService.getPublicProfile(id, viewerId)));
+    }
+
+    // --- FE-API-GAPS 1-5: onboarding basics (see API-CHANGES.md) ---
+
+    @GetMapping("/me/basics")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> getBasics(@AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.getBasics(principal.getId())));
+    }
+
+    @PatchMapping("/me")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> patch(
+            @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody PatchProfileRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.patch(principal.getId(), request)));
+    }
+
+    @PutMapping("/me/intents")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> setIntents(
+            @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody ProfileListRequest.Intents request) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.setIntents(principal.getId(), request.intents())));
+    }
+
+    // Row 18: who can find you in people search - nearby | everyone | hidden.
+    @GetMapping("/me/visibility")
+    public ResponseEntity<ApiResponse<VisibilityBody>> visibility(@AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.ok(new VisibilityBody(profileService.visibility(principal.getId()))));
+    }
+
+    @PutMapping("/me/visibility")
+    public ResponseEntity<ApiResponse<VisibilityBody>> setVisibility(@AuthenticationPrincipal UserPrincipal principal, @RequestBody VisibilityBody request) {
+        return ResponseEntity.ok(ApiResponse.ok(new VisibilityBody(profileService.setVisibility(principal.getId(), request.profile()))));
+    }
+
+    public record VisibilityBody(String profile) {
+    }
+
+    @PutMapping("/me/interests")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> setInterests(
+            @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody ProfileListRequest.Interests request) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.setInterests(principal.getId(), request.interests())));
+    }
+
+    @PostMapping(value = "/me/photo", consumes = "multipart/form-data")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> uploadPhoto(
+            @AuthenticationPrincipal UserPrincipal principal, @RequestParam("file") MultipartFile file) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.uploadPhoto(principal.getId(), file)));
+    }
+
+    @DeleteMapping("/me/photo")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> deletePhoto(@AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.deletePhoto(principal.getId())));
     }
 
     @PutMapping("/me/details")

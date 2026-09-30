@@ -25,6 +25,10 @@ public interface FollowRepository extends JpaRepository<Follow, UUID> {
     @Query("select f.followingUser.id from Follow f where f.followerUser.id = :followerUserId")
     List<UUID> findFollowingUserIdsByFollowerUserId(@Param("followerUserId") UUID followerUserId);
 
+    // Companies someone follows, in one query (PERFORMANCE.md: the feed checked each company).
+    @Query("select f.followingCompany.id from Follow f where f.followerUser.id = :followerUserId and f.followingCompany is not null")
+    List<UUID> findFollowingCompanyIdsByFollowerUserId(@Param("followerUserId") UUID followerUserId);
+
     // Newest first; id breaks same-instant ties so page boundaries are stable.
     @EntityGraph(attributePaths = "followerUser")
     Page<Follow> findByFollowingUserIdOrderByCreatedAtDescIdDesc(UUID followingUserId, Pageable pageable);
@@ -38,6 +42,10 @@ public interface FollowRepository extends JpaRepository<Follow, UUID> {
     boolean existsByFollowerUserIdAndFollowingCompanyId(UUID followerUserId, UUID followingCompanyId);
 
     long countByFollowingCompanyId(UUID followingCompanyId);
+
+    // Follower counts for a page of companies in one query (PERFORMANCE.md).
+    @Query("select f.followingCompany.id, count(f) from Follow f where f.followingCompany.id in :ids group by f.followingCompany.id")
+    List<Object[]> countFollowersByCompanyIds(@Param("ids") java.util.Collection<UUID> ids);
 
     // DemoContentService.removeAll() - a demo candidate can be followed by, or follow, a real
     // account during the review window; both directions have to go before the demo User itself.

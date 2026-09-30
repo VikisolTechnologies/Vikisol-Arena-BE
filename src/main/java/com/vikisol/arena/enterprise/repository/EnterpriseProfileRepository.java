@@ -55,4 +55,18 @@ public interface EnterpriseProfileRepository extends JpaRepository<EnterprisePro
 
     // DemoContentService - see PostRepository.findByDemoContentTrue()'s own comment.
     List<EnterpriseProfile> findByDemoContentTrue();
+
+    // Verification grandfathering (V39, DECISIONS.md): every company not verified at the moment
+    // company_verification_required switches on keeps publishing as "verified-legacy".
+    @org.springframework.data.jpa.repository.Modifying(flushAutomatically = true, clearAutomatically = true)
+    @Query("""
+            update EnterpriseProfile e set e.verificationGrandfatheredAt = :at
+            where e.verificationGrandfatheredAt is null
+              and not exists (select 1 from com.vikisol.arena.business.entity.BusinessVerification v
+                              where v.tenant = e and v.status = com.vikisol.arena.business.entity.BusinessVerification.Status.VERIFIED)
+            """)
+    int grandfatherUnverified(@Param("at") Instant at);
+
+    org.springframework.data.domain.Page<EnterpriseProfile> findByVerificationGrandfatheredAtIsNotNullOrderByVerificationGrandfatheredAtAscIdAsc(
+            org.springframework.data.domain.Pageable pageable);
 }

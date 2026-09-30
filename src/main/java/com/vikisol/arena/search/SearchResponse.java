@@ -15,6 +15,13 @@ public record SearchResponse(
         List<PostResponse> discussions,
         List<JobResponse> jobs,
         List<ProjectResponse> projects,
-        List<CompanyResponse> companies
+        List<CompanyResponse> companies,
+        // Row 17 (added): people, for type=people or type=skills and a signed-in searcher only.
+        List<PersonResult> people
 ) {
+    // distanceKm: whole kilometres between the two approximate locations, only when the search
+    // was near a point and the person shares a location.
+    public record PersonResult(String userId, String name, String avatarEmoji, String photoUrl, String title,
+                               List<String> skills, List<String> interests, Integer distanceKm) {
+    }
 }

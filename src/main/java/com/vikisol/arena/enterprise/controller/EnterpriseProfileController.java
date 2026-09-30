@@ -36,6 +36,20 @@ public class EnterpriseProfileController {
         return ResponseEntity.ok(ApiResponse.ok(enterpriseProfileService.updateMyProfile(principal.getId(), request)));
     }
 
+    // Row 29: the company logo (company admin).
+    @PreAuthorize("hasRole('COMPANY_ADMIN')")
+    @PostMapping(value = "/me/logo", consumes = "multipart/form-data")
+    public ResponseEntity<ApiResponse<EnterpriseProfileResponse>> uploadLogo(
+            @AuthenticationPrincipal UserPrincipal principal, @RequestParam("file") org.springframework.web.multipart.MultipartFile file) {
+        return ResponseEntity.ok(ApiResponse.ok(enterpriseProfileService.uploadLogo(principal.getId(), file)));
+    }
+
+    @PreAuthorize("hasRole('COMPANY_ADMIN')")
+    @DeleteMapping("/me/logo")
+    public ResponseEntity<ApiResponse<EnterpriseProfileResponse>> deleteLogo(@AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.ok(enterpriseProfileService.deleteLogo(principal.getId())));
+    }
+
     // HM3: a recruiter needs to pick a hiring manager from their own team when scheduling an
     // interview - TeamService.listMembers() itself stays company_admin-only (CA2's full team
     // management surface), this is a narrower read any workspace member can use.

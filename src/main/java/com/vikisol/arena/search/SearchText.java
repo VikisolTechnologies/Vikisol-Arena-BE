@@ -31,6 +31,16 @@ public final class SearchText {
                 .toList();
     }
 
+    /** True when the word is plain ASCII, so a database lower()/LIKE matches it exactly as Java does. */
+    public static boolean isAscii(String term) {
+        return term.chars().allMatch(c -> c < 128);
+    }
+
+    /** '%word%' for a database LIKE, with LIKE's own wildcards escaped (terms can't contain them today). */
+    public static String likePattern(String term) {
+        return "%" + term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%";
+    }
+
     /** Joins the searchable fields into one lowercase haystack; nulls are skipped. */
     public static String haystack(Object... parts) {
         return Stream.of(parts)
@@ -50,8 +60,27 @@ public final class SearchText {
             if (!inTitle && !rest.contains(term)) return 0;
             score += inTitle ? 3 : 1;
             // Whole-word title hit ("react" in "React developer", not "reactive") ranks above a partial one.
-            if (inTitle && (" " + t + " ").matches("(?s).*[^\\p{L}\\p{N}]" + java.util.regex.Pattern.quote(term) + "[^\\p{L}\\p{N}].*")) score += 1;
+            if (inTitle && wholeWord(t, term)) score += 1;
         }
         return score;
+    }
+
+    // True when `term` occurs in `text` with no letter or digit right before or after it. Same
+    // result as the regex this replaced (PERFORMANCE.md: compiling it per post was a hot spot).
+    static boolean wholeWord(String text, String term) {
+        for (int i = text.indexOf(term); i >= 0; i = text.indexOf(term, i + 1)) {
+            int end = i + term.length();
+            boolean before = i == 0 || !isWordChar(text.codePointBefore(i));
+            boolean after = end == text.length() || !isWordChar(text.codePointAt(end));
+            if (before && after) return true;
+        }
+        return false;
+    }
+
+    private static boolean isWordChar(int cp) {
+        return Character.isLetter(cp) || switch (Character.getType(cp)) {
+            case Character.DECIMAL_DIGIT_NUMBER, Character.LETTER_NUMBER, Character.OTHER_NUMBER -> true;
+            default -> false;
+        };
     }
 }

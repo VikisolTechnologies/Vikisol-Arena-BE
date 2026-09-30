@@ -13,6 +13,8 @@ public record ModerationItemResponse(
         String createdAt,
         // Phase C safety-audit addition - populated only for contentType=POST, so the admin
         // queue and any deep link can point straight at /feed/{postId}.
-        String postId
+        String postId,
+        // Row 15 (added): the evidence files the reporter attached (signed links).
+        java.util.List<String> evidenceUrls
 ) {
 }

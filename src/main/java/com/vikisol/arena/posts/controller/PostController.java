@@ -32,6 +32,8 @@ import java.util.UUID;
 public class PostController {
 
     private final PostService postService;
+    private final com.vikisol.arena.activities.service.ActivitiesService activitiesService;
+    private final com.vikisol.arena.needs.service.NeedService needService;
     private final PostCommentService postCommentService;
     private final PostReactionService postReactionService;
     private final ModerationService moderationService;
@@ -115,10 +117,23 @@ public class PostController {
         return ResponseEntity.ok(ApiResponse.ok(postService.getJoined(principal.getId(), pageable)));
     }
 
+    // No body: resolve a need (the original behaviour). Row 39: { status: paused|open|closed }.
     @PutMapping("/{id}/status")
     public ResponseEntity<ApiResponse<PostResponse>> close(
-            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.closeAsResolved(principal.getId(), id)));
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+            @RequestBody(required = false) StatusRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.setStatus(principal.getId(), id, request == null ? null : request.status())));
+    }
+
+    public record StatusRequest(String status) {
+    }
+
+    // Rows 14/39, flow A10: the owner edits a live post.
+    @PatchMapping("/{id}")
+    public ResponseEntity<ApiResponse<PostResponse>> update(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+            @Valid @RequestBody com.vikisol.arena.posts.dto.UpdatePostRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Post updated", postService.update(principal.getId(), id, request)));
     }
 
     // PART 6 SAVE - kept under /posts (where every other post-interaction endpoint already
@@ -148,13 +163,23 @@ public class PostController {
     @PostMapping
     public ResponseEntity<ApiResponse<PostResponse>> create(
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody CreatePostRequest request) {
-        return ResponseEntity.ok(ApiResponse.ok("Post published", postService.create(principal.getId(), request)));
+        boolean withActivity = request.activity() != null || (request.hostQuestions() != null && !request.hostQuestions().isEmpty());
+        if (withActivity && request.need() != null) throw new com.vikisol.arena.common.exception.BadRequestException("A post is an activity or a need, not both");
+        return ResponseEntity.ok(ApiResponse.ok("Post published", withActivity
+                ? activitiesService.create(principal.getId(), request)
+                : request.need() != null ? needService.create(principal.getId(), request)
+                : postService.create(principal.getId(), request)));
     }
 
+    // Flow A11: optional { reason (≤300) }, sent to everyone who joined.
     @PutMapping("/{id}/cancel")
     public ResponseEntity<ApiResponse<PostResponse>> cancel(
-            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.cancel(principal.getId(), id)));
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+            @Valid @RequestBody(required = false) CancelRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.cancel(principal.getId(), id, request == null ? null : request.reason())));
+    }
+
+    public record CancelRequest(@jakarta.validation.constraints.Size(max = 300, message = "must be at most 300 characters") String reason) {
     }
 
     // ARENA-FIX-EVERYTHING.md Phase 1 finding - see PostService.delete()'s own comment for why
@@ -181,8 +206,13 @@ public class PostController {
 
     @PutMapping("/{id}/joins/{joinId}/approve")
     public ResponseEntity<ApiResponse<PostJoinRequestResponse>> approveJoin(
-            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, true)));
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId,
+            @Valid @RequestBody(required = false) DecisionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, true, request == null ? null : request.note())));
+    }
+
+    // Row 23 (optional body): the host's note to the joiner with the decision.
+    public record DecisionRequest(@jakarta.validation.constraints.Size(max = 280, message = "must be at most 280 characters") String note) {
     }
 
     @DeleteMapping("/{id}/joins/me")
@@ -202,8 +232,9 @@ public class PostController {
 
     @PutMapping("/{id}/joins/{joinId}/decline")
     public ResponseEntity<ApiResponse<PostJoinRequestResponse>> declineJoin(
-            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId) {
-        return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, false)));
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @PathVariable UUID joinId,
+            @Valid @RequestBody(required = false) DecisionRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(postService.decideJoin(principal.getId(), id, joinId, false, request == null ? null : request.note())));
     }
 
     // ARENA-V2-PRODUCT-ARCHITECTURE.md Phase C - comments/reactions.
@@ -259,7 +290,7 @@ public class PostController {
     @PostMapping("/{id}/report")
     public ResponseEntity<ApiResponse<Void>> report(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody ReportPostRequest request) {
-        moderationService.filePostReport(principal.getId(), id, request.reason());
+        moderationService.filePostReport(principal.getId(), id, request.reason(), request.evidenceUrls());
         return ResponseEntity.ok(ApiResponse.ok("Report submitted", null));
     }
 }

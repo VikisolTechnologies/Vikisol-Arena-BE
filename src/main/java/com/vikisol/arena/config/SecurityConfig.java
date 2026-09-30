@@ -132,7 +132,7 @@ public class SecurityConfig {
                         // PostService/FeedAggregationService/ProjectService/CompanyService) -
                         // that null-tolerance was already there for shared-link support (FIX 1 /
                         // G9 below); this just opens the same door to the main browse surfaces.
-                        .requestMatchers(HttpMethod.GET, "/companies", "/companies/*", "/companies/*/jobs").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/companies", "/companies/*", "/companies/*/jobs", "/companies/*/verification").permitAll()
                         .requestMatchers(HttpMethod.GET, "/jobs").permitAll()
                         .requestMatchers(HttpMethod.GET, "/search").permitAll()
                         // Phase 2 (Discuss) - browsing communities and threads is open to guests;
@@ -155,6 +155,15 @@ public class SecurityConfig {
                         // every other permitAll GET on this list.
                         .requestMatchers(HttpMethod.GET, "/posts/mine", "/posts/saved", "/posts/joined").authenticated()
                         .requestMatchers(HttpMethod.GET, "/posts/*", "/posts/*/comments").permitAll()
+                        // An activity's page (details, questions, spots, waitlist size) is as
+                        // public as the post itself; "/activities/kinds" is the form catalogue.
+                        .requestMatchers(HttpMethod.GET, "/activities/*").permitAll()
+                        // A need/offer page and someone's confirmed outcomes are public; the
+                        // responses list and "my offers" stay signed-in (anyRequest below).
+                        .requestMatchers(HttpMethod.GET, "/needs/*", "/needs/outcomes/*").permitAll()
+                        // A community project's page, someone's projects and their profile stat
+                        // row are public like the profile itself.
+                        .requestMatchers(HttpMethod.GET, "/projects/*", "/projects/of/*", "/profile/*/stats").permitAll()
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())

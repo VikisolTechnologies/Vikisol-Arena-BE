@@ -26,7 +26,36 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
     Page<Post> findByStatusOrderByCreatedAtDesc(PostStatus status, Pageable pageable);
 
-    // Search candidates - live posts only (open or full), newest first.
+    // PERFORMANCE.md: search scores these light rows instead of whole Post entities, then loads
+    // only the hits. This is the unnarrowed window (newest live posts of these kinds), used when
+    // the first query word isn't plain ASCII; otherwise PostSearchRepository narrows it in the database.
+    @Query("""
+            select new com.vikisol.arena.posts.repository.PostSearchRow(
+                p.id, p.intentType, p.audience, p.anonymous, p.linkOnly, u.id, u.name, c.companyName,
+                p.title, p.body, p.locationText)
+            from Post p join p.authorUser u left join p.authorCompany c
+            where p.status in :statuses and p.intentType in :types
+            order by p.createdAt desc
+            """)
+    List<PostSearchRow> searchRows(@Param("statuses") java.util.Collection<PostStatus> statuses,
+                                   @Param("types") java.util.Collection<com.vikisol.arena.posts.entity.PostIntentType> types,
+                                   Pageable pageable);
+
+    // PERFORMANCE.md: the feed/trending candidate window as light rows (FeedWindowCache).
+    @Query("""
+            select new com.vikisol.arena.posts.repository.PostWindowRow(
+                p.id, p.createdAt, u.id, c.id, p.intentType, p.anonymous, p.linkOnly, p.embedding,
+                p.startsAt, p.capacity, p.spotsFilled)
+            from Post p join p.authorUser u left join p.authorCompany c
+            where p.status = :status
+            order by p.createdAt desc
+            """)
+    List<PostWindowRow> findWindowRows(@Param("status") PostStatus status, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
+    List<Post> findByIdIn(java.util.Collection<UUID> ids);
+
+    @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
     Page<Post> findByStatusInOrderByCreatedAtDesc(java.util.Collection<PostStatus> statuses, Pageable pageable);
 
     // Discuss thread lists (Phase 2) - live discussions, optionally inside one community.
@@ -62,6 +91,33 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
     @Query("select p from Post p where p.id in (select j.post.id from PostJoinRequest j where j.user.id = :userId and j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED)")
     Page<Post> findApprovedJoinsByUserId(@Param("userId") UUID userId, Pageable pageable);
+
+    // G31: community projects someone started or is in, newest first (anonymous and removed ones never).
+    @Query(value = """
+            select p from Post p
+            where p.intentType = com.vikisol.arena.posts.entity.PostIntentType.COLLAB
+              and p.anonymous = false and p.removedReason is null
+              and (p.authorUser.id = :userId or p.id in (select j.post.id from PostJoinRequest j
+                   where j.user.id = :userId and j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED))
+            order by p.createdAt desc, p.id desc
+            """,
+            countQuery = """
+            select count(p) from Post p
+            where p.intentType = com.vikisol.arena.posts.entity.PostIntentType.COLLAB
+              and p.anonymous = false and p.removedReason is null
+              and (p.authorUser.id = :userId or p.id in (select j.post.id from PostJoinRequest j
+                   where j.user.id = :userId and j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED))
+            """)
+    Page<Post> findCollabProjectsOf(@Param("userId") UUID userId, Pageable pageable);
+
+    // G32 "Hosted": activities someone hosted in their own name that weren't cancelled or removed.
+    @Query("""
+            select count(p) from Post p
+            where p.authorUser.id = :userId and p.intentType = com.vikisol.arena.posts.entity.PostIntentType.ACTIVITY
+              and p.anonymous = false and p.removedReason is null
+              and p.status <> com.vikisol.arena.posts.entity.PostStatus.CANCELLED
+            """)
+    long countHostedActivities(@Param("userId") UUID userId);
 
     // Company page's own post history (post-spec reconciliation - §3.5/§6 company posting).
     @EntityGraph(attributePaths = {"authorUser", "authorCompany"})

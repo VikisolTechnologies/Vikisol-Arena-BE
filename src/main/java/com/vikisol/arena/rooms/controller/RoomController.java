@@ -80,7 +80,7 @@ public class RoomController {
     @PostMapping("/{id}/report")
     public ResponseEntity<ApiResponse<Void>> report(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody ReportRoomRequest request) {
-        roomService.report(principal.getId(), id, request.reason());
+        roomService.report(principal.getId(), id, request.reason(), request.evidenceUrls());
         return ResponseEntity.ok(ApiResponse.ok("Report submitted", null));
     }
 }

@@ -37,10 +37,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             throws ServletException, IOException {
         String token = getTokenFromRequest(request);
 
-        if (StringUtils.hasText(token) && jwtTokenProvider.validateToken(token) && !jwtTokenProvider.isMfaPending(token)) {
-            String jti = jwtTokenProvider.getJtiFromToken(token);
+        var claims = StringUtils.hasText(token) ? jwtTokenProvider.sessionClaims(token) : java.util.Optional.<io.jsonwebtoken.Claims>empty();
+        if (claims.isPresent()) {
+            String jti = claims.get().getId();
             if (!tokenDenylistService.isDenylisted(jti)) {
-                String email = jwtTokenProvider.getEmailFromToken(token);
+                String email = claims.get().getSubject();
                 UserDetails userDetails = userDetailsService.loadUserByUsername(email);
 
                 UsernamePasswordAuthenticationToken authentication =

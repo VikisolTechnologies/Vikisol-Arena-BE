@@ -36,4 +36,19 @@ public class Application extends BaseEntity {
 
     @Column(nullable = false)
     private Instant appliedAt;
+
+    // V29, FE-API-GAPS row 20: sent with the application.
+    @Column(length = 2000)
+    private String coverNote;
+
+    // Row 20 / flow §6.4: the candidate ticked "include my CTC" for THIS application - the only
+    // way an employer ever sees their pay (CompensationPolicy).
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean includeCtc = false;
+
+    // Flow §6: a hire goes on the profile only if the person chooses.
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean showOutcome = false;
 }

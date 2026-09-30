@@ -40,7 +40,7 @@ public class PostMapper {
         long commentCount = postCommentRepository.countByPostId(post.getId());
         long reactionCount = postReactionRepository.countByPostId(post.getId());
         Boolean myReacted = viewingUserId == null ? null : postReactionRepository.existsByPostIdAndUserId(post.getId(), viewingUserId);
-        long authorJoinCount = postJoinRequestRepository.countApprovedByUserIdIn(List.of(post.getAuthorUser().getId())).stream()
+        long authorJoinCount = postJoinRequestRepository.countApprovedByUserIdIn(List.of(post.getAuthorUser().getId()), noShowFinalBefore()).stream()
                 .mapToLong(PostJoinRequestRepository.UserJoinCountProjection::getCnt).sum();
         long score = batchScores(List.of(post.getId())).getOrDefault(post.getId(), 0L);
         Integer myVote = batchMyVotes(List.of(post.getId()), viewingUserId).get(post.getId());
@@ -107,7 +107,7 @@ public class PostMapper {
     // a whole feed/nearby window, same shape as the comment/reaction batch counts above.
     public Map<UUID, Long> batchAuthorJoinCounts(List<UUID> authorUserIds) {
         if (authorUserIds.isEmpty()) return Map.of();
-        return postJoinRequestRepository.countApprovedByUserIdIn(authorUserIds.stream().distinct().toList()).stream()
+        return postJoinRequestRepository.countApprovedByUserIdIn(authorUserIds.stream().distinct().toList(), noShowFinalBefore()).stream()
                 .collect(Collectors.toMap(PostJoinRequestRepository.UserJoinCountProjection::getUserId,
                         PostJoinRequestRepository.UserJoinCountProjection::getCnt));
     }
@@ -199,7 +199,11 @@ public class PostMapper {
                 post.getCommunity() == null ? null : post.getCommunity().getSlug(),
                 post.getCommunity() == null ? null : post.getCommunity().getName(),
                 post.getCommunity() == null ? null : post.getCommunity().getEmoji(),
-                post.isAnonymous()
+                post.isAnonymous(),
+                post.getPriceInr(),
+                post.isAnonymous() && !mine ? null : post.getAuthorUser().getVerificationLevel().wireValue(),
+                post.getCancelReason(),
+                post.getEditedAt() == null ? null : post.getEditedAt().toString()
         );
     }
 
@@ -218,10 +222,15 @@ public class PostMapper {
                 joinRequest.getId().toString(), joinRequest.getPost().getId().toString(),
                 joinRequest.getUser().getId().toString(), userName, userEmoji,
                 joinRequest.getStatus().wireValue(), joinRequest.getCreatedAt().toString(),
-                joinRequest.getOutcome() == null ? null : joinRequest.getOutcome().wireValue());
+                joinRequest.getOutcome() == null ? null : joinRequest.getOutcome().wireValue(),
+                joinRequest.getNote(), joinRequest.getDecisionNote());
     }
 
     // Batched: one profile IN-query for the whole list instead of one findByUserId() per request.
+    private static Instant noShowFinalBefore() {
+        return Instant.now().minus(com.vikisol.arena.activities.ActivityRules.DISPUTE_WINDOW);
+    }
+
     public List<PostJoinRequestResponse> toResponseList(List<PostJoinRequest> requests) {
         Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
                 requests.stream().map(r -> r.getUser().getId()).toList());

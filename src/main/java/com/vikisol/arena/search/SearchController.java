@@ -27,8 +27,21 @@ public class SearchController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "") String q,
             @RequestParam(defaultValue = "all") String type,
-            @RequestParam(defaultValue = "20") int limit) {
+            @RequestParam(defaultValue = "20") int limit,
+            // Row 17: people search near a point ("lat,lng") within radiusKm (default 5, max 50).
+            @RequestParam(required = false) String near,
+            @RequestParam(required = false) Double radiusKm) {
         int bounded = Math.max(1, Math.min(limit, 50));
-        return ResponseEntity.ok(ApiResponse.ok(searchService.search(q, type, bounded, principal == null ? null : principal.getId())));
+        Double lat = null, lng = null;
+        if (near != null && !near.isBlank()) {
+            String[] parts = near.split(",");
+            try {
+                lat = Double.parseDouble(parts[0].trim());
+                lng = Double.parseDouble(parts[1].trim());
+            } catch (RuntimeException e) {
+                throw new com.vikisol.arena.common.exception.BadRequestException("near must be lat,lng");
+            }
+        }
+        return ResponseEntity.ok(ApiResponse.ok(searchService.search(q, type, bounded, principal == null ? null : principal.getId(), lat, lng, radiusKm)));
     }
 }

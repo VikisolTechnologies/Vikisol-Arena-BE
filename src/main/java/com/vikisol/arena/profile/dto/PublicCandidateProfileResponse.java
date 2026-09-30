@@ -25,6 +25,10 @@ public record PublicCandidateProfileResponse(
         String homeCity,
         long followerCount,
         long followingCount,
-        Boolean viewerFollows
+        Boolean viewerFollows,
+        // FE-API-GAPS 2, 3, 5 - added fields; the existing ones are unchanged.
+        String photoUrl,
+        List<String> interests,
+        List<String> availability
 ) {
 }

@@ -19,6 +19,9 @@ public interface FileStorageService {
      * is not an error the caller needs to handle. */
     void delete(String url);
 
+    /** True when the URL (signed or not) is a file this service stored under module/entityId. */
+    boolean isStoredUnder(String url, String module, String entityId);
+
     record StoredFile(String url, String fileName, long sizeBytes) {
     }
 }

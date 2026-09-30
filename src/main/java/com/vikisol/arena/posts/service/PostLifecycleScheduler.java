@@ -65,7 +65,7 @@ public class PostLifecycleScheduler {
     @Transactional
     public void expireStalePosts() {
         Instant now = Instant.now();
-        List<Post> expirable = postRepository.findExpirable(List.of(PostStatus.OPEN, PostStatus.FULL), now, now.minus(STALE_AFTER));
+        List<Post> expirable = postRepository.findExpirable(List.of(PostStatus.OPEN, PostStatus.FULL, PostStatus.PAUSED), now, now.minus(STALE_AFTER));
         for (Post post : expirable) {
             post.setStatus(PostStatus.EXPIRED);
         }
