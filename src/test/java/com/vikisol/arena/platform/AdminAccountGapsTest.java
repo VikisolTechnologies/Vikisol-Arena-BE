@@ -53,6 +53,7 @@ class AdminAccountGapsTest extends EmbeddedPostgresAppTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
     @Autowired JwtTokenProvider tokens;
+    @Autowired com.vikisol.arena.security.service.TotpService totp;
     @Autowired UserRepository users;
     @Autowired CandidateProfileRepository profiles;
     @Autowired EnterpriseProfileRepository enterprises;
@@ -108,6 +109,53 @@ class AdminAccountGapsTest extends EmbeddedPostgresAppTest {
         assertThat(audits("user.restored")).isEqualTo(1);
         assertThat(jdbc.queryForObject("select metadata from arena_audit_events where action = 'user.suspended'", String.class))
                 .isEqualTo("Harassment reports (7 days)");
+    }
+
+    // ARCHITECT-REVIEW-BE-1 blocker #6: erasure used to keep the account's real email, phone,
+    // handle and password hash - only the display name changed - and sign-in only checked
+    // isBlocked(), not deletedAt, so an erased account's original credentials still worked.
+    @Test
+    void erasureTombstonesTheRealIdentityAndTheOldCredentialsStopWorking() throws Exception {
+        String originalEmail = asha.getEmail();
+        call(staff, delete("/admin/users/" + asha.getId()), null).andExpect(status().isOk());
+
+        User erased = users.findById(asha.getId()).orElseThrow();
+        assertThat(erased.getEmail()).isNotEqualTo(originalEmail);
+        assertThat(erased.getHandle()).isNull();
+        assertThat(erased.getPhoneNumber()).isNull();
+        assertThat(passwords.matches("correct-horse", erased.getPasswordHash())).isFalse();
+        assertThat(erased.getDeletedAt()).isNotNull();
+
+        // The old email doesn't resolve to anyone any more.
+        mvc.perform(post("/auth/signin").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"email\":\"" + originalEmail + "\",\"password\":\"correct-horse\"}"))
+                .andExpect(status().isBadRequest());
+
+        // Audit the id, never "Name (email)" - the thing it's logging just got erased.
+        assertThat(jdbc.queryForObject("select target from arena_audit_events where action = 'account.erased_by_admin'", String.class))
+                .isEqualTo(asha.getId().toString());
+
+        // issueSession() itself must also refuse a deletedAt account, not just signIn()'s own
+        // upfront check - AuthService.verifyMfa (the 2FA-completion step) looks the user up by id
+        // from the pending token and goes straight to issueSession(), with no deletedAt check of
+        // its own, so an account erased/banned between "enter password" and "enter 2FA code"
+        // would otherwise still complete the session.
+        String totpSecret = totp.generateSecret();
+        User mfaUser = users.save(User.builder().email(UUID.randomUUID() + "@test.local")
+                .passwordHash(passwords.encode("correct-horse")).name("Mid-MFA").role(Role.PLATFORM_ADMIN)
+                .totpEnabled(true).totpSecret(totpSecret).dateOfBirth(LocalDate.of(1990, 1, 1)).build());
+        String pendingToken = tokens.generateMfaPendingToken(mfaUser.getId());
+        long step = Instant.now().getEpochSecond() / 30;
+        java.lang.reflect.Method generateCode = com.vikisol.arena.security.service.TotpService.class
+                .getDeclaredMethod("generateCode", String.class, long.class);
+        generateCode.setAccessible(true);
+        String code = (String) generateCode.invoke(totp, totpSecret, step);
+        mfaUser.setDeletedAt(Instant.now());
+        users.save(mfaUser);
+        mvc.perform(post("/auth/2fa/verify").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"pendingToken\":\"" + pendingToken + "\",\"code\":\"" + code + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("This account can't sign in."));
     }
 
     @Test

@@ -257,6 +257,7 @@ class PersonalDataTest extends EmbeddedPostgresAppTest {
         call(recruiter, post("/enterprise/applicants/" + app.getId() + "/notes"), "{\"text\":\"Strong on logistics\"}").andExpect(status().isOk());
         call(recruiter, put("/enterprise/applicants/" + app.getId() + "/requirements/" + mustHave), "{\"assessment\":\"met\",\"note\":\"Clear examples\"}")
                 .andExpect(status().isOk());
+        call(recruiter, put("/enterprise/applicants/" + app.getId() + "/stage"), "{\"stage\":\"screening\"}").andExpect(status().isOk());
         call(recruiter, put("/enterprise/applicants/" + app.getId() + "/stage"), "{\"stage\":\"interview\",\"message\":\"Let's talk\"}").andExpect(status().isOk());
         Interview interview = interviews.save(Interview.builder().application(applications.findById(app.getId()).orElseThrow()).build());
         call(recruiter, post("/interviews/" + interview.getId() + "/feedback"),

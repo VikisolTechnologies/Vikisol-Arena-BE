@@ -65,6 +65,7 @@ public class CandidateProfileService {
     private final FollowService followService;
     private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
     private final ProfileVisibilityGuard visibilityGuard;
+    private final com.vikisol.arena.auth.service.AccountTombstone accountTombstone;
 
     // FE-API-GAPS 1 and 5: the closed vocabularies the onboarding screens send.
     static final Set<String> INTENTS = Set.of("activities", "meet", "ask", "offer", "job", "hire", "projects", "explore");
@@ -259,6 +260,9 @@ public class CandidateProfileService {
         // name is stored, not just the surface most screens happen to read from.
         user.setName("Deleted user");
         user.setDeletedAt(Instant.now());
+        // ARCHITECT-REVIEW-BE-1 blocker #6: the real email/phone/handle/password hash used to
+        // survive erasure untouched - the account's actual identity, not just its display name.
+        accountTombstone.tombstone(user);
         userRepository.save(user);
         refreshTokenService.revokeAllForUser(userId);
         // Without this, the access token making THIS request stays valid for up to its

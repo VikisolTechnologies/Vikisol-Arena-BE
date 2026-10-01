@@ -642,13 +642,18 @@ public class AuthService {
         userRepository.save(user);
     }
 
-    // Every way into a session ends here, so a suspended or banned account is refused on all of
-    // them (password, code, Google, phone, 2FA). Rows 50-51.
+    // Every way into a session ends here, so a suspended, banned or erased account is refused on
+    // all of them (password, code, Google, phone, 2FA). Rows 50-51.
+    // ARCHITECT-REVIEW-BE-1 blocker #6: this only checked isBlocked() (suspended/banned), not
+    // deletedAt - an erased account's (now-tombstoned, but still technically present) credentials
+    // could still issue a session. refreshAccessToken already checked deletedAt; this didn't.
     private SignInOutcome.Success issueSession(User user) {
-        if (user.isBlocked(Instant.now())) {
+        if (user.getDeletedAt() != null || user.isBlocked(Instant.now())) {
             throw new BadRequestException(user.getBannedAt() != null
                     ? "This account has been closed by Arena's team."
-                    : "This account is suspended. Contact Vikisol support for help.");
+                    : user.getDeletedAt() != null
+                            ? "This account can't sign in."
+                            : "This account is suspended. Contact Vikisol support for help.");
         }
         recordActive(user);
         // See currentSession()'s comment - this is the User.id, not the CandidateProfile PK.
