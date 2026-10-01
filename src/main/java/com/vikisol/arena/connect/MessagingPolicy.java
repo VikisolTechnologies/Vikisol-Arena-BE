@@ -33,9 +33,13 @@ public class MessagingPolicy {
     public boolean mayStartChat(User sender, UUID recipientUserId) {
         if (!EMPLOYER_ROLES.contains(sender.getRole())) return true;
         User recipient = userRepository.findById(recipientUserId).orElse(null);
-        if (recipient == null || recipient.getRole() != Role.TALENT) return true;
+        // ARCHITECT-REVIEW-BE-1 blocker #3: a missing recipient and a sender with no tenant both
+        // used to fall through to "allowed" (fail-open), not "unverified, so blocked". An
+        // employer-role account with a broken/missing enterprise link could message any talent.
+        if (recipient == null) return false;
+        if (recipient.getRole() != Role.TALENT) return true;
         EnterpriseProfile tenant = enterpriseProfileService.findEntityForUser(sender.getId()).orElse(null);
-        if (tenant == null) return true;
+        if (tenant == null) return false;
         if (connectRequestRepository.existsByTenantIdAndCandidateIdAndStatus(tenant.getId(), recipientUserId, ConnectRequest.Status.ACCEPTED)) {
             return true;
         }

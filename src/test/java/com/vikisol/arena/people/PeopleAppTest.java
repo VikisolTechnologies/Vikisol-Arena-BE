@@ -198,6 +198,21 @@ class PeopleAppTest extends EmbeddedPostgresAppTest {
         call(asha, get("/posts/by-user/" + recruiter.getId()), null).andExpect(status().isOk());
     }
 
+    // ARCHITECT-REVIEW-BE-1 blocker #3: MessagingPolicy.mayStartChat fail-opened (returned true)
+    // for an employer-role account with no enterprise profile at all, and for a recipient id that
+    // doesn't resolve to a real user - both now fail closed.
+    @Test
+    void unlinkedEmployersCannotMessageTalent() throws Exception {
+        User unlinkedRecruiter = user(Role.RECRUITER, "No Company Yet"); // no EnterpriseProfile row
+        call(unlinkedRecruiter, post("/messages/conversations"), "{\"participantUserId\":\"" + ravi.getId() + "\"}")
+                .andExpect(status().isBadRequest());
+
+        EnterpriseProfile acme = enterprises.save(EnterpriseProfile.builder().user(recruiter).companyName("Acme").logoEmoji("A")
+                .industry(Industry.DESIGN).size(CompanySize.S_11_50).build());
+        call(recruiter, post("/messages/conversations"), "{\"participantUserId\":\"" + UUID.randomUUID() + "\"}")
+                .andExpect(status().isBadRequest());
+    }
+
     @Test
     void employersAskFirstAndMessageOnlyAfterAcceptOrApply() throws Exception {
         EnterpriseProfile acme = enterprises.save(EnterpriseProfile.builder().user(recruiter).companyName("Acme").logoEmoji("A")
