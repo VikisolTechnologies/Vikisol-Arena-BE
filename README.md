@@ -20,24 +20,29 @@ brew install postgresql@16 redis   # skip anything already installed
 brew services start postgresql@16
 brew services start redis
 
-# Role + database matching the app's defaults (DB_USERNAME=postgres, DB_PASSWORD=Welcome@12345#)
-psql postgres -c "CREATE ROLE postgres LOGIN SUPERUSER PASSWORD 'Welcome@12345#';"
+# Pick your own local-only password here - DB_PASSWORD has no default (ARCHITECT-REVIEW-BE-1
+# blocker #7), so whatever you choose, you type it again as an env var in step 2.
+psql postgres -c "CREATE ROLE postgres LOGIN SUPERUSER PASSWORD 'type-your-own-local-password-here';"
 createdb -U postgres -h localhost vikisol_arena
 ```
 
-If your local Postgres role/password differs, override with `DB_USERNAME` / `DB_PASSWORD` /
-`DB_PORT` / `DB_NAME` instead of changing the role. Redis needs no auth locally — the default
+If your local Postgres role/username differs, override `DB_USERNAME` / `DB_PORT` / `DB_NAME`
+too instead of changing the role. Redis needs no auth locally — the default
 `redis://localhost:6379` (see `REDIS_URL`) just works once `brew services start redis` is up.
 
 ### 2. Start the app
 
 ```bash
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21   # or wherever your JDK 21 lives
+DB_PASSWORD="the-same-password-from-step-1" \
 SEED_ENABLED=false \
 PLATFORM_ADMIN_EMAIL="you@vikisol.dev" \
 PLATFORM_ADMIN_PASSWORD="type-your-own-password-here" \
 ./mvnw spring-boot:run
 ```
+
+`DB_PASSWORD` is required - there's no built-in default any more, so startup fails loudly instead
+of ever silently using one.
 
 Starts on `http://localhost:8081`, API base path `/api/v1` (so `http://localhost:8081/api/v1`).
 Flyway runs every migration up to the current `V44` automatically on first boot. `SEED_ENABLED=false`
@@ -76,7 +81,8 @@ All in `src/main/resources/application.yml`, same override style as `HRLMS-BE`:
 
 | Var | Default | Purpose |
 |---|---|---|
-| `DB_PORT` / `DB_NAME` / `DB_USERNAME` / `DB_PASSWORD` | `5432` / `vikisol_arena` / `postgres` / `Welcome@12345#` | Postgres connection |
+| `DB_PORT` / `DB_NAME` / `DB_USERNAME` | `5432` / `vikisol_arena` / `postgres` | Postgres connection |
+| `DB_PASSWORD` | *(required, no default)* | Postgres connection - startup fails without it (ARCHITECT-REVIEW-BE-1 blocker #7) |
 | `JWT_SECRET` | local-dev fallback (do not reuse anywhere real) | JWT signing key |
 | `JWT_EXPIRATION_MS` | `86400000` (24h) | Access token TTL |
 | `CORS_ORIGINS` | `http://localhost:3000,http://localhost:3001` | Allowed frontend origins |

@@ -22,7 +22,10 @@ spring:
     # Postgres install HRLMS-BE uses.
     url: ${DB_URL:jdbc:postgresql://localhost:${DB_PORT:5432}/${DB_NAME:vikisol_arena}}
     username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:Welcome@12345#}
+    # ARCHITECT-REVIEW-BE-1 blocker #7: no default - a real, deployable-looking password baked
+    # into application.yml is a password, and anyone with the repo had it. Startup now fails
+    # loudly without DB_PASSWORD set, same as JWT_SECRET's require-real-secret pattern below.
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
     # PERFORMANCE.md: HikariCP's own default (10), made adjustable without a code change. Load
     # tests on 2 vCPU showed no gain from 5 or 20 - the app is CPU-bound, not connection-bound.
