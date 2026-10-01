@@ -133,6 +133,9 @@ class AdminAccountGapsTest extends EmbeddedPostgresAppTest {
     // isBlocked(), not deletedAt, so an erased account's original credentials still worked.
     @Test
     void erasureTombstonesTheRealIdentityAndTheOldCredentialsStopWorking() throws Exception {
+        // A unique X-Forwarded-For keeps these /auth/* calls off the shared IP-keyed rate-limit
+        // bucket (10/min) that every other test's /auth/* calls also share in a full-suite run.
+        String ip = "10.88." + (int) (Math.random() * 255) + "." + (int) (Math.random() * 255);
         String originalEmail = asha.getEmail();
         call(staff, delete("/admin/users/" + asha.getId()), null).andExpect(status().isOk());
 
@@ -144,7 +147,7 @@ class AdminAccountGapsTest extends EmbeddedPostgresAppTest {
         assertThat(erased.getDeletedAt()).isNotNull();
 
         // The old email doesn't resolve to anyone any more.
-        mvc.perform(post("/auth/signin").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/auth/signin").header("X-Forwarded-For", ip).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"email\":\"" + originalEmail + "\",\"password\":\"correct-horse\"}"))
                 .andExpect(status().isBadRequest());
 
@@ -169,7 +172,7 @@ class AdminAccountGapsTest extends EmbeddedPostgresAppTest {
         String code = (String) generateCode.invoke(totp, totpSecret, step);
         mfaUser.setDeletedAt(Instant.now());
         users.save(mfaUser);
-        mvc.perform(post("/auth/2fa/verify").contentType(MediaType.APPLICATION_JSON)
+        mvc.perform(post("/auth/2fa/verify").header("X-Forwarded-For", ip).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"pendingToken\":\"" + pendingToken + "\",\"code\":\"" + code + "\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.message").value("This account can't sign in."));
