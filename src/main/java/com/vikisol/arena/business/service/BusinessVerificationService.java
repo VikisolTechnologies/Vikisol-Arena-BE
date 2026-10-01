@@ -153,9 +153,10 @@ public class BusinessVerificationService {
         } else {
             BusinessVerification.Status s;
             try {
-                s = BusinessVerification.Status.valueOf(status.trim().toUpperCase(Locale.ROOT));
+                String wire = status.trim().toUpperCase(Locale.ROOT);
+                s = BusinessVerification.Status.valueOf(wire.equals("APPROVED") ? "VERIFIED" : wire); // row 43 says "approved"
             } catch (IllegalArgumentException e) {
-                throw new BadRequestException("status must be one of pending, verified, rejected");
+                throw new BadRequestException("status must be one of pending, verified (or approved), rejected");
             }
             page = repository.findByStatusOrderByReviewedAtDescIdDesc(s, pageable);
         }
@@ -245,7 +246,8 @@ public class BusinessVerificationService {
                 v.getDomain(), v.getWorkEmail(), v.getSubmitterRole().name().toLowerCase(Locale.ROOT), t.getGstin(), t.getCin(),
                 t.getHqCity(), v.getStatus().name().toLowerCase(Locale.ROOT),
                 v.getDomainConfirmedAt() == null ? null : v.getDomainConfirmedAt().toString(), v.getReviewNote(),
-                v.getReviewedAt() == null ? null : v.getReviewedAt().toString());
+                v.getReviewedAt() == null ? null : v.getReviewedAt().toString(),
+                v.getCreatedAt() == null ? null : v.getCreatedAt().toString(), v.getDomainConfirmedAt() != null);
     }
 
     // GSTIN: 15 characters (state code, PAN, entity, Z, check). CIN: 21 characters.

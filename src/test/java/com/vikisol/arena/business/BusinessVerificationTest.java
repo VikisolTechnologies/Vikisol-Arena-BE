@@ -183,11 +183,18 @@ class BusinessVerificationTest extends EmbeddedPostgresAppTest {
         call(admin, post("/enterprise/postings"), job + "}").andExpect(status().isBadRequest());
         String draft = body(call(admin, post("/enterprise/postings"), job + ",\"status\":\"draft\"}").andExpect(status().isOk()));
         call(admin, put("/enterprise/postings/" + draft + "/status"), "{\"status\":\"open\"}").andExpect(status().isBadRequest());
+        // ARCHITECT-REVIEW-BE-1 blocker #5: CLOSED->OPEN used to skip the verification check
+        // entirely (only DRAFT->OPEN was gated) - `first` was published before the flag went on,
+        // then closed, so this is the still-unverified company trying to reopen it.
+        call(admin, put("/enterprise/postings/" + first + "/status"), "{\"status\":\"open\"}").andExpect(status().isBadRequest());
         verifications.save(com.vikisol.arena.business.entity.BusinessVerification.builder().tenant(company).legalName("GreenLeaf")
                 .website("https://greenleaf.example").domain("greenleaf.example").workEmail("asha@greenleaf.example")
                 .submitterRole(com.vikisol.arena.business.entity.BusinessVerification.SubmitterRole.FOUNDER)
                 .status(com.vikisol.arena.business.entity.BusinessVerification.Status.VERIFIED).verifiedAt(Instant.now()).build());
         call(admin, put("/enterprise/postings/" + draft + "/status"), "{\"status\":\"open\"}").andExpect(status().isOk());
+        // Free plan allows one active posting - close it before reopening `first`.
+        call(admin, put("/enterprise/postings/" + draft + "/status"), "{\"status\":\"closed\"}").andExpect(status().isOk());
+        call(admin, put("/enterprise/postings/" + first + "/status"), "{\"status\":\"open\"}").andExpect(status().isOk());
     }
 
     @Test

@@ -33,6 +33,10 @@ public class NotificationService {
     public static final String JOB = "job";
     public static final String MESSAGE = "message";
     public static final String SAFETY = "safety";
+    // Row 52. Nothing is sent in these yet; a sender that uses them honours the toggle.
+    // Marketing is opt-in: without a saved preference it is not sent.
+    public static final String JENNY = "jenny";
+    public static final String MARKETING = "marketing";
 
     // Always stored (seeds rely on the returned row); the category follows the type.
     @Transactional
@@ -57,8 +61,10 @@ public class NotificationService {
             case NEED -> p.isNeed();
             case JOB -> p.isJob();
             case MESSAGE -> p.isMessage();
+            case JENNY -> p.isJenny();
+            case MARKETING -> p.isMarketing();
             default -> true;
-        }).orElse(true);
+        }).orElse(!MARKETING.equals(category));
     }
 
     private static String defaultCategory(NotificationType type) {

@@ -25,8 +25,22 @@ public final class AuditActions {
     public static final String TENANT_REACTIVATED = "tenant.reactivated";
     public static final String MODERATION_TAKEDOWN = "moderation.takedown";
     public static final String MODERATION_DISMISSED = "moderation.dismissed";
+    // FE-API-GAPS rows 44-51 (admin, B+): every admin action is audited, with the reason as
+    // metadata when one was given.
+    public static final String USER_WARNED = "user.warned";
+    public static final String USER_SUSPENDED = "user.suspended";
+    public static final String USER_BANNED = "user.banned";
+    public static final String USER_RESTORED = "user.restored";
+    public static final String USER_SIGNED_OUT = "user.signed_out";
+    public static final String CONTENT_TAKEDOWN = "content.takedown";
+    public static final String DISPUTE_RESOLVED = "dispute.resolved";
+    public static final String STAFF_AREAS_SET = "staff.areas_set";
+    public static final String DEMO_CONTENT_SEEDED = "demo.seeded";
+    public static final String DEMO_CONTENT_REMOVED = "demo.removed";
     public static final String SUBSCRIPTION_ADJUSTED = "subscription.adjusted";
     public static final String FLAG_TOGGLED = "flag.toggled";
+    public static final String INDUSTRY_ADDED = "industry.added";
+    public static final String INDUSTRY_UPDATED = "industry.updated";
     public static final String CONSENT_CHANGED = "consent.changed";
     public static final String DATA_EXPORTED = "data.exported";
     public static final String ACCOUNT_DELETED = "account.deleted";

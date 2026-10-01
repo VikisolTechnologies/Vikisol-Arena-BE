@@ -50,6 +50,11 @@ public class SecurityConfig {
     @Value("${app.cors.allowed-origins:http://localhost:3000}")
     private String allowedOrigins;
 
+    // Browsers cache a preflight answer this long, so a signed-in page doesn't send an OPTIONS
+    // before every API call. Chrome caps it at 2 hours, Firefox at 24.
+    @Value("${app.cors.max-age-seconds:3600}")
+    private long corsMaxAgeSeconds;
+
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
@@ -61,6 +66,7 @@ public class SecurityConfig {
                     config.addAllowedMethod("*");
                     // PageLimits' paging headers on the bare-array list endpoints.
                     config.setExposedHeaders(List.of(PageLimits.TOTAL_COUNT_HEADER, PageLimits.HAS_MORE_HEADER));
+                    config.setMaxAge(corsMaxAgeSeconds);
                     return config;
                 }))
                 .csrf(csrf -> csrf.disable())

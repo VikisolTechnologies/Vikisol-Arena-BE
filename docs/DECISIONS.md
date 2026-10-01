@@ -198,3 +198,43 @@ Details and numbers: `docs/PERFORMANCE.md`.
 - No extra CPU or second instance for launch. The search trigram index (V40) and the scale-up trigger are in `docs/PERFORMANCE.md`.
 - The `Dockerfile` defaults `JAVA_OPTS` to `-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError`. The founder sets the service to 1 GB. `railway.toml` is unchanged.
 - Reading messages (GET conversations and threads) has its own limit of 60 per minute per user. Sending stays at 30.
+
+## 30 Sep 2026 — Admin and account gaps (FE-API-GAPS rows 42–54)
+
+- **Suspensions, bans and force sign-out take effect on the next request.**
+  - The JWT filter already loads the account on every request. It now treats a suspended, banned or erased account as signed out.
+  - It also rejects a token issued before the account's `sessions_revoked_at`.
+  - Every way of getting a session (password, codes, Google, 2FA, refresh) refuses a blocked account, and so does a Jenny service token acting for one.
+  - Suspending or banning also revokes the refresh tokens.
+- **Erased accounts are now signed out at once.** Previously their access token kept working until it expired (up to 15 minutes).
+- **Admins can't act on staff accounts or their own.** Staff (platform admin) accounts are managed separately.
+- **Activity tracking for D1/D7 (row 42)** is one row per person per day, written at sign-in and at session refresh, not on every request. It stores no content, and it is in the person's export and erasure. The return rates count only people who signed up after tracking began, so older accounts don't pull them down.
+- **`onboardingCompleted` is null** rather than a guess: nothing records a finished onboarding yet.
+- **Jenny automations and cover flags (row 47) are JennySol's**, so they are not in Arena. Arena shows the actions Jenny took through service tokens (already audited) and whether each outside provider is configured, without calling it.
+- **Every admin action writes an audit entry.** This now includes moderation dismiss and takedown on posts, rooms and chats, dispute decisions, and demo-content seeding and removal.
+- **Audit CSV exports neutralise spreadsheet formulas.** This covers the company export as well as the new platform one.
+- **`GET /profile/{id}`** answers the same 404 as for a missing profile whenever the viewer may not see it, so the answer never reveals that the person is on Arena.
+
+## 30 Sep 2026 — No agent autopilot
+
+Founder decision: Jenny always prepares and the person approves each action.
+
+- **There is no `agent_autopilot` flag.**
+  - V42 deletes the row if an admin ever created one.
+  - `POST /admin/flags` refuses that key (and `autopilot`) with 400.
+  - The only place the flag existed was the frontend's mock flag list (`src/lib/api/platformAdmin.ts` in Vikisol-Arena-FE); it must be removed there too.
+- **`AutonomyLevel` loses `AUTOPILOT`.**
+  - V42 moves any stored `AUTOPILOT` profile to `SUPERVISED` (the default), and the column's check constraint no longer allows the value.
+  - `PUT /profile/me/autonomy` answers 400 for `autopilot`.
+  - The seeders no longer hand it out.
+- **Backend approval path (unchanged, already in place):** Jenny's proposed actions are stored as `PENDING` (`AgentAction`) and run only after the person's `PUT /agent/actions/{id}` with `approve: true`. The autonomy level is never sent to Jenny.
+- **What Arena can't see:** a service token's write means JennySol already holds an approval. Arena can't see that approval itself, so keeping it per-action is JennySol's side of `JENNY-ARENA-CONTRACT.md`.
+
+## 30 Sep 2026 — Industries are an open, staff-managed list
+
+Architect decision (FE-API-GAPS row 62): the industry list is no longer the closed five.
+
+- **Storage:** V44 adds `arena_industries (key, label, active, position)`, seeded with the five. The V1 check constraints go, and the three `industry` columns (candidate profiles, companies, jobs) become foreign keys to it, so the database still refuses a value nobody listed.
+- **Keys never change; labels can.** The stored value stays the key (`ENGINEERING`), so no existing row moves and a rename needs no data migration. The API keeps sending the label.
+- **Retire, don't delete.** A deactivated industry stays valid for rows that already use it and can't be newly picked. Deleting would orphan profiles and jobs.
+- **In code,** `Industry` is a small value class instead of an enum, keeping the five constants for the seeders. `IndustryCatalogue` resolves incoming values and refreshes the label cache when a change commits. Arena runs one instance today; with more than one, the others would show a rename only after a restart. That's acceptable for a rarely changed list, and the fix, if needed, is a short cache expiry.

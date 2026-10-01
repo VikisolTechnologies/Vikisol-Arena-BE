@@ -53,6 +53,7 @@ public class NeedService {
     private final NotificationService notificationService;
     private final com.vikisol.arena.posts.service.PostService postService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final com.vikisol.arena.profile.service.ProfileVisibilityGuard visibilityGuard;
 
     @Transactional(readOnly = true)
     public NeedView get(UUID postId, UUID viewerId) {
@@ -222,8 +223,11 @@ public class NeedService {
     }
 
     // G17: confirmed outcomes on a public profile. Only what and when - never the other person.
+    // ARCHITECT-REVIEW-BE-1 blocker #2: this endpoint is permitAll() and used to answer for a
+    // hidden/blocked/banned/deleted person too.
     @Transactional(readOnly = true)
-    public Page<OutcomeView> outcomes(UUID userId, Pageable pageable) {
+    public Page<OutcomeView> outcomes(UUID userId, UUID viewerId, Pageable pageable) {
+        visibilityGuard.requireVisibleTo(viewerId, userId);
         Page<NeedCompletion> page = completionRepository.findCompletedFor(userId, pageable);
         Map<UUID, NeedDetails> details = detailsRepository.findByPostIdIn(page.stream().map(c -> c.getResponse().getPost().getId()).toList())
                 .stream().collect(Collectors.toMap(d -> d.getPost().getId(), Function.identity()));

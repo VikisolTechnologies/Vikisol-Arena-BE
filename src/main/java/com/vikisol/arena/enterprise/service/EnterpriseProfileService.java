@@ -9,7 +9,6 @@ import com.vikisol.arena.enterprise.entity.CompanySize;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.repository.EnterpriseProfileRepository;
 import com.vikisol.arena.enterprise.repository.MembershipRepository;
-import com.vikisol.arena.profile.entity.Industry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,6 +24,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class EnterpriseProfileService {
 
+    private final com.vikisol.arena.profile.industry.IndustryCatalogue industryCatalogue;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final MembershipRepository membershipRepository;
     private final EnterpriseProfileMapper mapper;
@@ -84,7 +84,7 @@ public class EnterpriseProfileService {
         EnterpriseProfile profile = getEntityForUser(userId);
         profile.setCompanyName(request.companyName());
         profile.setLogoEmoji(request.logoEmoji());
-        profile.setIndustry(Industry.fromWireValue(request.industry()));
+        profile.setIndustry(industryCatalogue.resolveForWrite(request.industry(), profile.getIndustry()));
         profile.setSize(CompanySize.fromWireValue(request.size()));
         profile.setHiringFor(request.hiringFor());
         if (request.website() != null) {

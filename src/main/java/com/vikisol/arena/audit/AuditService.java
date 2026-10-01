@@ -73,6 +73,29 @@ public class AuditService {
                 .map(this::toResponse).getContent();
     }
 
+    // FE-API-GAPS row 48: every audit entry on the platform, newest first.
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<AuditEventResponse> searchPlatform(UUID actorId, String action, Instant since, Pageable pageable) {
+        return auditEventRepository.searchPlatform(actorId, blankToNull(action), since == null ? Instant.EPOCH : since, pageable)
+                .map(this::toResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public List<AuditEventResponse> exportPlatform(UUID actorId, String action, Instant since) {
+        return searchPlatform(actorId, action, since, org.springframework.data.domain.PageRequest.of(0, 5000)).getContent();
+    }
+
+    // Row 47: what Jenny did (or was refused) through a service token, newest first.
+    @Transactional(readOnly = true)
+    public org.springframework.data.domain.Page<AuditEventResponse> agentActions(Pageable pageable) {
+        return auditEventRepository.findByActionInOrderByCreatedAtDesc(
+                List.of(AuditActions.AGENT_ACTION_AUTHORIZED, AuditActions.AGENT_ACTION_DENIED), pageable).map(this::toResponse);
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
+    }
+
     private AuditEventResponse toResponse(AuditEvent e) {
         return new AuditEventResponse(
                 e.getId().toString(), e.getActor().getName(), e.getAction(), e.getTarget(), e.getMetadata(),

@@ -49,4 +49,7 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     // DemoContentService - see PostRepository.findByDemoContentTrue()'s own comment. Deleted
     // last of all (see removeAll()'s ordering) since nearly everything else FKs to a user.
     List<User> findByDemoContentTrue();
+
+    // FE-API-GAPS row 49: the Vikisol staff list.
+    List<User> findByRoleOrderByNameAsc(com.vikisol.arena.auth.entity.Role role);
 }

@@ -747,3 +747,97 @@ No request or response shape changed. Behaviour notes:
 | `GET /admin/retention` | New, platform admin. Candidate-retention dry-run counts: `{ enabled, deleted, cutoff, postings, applications, screeningAnswers, evidence, notes, events, interviews, interviewSlots }`. Never deletes. |
 | `/messages/**` rate limit | GET (conversation list, threads) now has its own limit of 60 per minute per user (`RATE_LIMIT_MESSAGING_READ_PER_MIN`); sending stays at 30 (`RATE_LIMIT_MESSAGING_PER_MIN`). Polling plan: the open thread every 5 s only while it is visible, the conversation list every 30 s. Over the limit answers 429. |
 | `GET /search` | Same results; posts are found through trigram indexes (V40). |
+
+## Admin and account gaps — FE-API-GAPS rows 42–54 (B+)
+
+All `/admin/**` endpoints need the platform-admin role and 2FA. Every admin action writes an audit entry, with the reason as metadata.
+
+### New endpoints
+
+| Row | Endpoint | Body / params | Response |
+|---|---|---|---|
+| 42 | `GET /admin/metrics/launch` | `sinceDays?` | `{ signUps, onboardingCompleted (null), activitiesCreated, activitiesJoined, activitiesCompleted, needsResolved, d1ReturnRate, d7ReturnRate, reportsTotal, since }`. The rates are 0–1, or null until measurable. |
+| 44 | `GET /admin/content` | `kind? (activity\|need\|job)`, `query?`, `page`, `size` | `[{ id, kind, title, authorName, area, status, createdAt, reportCount }]` with paging headers |
+| 44 | `PUT /admin/content/{id}/takedown` | `{ reason }` (required) | The item, now `cancelled` (post) or `closed` (job). Open reports on it are resolved and the owner is notified. |
+| 45 | `GET /admin/catalog/activity-types` | — | `[{ category, subtypes[] }]` |
+| 46 | `PUT /admin/disputes/{id}/resolve` | `{ side: "host"\|"joiner", reason }` | The dispute. `joiner` = marked present (as `accept`); `host` = the no-show stands (as `reject`). |
+| 47 | `GET /admin/jenny/actions` | `page`, `size` | Audit rows of Jenny's service-token actions (`agent.action.authorized` / `.denied`) |
+| 47 | `GET /admin/jenny/providers` | — | `[{ name, purpose, configured }]` for jenny, email, sms, whatsapp, meetings, embeddings and google. No keys, no live calls. |
+| 48 | `GET /admin/audit` | `sinceDays?`, `action?`, `actorId?`, `page`, `size` | `[{ id, actorName, action, target, metadata, createdAt }]`, platform-wide |
+| 48 | `GET /admin/audit/export` | same filters | CSV. Cells that start like a formula get a leading `'`. |
+| 49 | `GET /admin/team` | — | `[{ id, name, email, twoFactorEnabled, launchAreas[], lastActiveAt }]` |
+| 49 | `PUT /admin/team/{id}/launch-areas` | `{ areas: string[] }` (≤10, ≤80 chars) | The staff member |
+| 50 | `PUT /admin/moderation/{id}/warn` | `{ reason }` | — The person behind the report gets a safety notification with the reason. |
+| 50 | `PUT /admin/moderation/{id}/suspend` | `{ reason, durationDays? (1–365) }` | The account detail |
+| 50 | `PUT /admin/moderation/{id}/ban` | `{ reason }` | The account detail |
+| 51 | `GET /admin/users/{id}` | — | `{ id, name, email, handle, role, status (active\|suspended\|banned\|deleted), createdAt, lastActiveAt, twoFactorEnabled, phoneVerified, verificationLevel, suspendedUntil, suspensionReason, bannedAt, deletedAt, lastDataExportAt, deletionRequested, title, location, hasPhoto, posts, reportsAgainst, reportsFiled }`. Never a password, 2FA secret, code or token. |
+| 51 | `PUT /admin/users/{id}/suspend` | `{ reason, durationDays? }` | The account detail. A missing `durationDays` means until restored. |
+| 51 | `PUT /admin/users/{id}/restore` | `{ reason? }` | The account detail. Lifts a suspension or a ban. |
+| 51 | `POST /admin/users/{id}/force-signout` | `{ reason? }` | — Access tokens issued before now stop working, and refresh tokens are revoked. |
+
+Suspend, ban, restore, warn and force sign-out answer 400 for a staff account, your own account, or a deleted one. The report actions act on:
+- the post's author;
+- the room's host;
+- the company's owner, for a job;
+- the other person in a chat.
+
+### Changed behaviour
+
+- ⚠ **Suspended, banned or erased accounts.** Existing tokens get 401 on the next request, and refresh answers 401. Every sign-in path answers 400 "This account is suspended…" (or "…closed by Arena's team."). A Jenny service token can't act for these accounts.
+- ⚠ **`GET /profile/{id}`** answers 404 to anyone but the owner when:
+  - the profile is `hidden`;
+  - it is `nearby` and the viewer is a guest;
+  - either side blocked the other;
+  - the account is deleted or banned.
+- **`GET /admin/verifications`** is also served at `/admin/verification`, with the additions below.
+  - `status=approved` means verified.
+  - Items gain `submittedAt` and `domainMatch`.
+  - The reject body takes `{ note }` or `{ reason }`.
+- **`GET /admin/disputes`**
+  - `status` also takes `resolved_host`, `resolved_joiner` and `expired` (still open 72 hours after it was opened); `open` lists every open dispute.
+  - Items gain `id, activityTitle, joinerName, openedAt, deadlineAt, state, note`.
+- **`PUT /admin/moderation/{id}/dismiss|takedown`** accept an optional `{ reason }`. Every decision is audited, including on posts, rooms and chats.
+- **`GET/PUT /notifications/preferences`** also read and write `messages, activities, needs, jobs`, and add `jenny` (default on) and `marketing` (default off, opt-in). The singular names still work.
+- **`PATCH /profile/me`** takes `interests` (same rules as `PUT /profile/me/interests`) and `photoUrl`:
+  - `""` removes the photo;
+  - the URL already on file is a no-op;
+  - anything else is 400: upload with `POST /profile/me/photo`.
+- **Company audit CSV export:** same columns; cells that start like a formula now get a leading `'`.
+
+## No agent autopilot (DECISIONS.md, 30 Sep 2026)
+
+| Endpoint | Change |
+|---|---|
+| `PUT /profile/me/autonomy` | ⚠ `autopilot` is refused (400); the values are `manual` and `supervised`. Stored `autopilot` profiles now read `supervised` (V42). |
+| `GET /profile/me` | `autonomy` is only ever `manual` or `supervised`. Same field. |
+| `POST /admin/flags` | ⚠ The key `agent_autopilot` (or `autopilot`) is refused (400), and V42 deleted any existing row. |
+
+## Report a person — FE-API-GAPS row 61
+
+| Endpoint | Body | Response |
+|---|---|---|
+| `POST /profile/{id}/report` (signed in) | `{ reason, evidenceUrls? }`. `id` is the user id or profile id, as for `GET /profile/{id}`. Evidence works as for post reports: upload with `POST /reports/evidence` first. | 200 "Report submitted". 400 when reporting yourself, or when your earlier report of this person is still open. 404 for an unknown or deleted account. |
+
+- In `GET /admin/moderation` the item has `contentType: "user"`, a summary of "Report about <name>", and a new field `reportedUserId` (null on other reports).
+- Admins act with `PUT /admin/moderation/{id}/warn|suspend|ban`. `…/takedown` answers 400 (there is no content to take down), and `…/dismiss` works as usual.
+- V43 adds `arena_moderation_items.reported_user_id`.
+
+## Open industry list — FE-API-GAPS row 62
+
+The five industries were fixed in code and in the database. They are now rows in `arena_industries` (V44) that staff manage. Every existing response keeps its shape: `industry` is still the label, e.g. `"Engineering"`.
+
+| Endpoint | Body | Response |
+|---|---|---|
+| `GET /public/industries` (no sign-in) | | `[{ key, label }]`, active only, in display order. Use it for every industry picker and filter instead of a hard-coded list. |
+| `GET /admin/industries` | | `[{ key, label, active, position }]`, including retired ones. |
+| `POST /admin/industries` | `{ label, position? }` | The new row. The key is made from the label (`"Real estate"` → `REAL_ESTATE`) and never changes. 400 for a blank label, more than 80 characters, or a label or key that already exists (any case). |
+| `PUT /admin/industries/{key}` | `{ label?, active?, position? }` | The updated row. 404 for an unknown key; 400 for a label another industry has. |
+
+- **Retiring:** industries are never deleted. `active: false` hides one from `GET /public/industries` and stops anyone newly picking it; profiles, companies and jobs that already have it keep it, and can be saved again unchanged. A renamed industry shows its new label everywhere at once.
+- **Where an industry is sent** (`PUT /profile/me/details`, the company profile, job create/edit, the talent search `industry` filter), the label or the key is accepted, in any case. ⚠ An unknown value now answers 400 with `industry: unknown value …`; it used to be a 500. Picking a retired one answers 400 `… is no longer offered`.
+- Staff changes are audited as `industry.added` and `industry.updated`, and go through the admin 2FA check like the rest of `/admin`.
+- Frontend: the `Industry` union in `src/lib/types.ts` (Vikisol-Arena-FE) becomes a plain `string`, and pickers load `GET /public/industries`.
+
+## Preflight caching
+
+Every CORS answer now carries `Access-Control-Max-Age: 3600`, so a browser asks the preflight `OPTIONS` once an hour per endpoint instead of before every call with an `Authorization` header. Set with `app.cors.max-age-seconds`; no response shape changes.

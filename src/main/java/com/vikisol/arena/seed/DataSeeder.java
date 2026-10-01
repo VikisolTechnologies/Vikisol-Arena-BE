@@ -273,7 +273,7 @@ public class DataSeeder implements ApplicationRunner {
                     .openTo(openTo)
                     .careerHealth(50)
                     .consent(new ConsentSettings(IndianData.RANDOM.nextDouble() < 0.7, IndianData.RANDOM.nextDouble() < 0.85))
-                    .autonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED, AutonomyLevel.AUTOPILOT)))
+                    .autonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED)))
                     .bio(experienceYears + "+ years in " + industry.wireValue().toLowerCase() + ", based in " + IndianData.pick(IndianData.LOCATIONS) + ".")
                     .build();
             // Phase B: the first 8 candidates get real PRECISE-consent coordinates scattered a

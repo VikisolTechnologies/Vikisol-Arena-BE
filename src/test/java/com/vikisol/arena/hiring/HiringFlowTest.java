@@ -143,7 +143,12 @@ class HiringFlowTest extends EmbeddedPostgresAppTest {
     void funnelCountsStagesIncludingHired() throws Exception {
         String a = body(call(asha, post("/applications"), "{\"jobId\":\"" + job.getId() + "\"}")).path("data").path("id").asText();
         body(call(ravi, post("/applications"), "{\"jobId\":\"" + job.getId() + "\"}"));
-        call(recruiter, put("/enterprise/applicants/" + a + "/stage"), "{\"stage\":\"hired\"}").andExpect(status().isOk());
+        // ARCHITECT-REVIEW-BE-1 blocker #4: hired is reachable only via screening -> interview ->
+        // offer -> the candidate's own accept, never a direct company-set stage.
+        call(recruiter, put("/enterprise/applicants/" + a + "/stage"), "{\"stage\":\"screening\"}").andExpect(status().isOk());
+        call(recruiter, put("/enterprise/applicants/" + a + "/stage"), "{\"stage\":\"interview\"}").andExpect(status().isOk());
+        call(recruiter, put("/enterprise/applicants/" + a + "/stage"), "{\"stage\":\"offer\"}").andExpect(status().isOk());
+        call(asha, post("/applications/" + a + "/offer/accept"), null).andExpect(jsonPath("$.data.stage").value("hired"));
         call(recruiter, get("/enterprise/postings/" + job.getId() + "/funnel"), null)
                 .andExpect(jsonPath("$.data.total").value(2))
                 .andExpect(jsonPath("$.data.stages.applied").value(1))

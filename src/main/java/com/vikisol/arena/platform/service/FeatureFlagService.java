@@ -35,8 +35,16 @@ public class FeatureFlagService {
         return featureFlagRepository.findAllByOrderByKeyAsc().stream().map(this::toResponse).toList();
     }
 
+    // Flags that must never exist (DECISIONS.md, 30 Sep 2026): Jenny always prepares and the
+    // person approves each action, so there is no switch that lets it act on its own. V42 deleted
+    // any such row.
+    public static final java.util.Set<String> FORBIDDEN_KEYS = java.util.Set.of("agent_autopilot", "autopilot");
+
     @Transactional
     public FeatureFlagResponse create(UUID actorUserId, UpsertFeatureFlagRequest request) {
+        if (FORBIDDEN_KEYS.contains(request.key().trim().toLowerCase(java.util.Locale.ROOT))) {
+            throw new BadRequestException("Arena has no agent autopilot: Jenny prepares, and the person approves each action.");
+        }
         if (featureFlagRepository.findByKey(request.key()).isPresent()) {
             throw new BadRequestException("A flag with that key already exists.");
         }

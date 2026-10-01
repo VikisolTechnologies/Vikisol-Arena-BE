@@ -16,7 +16,6 @@ import com.vikisol.arena.jobs.entity.JobPosting;
 import com.vikisol.arena.jobs.entity.PostingStatus;
 import com.vikisol.arena.jobs.repository.JobPostingRepository;
 import com.vikisol.arena.platform.service.ModerationService;
-import com.vikisol.arena.profile.entity.Industry;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
@@ -30,6 +29,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class JobPostingService {
 
+    private final com.vikisol.arena.profile.industry.IndustryCatalogue industryCatalogue;
     private final JobPostingRepository jobPostingRepository;
     private final EnterpriseProfileService enterpriseProfileService;
     private final AuditService auditService;
@@ -84,7 +84,7 @@ public class JobPostingService {
         JobPosting posting = JobPosting.builder()
                 .enterprise(enterprise)
                 .title(request.title())
-                .industry(Industry.fromWireValue(request.industry()))
+                .industry(industryCatalogue.resolveForWrite(request.industry(), null))
                 .location(request.location())
                 .remote(request.remote())
                 .employmentType(EmploymentType.fromWireValue(request.employmentType()))
@@ -121,7 +121,7 @@ public class JobPostingService {
             if (r.title().isBlank()) throw new BadRequestException("title can't be empty");
             posting.setTitle(r.title().trim());
         }
-        if (r.industry() != null) posting.setIndustry(Industry.fromWireValue(r.industry()));
+        if (r.industry() != null) posting.setIndustry(industryCatalogue.resolveForWrite(r.industry(), posting.getIndustry()));
         if (r.location() != null) {
             if (r.location().isBlank()) throw new BadRequestException("location can't be empty");
             posting.setLocation(r.location().trim());
@@ -167,13 +167,16 @@ public class JobPostingService {
         }
         // Row 28: back to draft only while nobody has applied; going live counts against the plan.
         if (status == PostingStatus.DRAFT && posting.getStatus() != PostingStatus.DRAFT
-                && !applicationRepository.findByJobPosting(posting).isEmpty()) {
+                && applicationRepository.existsByJobPostingId(posting.getId())) {
             throw new BadRequestException("People have applied, so this posting can't go back to draft. Pause or close it instead.");
         }
         boolean goingLive = (status == PostingStatus.OPEN || status == PostingStatus.PAUSED)
                 && (posting.getStatus() == PostingStatus.DRAFT || posting.getStatus() == PostingStatus.CLOSED);
         if (goingLive) requireRoomUnderCap(actingTenant);
-        if ((status == PostingStatus.OPEN || status == PostingStatus.PAUSED) && posting.getStatus() == PostingStatus.DRAFT) {
+        // ARCHITECT-REVIEW-BE-1 blocker #5: only checked on DRAFT->OPEN/PAUSED, so an unverified
+        // company could still CLOSED/PAUSED->OPEN a posting straight back to live. Verification
+        // is required on every transition INTO open, not just the first one.
+        if (status == PostingStatus.OPEN) {
             requirePublishAllowed(actingTenant);
         }
         posting.setStatus(status);

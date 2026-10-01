@@ -46,6 +46,7 @@ import static org.hamcrest.Matchers.containsString;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -179,6 +180,16 @@ class ListOrderAndHeadersTest extends EmbeddedPostgresAppTest {
                 .andExpect(header().exists(PageLimits.HAS_MORE_HEADER))
                 .andExpect(header().string("Access-Control-Expose-Headers", containsString(PageLimits.TOTAL_COUNT_HEADER)))
                 .andExpect(header().string("Access-Control-Expose-Headers", containsString(PageLimits.HAS_MORE_HEADER)));
+    }
+
+    @Test
+    void preflightAnswersAreCachedForAnHour() throws Exception {
+        mvc.perform(options("/communities").header("Origin", "http://localhost:3000")
+                        .header("Access-Control-Request-Method", "GET")
+                        .header("Access-Control-Request-Headers", "authorization"))
+                .andExpect(status().isOk())
+                .andExpect(header().string("Access-Control-Allow-Origin", "http://localhost:3000"))
+                .andExpect(header().string("Access-Control-Max-Age", "3600"));
     }
 
     private ResultActions list(String path, int page, int size) throws Exception {

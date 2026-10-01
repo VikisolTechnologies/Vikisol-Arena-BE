@@ -43,6 +43,7 @@ public class TalentSearchService {
             "A slightly non-obvious pick, but the skill graph lines up well.",
             "Recently active, open to new roles, and priced within typical range.");
 
+    private final com.vikisol.arena.profile.industry.IndustryCatalogue industryCatalogue;
     private final CandidateProfileRepository candidateProfileRepository;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final EnterpriseProfileService enterpriseProfileService;
@@ -58,7 +59,7 @@ public class TalentSearchService {
     public PagedResponse<TalentSearchResult> search(UUID enterpriseUserId, String text, String industry, boolean remoteOnly, Pageable pageable) {
         EnterpriseProfile enterprise = requireEnterprise(enterpriseUserId);
         Industry industryEnum = (industry == null || industry.isBlank() || "All".equalsIgnoreCase(industry))
-                ? null : Industry.fromWireValue(industry);
+                ? null : industryCatalogue.resolve(industry);
         // Always a non-null string ("" means "no filter") - the repository query relies on this,
         // see the comment on CandidateProfileRepository.search().
         String normalizedText = (text == null || text.isBlank()) ? "" : text.toLowerCase();

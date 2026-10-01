@@ -35,4 +35,13 @@ public class NotificationPreference extends BaseEntity {
     @Column(nullable = false)
     @Builder.Default
     private boolean message = true;
+
+    // V41, FE-API-GAPS row 52. Marketing is opt-in (off until the person turns it on).
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean jenny = true;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean marketing = false;
 }

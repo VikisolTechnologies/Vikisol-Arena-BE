@@ -31,6 +31,8 @@ public class PostMapper {
     private final PostReactionRepository postReactionRepository;
     private final PostJoinRequestRepository postJoinRequestRepository;
     private final PostRepository postRepository;
+    private final com.vikisol.arena.common.service.CloudinaryService cloudinaryService;
+    private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
 
     // Single-post convenience overload (a few extra queries) - list/feed call sites should use
     // the batched overload below instead, same split as ProjectMapper's toResponse(Bid) vs
@@ -186,7 +188,7 @@ public class PostMapper {
                 post.getCapacity(), post.getSpotsFilled(), post.getStatus().wireValue(),
                 post.getStartsAt() == null ? null : post.getStartsAt().toString(),
                 post.getEndsAt() == null ? null : post.getEndsAt().toString(),
-                tags, mediaUrls, post.isJoinable(),
+                tags, signLocalMedia(mediaUrls), post.isJoinable(),
                 mine ? Boolean.TRUE : null, myJoinStatus, roomId, post.getCreatedAt().toString(),
                 displayLat, displayLng,
                 canSeeExactMeetingPoint ? post.getExactMeetingPoint() : null,
@@ -235,5 +237,18 @@ public class PostMapper {
         Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
                 requests.stream().map(r -> r.getUser().getId()).toList());
         return requests.stream().map(r -> toResponse(r, profiles.get(r.getUser().getId()))).toList();
+    }
+
+    // B12: a real Cloudinary media URL is permanent and needs no signing (same reasoning as
+    // profile/company logo URLs never being Cloudinary-signed either). A local-fallback media URL
+    // (CloudinaryService.isLocalFallbackActive, dev-only) is stored bare in the post and must be
+    // signed fresh on every read instead - the same pattern CandidateProfileMapper already uses
+    // for photo/CV URLs - so it never permanently expires the way signing it once at upload time
+    // would (GET /files/** rejects an expired signature outright, see FileController).
+    private List<String> signLocalMedia(List<String> mediaUrls) {
+        if (mediaUrls == null || mediaUrls.isEmpty()) return mediaUrls;
+        return mediaUrls.stream()
+                .map(url -> cloudinaryService.isLocalMediaUrl(url) ? fileSigningService.sign(url) : url)
+                .toList();
     }
 }

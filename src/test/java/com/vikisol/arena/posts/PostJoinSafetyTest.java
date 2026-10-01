@@ -27,6 +27,7 @@ class PostJoinSafetyTest extends EmbeddedPostgresAppTest {
     @Autowired PostJoinRequestRepository joins;
     @Autowired PostService service;
     @Autowired PlatformTransactionManager transactions;
+    @Autowired com.vikisol.arena.activities.repository.ActivityAttendanceRepository attendances;
 
     User user() {
         return users.save(User.builder().email(UUID.randomUUID() + "@test.local").passwordHash("x")
@@ -125,6 +126,10 @@ class PostJoinSafetyTest extends EmbeddedPostgresAppTest {
         activity.setStartsAt(Instant.now().minusSeconds(60));
         var recorded = service.recordOutcome(host.getId(), activity.getId(), request.getId(), "no_show");
         assertThat(recorded.outcome()).isEqualTo("no_show");
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX (activities): a no-show must stamp outcomeRecordedAt
+        // too, not only an "attended" outcome - the 72h dispute window is computed from it, so a
+        // null here would make every dispute on a no-show fail outright.
+        assertThat(attendances.findByJoinRequestId(request.getId()).orElseThrow().getOutcomeRecordedAt()).isNotNull();
         var someoneElse = user();
         var other = post(someoneElse, 2);
         assertThatThrownBy(() -> service.recordOutcome(host.getId(), other.getId(), request.getId(), "attended"))

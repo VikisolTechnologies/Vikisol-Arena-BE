@@ -94,16 +94,22 @@ public class PlatformAdminController {
         return ResponseEntity.ok(ApiResponse.ok(moderationService.listQueue(status, PageLimits.of(page, size))));
     }
 
+    // An optional { reason } goes into the audit entry (FE-API-GAPS row 48).
     @PutMapping("/moderation/{id}/dismiss")
-    public ResponseEntity<ApiResponse<Void>> dismissModeration(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        moderationService.dismiss(principal.getId(), id);
+    public ResponseEntity<ApiResponse<Void>> dismissModeration(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+                                                               @Valid @RequestBody(required = false) ModerationReason request) {
+        moderationService.dismiss(principal.getId(), id, request == null ? null : request.reason());
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
     @PutMapping("/moderation/{id}/takedown")
-    public ResponseEntity<ApiResponse<Void>> takedownModeration(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        moderationService.takedown(principal.getId(), id);
+    public ResponseEntity<ApiResponse<Void>> takedownModeration(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+                                                                @Valid @RequestBody(required = false) ModerationReason request) {
+        moderationService.takedown(principal.getId(), id, request == null ? null : request.reason());
         return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    public record ModerationReason(@jakarta.validation.constraints.Size(max = 500, message = "must be at most 500 characters") String reason) {
     }
 
     @GetMapping("/analytics")

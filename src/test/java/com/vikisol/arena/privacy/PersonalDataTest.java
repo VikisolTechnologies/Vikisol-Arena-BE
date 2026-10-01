@@ -86,7 +86,8 @@ class PersonalDataTest extends EmbeddedPostgresAppTest {
             "arena_job_screening_questions", "the company's job content",
             "arena_project_roles", "part of the project post",
             "arena_project_details", "part of the project post (category, cover, outcome)",
-            "arena_business_verifications", "the company's record; the submitter's work email is handled in erase()");
+            "arena_business_verifications", "the company's record; the submitter's work email is handled in erase()",
+            "arena_industries", "the staff-managed industry list (V44): reference data, no person's entries");
 
     @BeforeEach
     void setUp() {
@@ -256,6 +257,7 @@ class PersonalDataTest extends EmbeddedPostgresAppTest {
         call(recruiter, post("/enterprise/applicants/" + app.getId() + "/notes"), "{\"text\":\"Strong on logistics\"}").andExpect(status().isOk());
         call(recruiter, put("/enterprise/applicants/" + app.getId() + "/requirements/" + mustHave), "{\"assessment\":\"met\",\"note\":\"Clear examples\"}")
                 .andExpect(status().isOk());
+        call(recruiter, put("/enterprise/applicants/" + app.getId() + "/stage"), "{\"stage\":\"screening\"}").andExpect(status().isOk());
         call(recruiter, put("/enterprise/applicants/" + app.getId() + "/stage"), "{\"stage\":\"interview\",\"message\":\"Let's talk\"}").andExpect(status().isOk());
         Interview interview = interviews.save(Interview.builder().application(applications.findById(app.getId()).orElseThrow()).build());
         call(recruiter, post("/interviews/" + interview.getId() + "/feedback"),
