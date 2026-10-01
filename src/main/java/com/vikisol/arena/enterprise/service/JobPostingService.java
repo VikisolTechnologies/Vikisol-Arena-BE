@@ -167,7 +167,7 @@ public class JobPostingService {
         }
         // Row 28: back to draft only while nobody has applied; going live counts against the plan.
         if (status == PostingStatus.DRAFT && posting.getStatus() != PostingStatus.DRAFT
-                && !applicationRepository.findByJobPosting(posting).isEmpty()) {
+                && applicationRepository.existsByJobPostingId(posting.getId())) {
             throw new BadRequestException("People have applied, so this posting can't go back to draft. Pause or close it instead.");
         }
         boolean goingLive = (status == PostingStatus.OPEN || status == PostingStatus.PAUSED)

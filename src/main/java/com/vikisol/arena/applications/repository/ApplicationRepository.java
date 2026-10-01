@@ -32,6 +32,10 @@ public interface ApplicationRepository extends JpaRepository<Application, UUID> 
     java.util.List<Application> findByCandidate(CandidateProfile candidate);
     java.util.List<Application> findByJobPosting(JobPosting jobPosting);
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX (business): JobPostingService.setStatus only needs to
+    // know whether anyone has applied, not load every Application row to check .isEmpty().
+    boolean existsByJobPostingId(java.util.UUID jobPostingId);
+
     // Batched form of existsByCandidateIdAndJobPostingEnterpriseId for a whole page of candidates
     // at once - one query instead of one-per-row. Callers turn this into a Set for O(1) lookups.
     @Query("select distinct a.candidate.id from Application a where a.candidate.id in :candidateIds and a.jobPosting.enterprise.id = :enterpriseId")

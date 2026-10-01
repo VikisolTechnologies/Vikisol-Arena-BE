@@ -32,9 +32,20 @@ ALTER TABLE public.arena_candidate_profiles DROP CONSTRAINT IF EXISTS arena_cand
 ALTER TABLE public.arena_enterprise_profiles DROP CONSTRAINT IF EXISTS arena_enterprise_profiles_industry_check;
 ALTER TABLE public.arena_job_postings DROP CONSTRAINT IF EXISTS arena_job_postings_industry_check;
 
+-- ARCHITECT-REVIEW-BE-1 SHOULD-FIX (migrations): NOT VALID + a separate VALIDATE CONSTRAINT.
+-- A plain ADD CONSTRAINT ... FOREIGN KEY takes an ACCESS EXCLUSIVE lock on both tables for as
+-- long as it takes to scan and verify every existing row - on a production table with real
+-- traffic, that's a write-blocking outage for the duration. NOT VALID adds the constraint
+-- (enforced on every new/updated row from this moment on) without that scan; VALIDATE CONSTRAINT
+-- then does the scan under a much weaker SHARE UPDATE EXCLUSIVE lock, which doesn't block reads
+-- or writes. Same end state, no full-table lock window.
 ALTER TABLE public.arena_candidate_profiles
-    ADD CONSTRAINT fk_candidate_profiles_industry FOREIGN KEY (industry) REFERENCES public.arena_industries (key);
+    ADD CONSTRAINT fk_candidate_profiles_industry FOREIGN KEY (industry) REFERENCES public.arena_industries (key) NOT VALID;
 ALTER TABLE public.arena_enterprise_profiles
-    ADD CONSTRAINT fk_enterprise_profiles_industry FOREIGN KEY (industry) REFERENCES public.arena_industries (key);
+    ADD CONSTRAINT fk_enterprise_profiles_industry FOREIGN KEY (industry) REFERENCES public.arena_industries (key) NOT VALID;
 ALTER TABLE public.arena_job_postings
-    ADD CONSTRAINT fk_job_postings_industry FOREIGN KEY (industry) REFERENCES public.arena_industries (key);
+    ADD CONSTRAINT fk_job_postings_industry FOREIGN KEY (industry) REFERENCES public.arena_industries (key) NOT VALID;
+
+ALTER TABLE public.arena_candidate_profiles VALIDATE CONSTRAINT fk_candidate_profiles_industry;
+ALTER TABLE public.arena_enterprise_profiles VALIDATE CONSTRAINT fk_enterprise_profiles_industry;
+ALTER TABLE public.arena_job_postings VALIDATE CONSTRAINT fk_job_postings_industry;
