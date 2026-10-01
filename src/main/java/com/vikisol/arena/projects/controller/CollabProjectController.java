@@ -103,13 +103,14 @@ public class CollabProjectController {
     @PreAuthorize("permitAll()")
     @GetMapping("/projects/of/{userId}")
     public ResponseEntity<ApiResponse<List<ProjectCard>>> projectsOf(
+            @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable UUID userId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
-        return PageLimits.ok(projectService.projectsOf(userId, PageLimits.of(page, size)));
+        return PageLimits.ok(projectService.projectsOf(userId, principal == null ? null : principal.getId(), PageLimits.of(page, size)));
     }
 
     @PreAuthorize("permitAll()")
     @GetMapping("/profile/{userId}/stats")
-    public ResponseEntity<ApiResponse<ProfileStats>> stats(@PathVariable UUID userId) {
-        return ResponseEntity.ok(ApiResponse.ok(projectService.stats(userId)));
+    public ResponseEntity<ApiResponse<ProfileStats>> stats(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID userId) {
+        return ResponseEntity.ok(ApiResponse.ok(projectService.stats(userId, principal == null ? null : principal.getId())));
     }
 }

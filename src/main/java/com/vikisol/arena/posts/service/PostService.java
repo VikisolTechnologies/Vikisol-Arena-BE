@@ -92,6 +92,7 @@ public class PostService {
     private final CloudinaryService cloudinaryService;
     private final com.vikisol.arena.communities.repository.CommunityRepository communityRepository;
     private final com.vikisol.arena.communities.repository.CommunityMemberRepository communityMemberRepository;
+    private final com.vikisol.arena.profile.service.ProfileVisibilityGuard visibilityGuard;
 
     @Transactional(readOnly = true)
     public List<PostResponse> getFeed(UUID viewingUserId, int page, int size) {
@@ -174,6 +175,9 @@ public class PostService {
     // excluded (nothing to show a visitor about a post that never happened).
     @Transactional(readOnly = true)
     public PagedResponse<PostResponse> getUserPosts(UUID targetUserId, UUID viewingUserId, Pageable pageable) {
+        // ARCHITECT-REVIEW-BE-1 blocker #2: permitAll(), used to answer for a hidden/blocked/
+        // banned/deleted person too.
+        visibilityGuard.requireVisibleTo(viewingUserId, targetUserId);
         boolean viewerFollowsTarget = viewingUserId != null
                 && followRepository.existsByFollowerUserIdAndFollowingUserId(viewingUserId, targetUserId);
         boolean isSelf = viewingUserId != null && viewingUserId.equals(targetUserId);

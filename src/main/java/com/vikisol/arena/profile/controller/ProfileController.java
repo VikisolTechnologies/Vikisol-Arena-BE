@@ -37,6 +37,7 @@ public class ProfileController {
 
     private final CandidateProfileService profileService;
     private final com.vikisol.arena.platform.service.ModerationService moderationService;
+    private final com.vikisol.arena.profile.service.ProfileVisibilityGuard visibilityGuard;
 
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<CandidateProfileResponse>> getMyProfile(@AuthenticationPrincipal UserPrincipal principal) {
@@ -60,10 +61,14 @@ public class ProfileController {
 
     // FE-API-GAPS row 61: report a person. `id` is their user id or profile id, as for GET above.
     // Evidence files work as for post reports (POST /reports/evidence first).
+    // ARCHITECT-REVIEW-BE-1 blocker #2: used to skip visibility entirely, so this endpoint's
+    // 200-vs-404 could be used to probe whether a hidden/blocked person exists at all.
     @PostMapping("/{id}/report")
     public ResponseEntity<ApiResponse<Void>> reportPerson(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
                                                           @Valid @RequestBody com.vikisol.arena.posts.dto.ReportPostRequest request) {
-        moderationService.fileUserReport(principal.getId(), profileService.resolveUserId(id), request.reason(), request.evidenceUrls());
+        UUID targetUserId = profileService.resolveUserId(id);
+        visibilityGuard.requireVisibleTo(principal.getId(), targetUserId);
+        moderationService.fileUserReport(principal.getId(), targetUserId, request.reason(), request.evidenceUrls());
         return ResponseEntity.ok(ApiResponse.ok("Report submitted", null));
     }
 

@@ -164,6 +164,40 @@ class PeopleAppTest extends EmbeddedPostgresAppTest {
                 .andExpect(jsonPath("$.data.people.length()").value(0));
     }
 
+    // ARCHITECT-REVIEW-BE-1 blocker #2: GET /profile/{id} was the only endpoint that hid a
+    // hidden/blocked/banned person - every one of these five used to answer anyway.
+    @Test
+    void hiddenBlockedAndBannedProfilesAreInvisibleEverywhereNotJustGetProfile() throws Exception {
+        EnterpriseProfile acme = enterprises.save(EnterpriseProfile.builder().user(recruiter).companyName("Acme").logoEmoji("A")
+                .industry(Industry.DESIGN).size(CompanySize.S_11_50).build());
+        String ravisProfileId = profiles.findByUserId(ravi.getId()).orElseThrow().getId().toString();
+
+        call(ravi, put("/profile/me/visibility"), "{\"profile\":\"hidden\"}").andExpect(status().isOk());
+        call(asha, get("/needs/outcomes/" + ravi.getId()), null).andExpect(status().isNotFound());
+        call(asha, get("/projects/of/" + ravi.getId()), null).andExpect(status().isNotFound());
+        call(asha, get("/profile/" + ravi.getId() + "/stats"), null).andExpect(status().isNotFound());
+        call(asha, get("/posts/by-user/" + ravi.getId()), null).andExpect(status().isNotFound());
+        call(asha, post("/profile/" + ravi.getId() + "/report"), "{\"reason\":\"Spam\"}").andExpect(status().isNotFound());
+        call(recruiter, post("/enterprise/talent/" + ravisProfileId + "/connect"), "{\"note\":\"Hi\"}").andExpect(status().isNotFound());
+        // The owner can always see their own.
+        call(ravi, get("/profile/" + ravi.getId() + "/stats"), null).andExpect(status().isOk());
+        call(ravi, put("/profile/me/visibility"), "{\"profile\":\"everyone\"}").andExpect(status().isOk());
+
+        User banned = talent("Banned");
+        banned.setBannedAt(Instant.now());
+        users.save(banned);
+        call(asha, get("/profile/" + banned.getId() + "/stats"), null).andExpect(status().isNotFound());
+        call(asha, get("/posts/by-user/" + banned.getId()), null).andExpect(status().isNotFound());
+
+        call(asha, post("/blocks/" + meera.getId()), null).andExpect(status().isOk());
+        call(asha, get("/projects/of/" + meera.getId()), null).andExpect(status().isNotFound());
+        call(meera, get("/projects/of/" + asha.getId()), null).andExpect(status().isNotFound()); // either direction
+
+        // A stranger with no CandidateProfile at all (e.g. the recruiter) is always visible -
+        // this guard is about talent profiles, not every user row.
+        call(asha, get("/posts/by-user/" + recruiter.getId()), null).andExpect(status().isOk());
+    }
+
     @Test
     void employersAskFirstAndMessageOnlyAfterAcceptOrApply() throws Exception {
         EnterpriseProfile acme = enterprises.save(EnterpriseProfile.builder().user(recruiter).companyName("Acme").logoEmoji("A")
