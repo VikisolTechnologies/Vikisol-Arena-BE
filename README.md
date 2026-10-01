@@ -36,13 +36,16 @@ too instead of changing the role. Redis needs no auth locally — the default
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21   # or wherever your JDK 21 lives
 DB_PASSWORD="the-same-password-from-step-1" \
 SEED_ENABLED=false \
+SPRING_PROFILES_ACTIVE=local \
 PLATFORM_ADMIN_EMAIL="you@vikisol.dev" \
 PLATFORM_ADMIN_PASSWORD="type-your-own-password-here" \
 ./mvnw spring-boot:run
 ```
 
 `DB_PASSWORD` is required - there's no built-in default any more, so startup fails loudly instead
-of ever silently using one.
+of ever silently using one. `SPRING_PROFILES_ACTIVE=local` turns on the local-disk photo-upload
+fallback (see "Photo uploads locally" below) - harmless to leave out, but without it photo/post
+uploads just report "not set up yet" the same as before.
 
 Starts on `http://localhost:8081`, API base path `/api/v1` (so `http://localhost:8081/api/v1`).
 Flyway runs every migration up to the current `V44` automatically on first boot. `SEED_ENABLED=false`
@@ -61,6 +64,25 @@ dropdb -U postgres -h localhost vikisol_arena && createdb -U postgres -h localho
 
 Flyway rebuilds the schema from scratch the next time the app starts. Nothing needs to be dropped
 in Redis — it only holds refresh tokens, denylist entries, and rate-limit counters, all disposable.
+
+### Photo uploads locally (no Cloudinary)
+
+Post/activity photos normally go browser → Cloudinary directly (`POST /media/upload-signature`,
+see `CloudinaryService`'s own comment for why). With no `CLOUDINARY_*` env vars set, that reports
+"Photo and video uploads aren't set up yet" — fine for most local work, but blocks verifying the
+photo-cover path specifically.
+
+With `SPRING_PROFILES_ACTIVE=local` set (step 2 above) and Cloudinary still unconfigured,
+`POST /media/upload-signature` instead points the browser at this server's own
+`POST /media/local-upload`, which stores the file on local disk through the same
+`FileStorageService` every other upload (CVs, profile photos) already uses, and returns the same
+`{"secure_url": "..."}` shape Cloudinary would — arena-web's upload code needs no changes to use
+either one. **Images only** (`png`/`jpg`/`jpeg`/`webp`/`gif`) — no video support locally yet.
+
+This fallback is dev-only by design: it's never active unless the `local` profile is explicitly
+set, and `CloudinaryService` logs a loud warning at startup if Cloudinary is unconfigured and the
+`local` profile *isn't* active either (i.e. a real deployment with Cloudinary missing) - that
+should never go unnoticed the way a quiet per-upload 400 could.
 
 ### 4. The first platform admin (local, one-time)
 
