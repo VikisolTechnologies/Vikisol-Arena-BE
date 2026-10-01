@@ -67,9 +67,26 @@ class AdminAccountGapsTest extends EmbeddedPostgresAppTest {
     @MockBean RefreshTokenService refreshTokens;
 
     private User staff, asha, ravi;
+    // ARCHITECT-REVIEW-BE-1 (architect notes on B8/B9): launchMetricsCountRealActivityOnly
+    // asserted an absolute signUps count, which only ever matched running this class alone - in
+    // the full suite, other test classes' (non-demo, non-admin) users are already in the shared
+    // embedded Postgres by the time this one runs, so the real count is always
+    // signUpsBaseline + however many this test itself creates, never a fixed number. Captured
+    // before setUp() creates its own fixtures, with production's exact filter.
+    private long signUpsBaseline, activitiesCreatedBaseline, activitiesJoinedBaseline, reportsBaseline;
 
     @BeforeEach
     void setUp() {
+        signUpsBaseline = jdbc.queryForObject(
+                "select count(*) from arena_users where demo_content = false and role <> 'PLATFORM_ADMIN'", Long.class);
+        activitiesCreatedBaseline = jdbc.queryForObject(
+                "select count(*) from arena_posts where intent_type = 'ACTIVITY' and demo_content = false", Long.class);
+        activitiesJoinedBaseline = jdbc.queryForObject("""
+                select count(*) from arena_post_joins j join arena_posts p on p.id = j.post_id
+                where p.intent_type = 'ACTIVITY' and j.status = 'APPROVED' and j.demo_content = false
+                """, Long.class);
+        reportsBaseline = jdbc.queryForObject(
+                "select count(*) from arena_moderation_items where demo_content = false", Long.class);
         when(denylist.isDenylisted(anyString())).thenReturn(false);
         when(refreshTokens.issue(any())).thenReturn("refresh-token");
         staff = users.save(User.builder().email(UUID.randomUUID() + "@test.local").passwordHash("x").name("Staff")
@@ -220,7 +237,7 @@ class AdminAccountGapsTest extends EmbeddedPostgresAppTest {
     @Test
     void launchMetricsCountRealActivityOnly() throws Exception {
         call(staff, get("/admin/metrics/launch"), null)
-                .andExpect(jsonPath("$.data.signUps").value(2))
+                .andExpect(jsonPath("$.data.signUps").value(signUpsBaseline + 2))
                 .andExpect(jsonPath("$.data.onboardingCompleted").doesNotExist())
                 .andExpect(jsonPath("$.data.d1ReturnRate").doesNotExist());
         String activity = id(call(asha, post("/posts"), "{\"intentType\":\"activity\",\"body\":\"Badminton\",\"startsAt\":\""
@@ -237,10 +254,10 @@ class AdminAccountGapsTest extends EmbeddedPostgresAppTest {
         jdbc.update("insert into arena_user_active_days (user_id, day) values (?, (now() at time zone 'utc')::date - 2), (?, (now() at time zone 'utc')::date - 1), (?, (now() at time zone 'utc')::date - 2)",
                 asha.getId(), asha.getId(), ravi.getId());
         call(staff, get("/admin/metrics/launch"), null)
-                .andExpect(jsonPath("$.data.signUps").value(2))
-                .andExpect(jsonPath("$.data.activitiesCreated").value(1))
-                .andExpect(jsonPath("$.data.activitiesJoined").value(1))
-                .andExpect(jsonPath("$.data.reportsTotal").value(1))
+                .andExpect(jsonPath("$.data.signUps").value(signUpsBaseline + 2))
+                .andExpect(jsonPath("$.data.activitiesCreated").value(activitiesCreatedBaseline + 1))
+                .andExpect(jsonPath("$.data.activitiesJoined").value(activitiesJoinedBaseline + 1))
+                .andExpect(jsonPath("$.data.reportsTotal").value(reportsBaseline + 1))
                 .andExpect(jsonPath("$.data.d1ReturnRate").value(0.5))
                 .andExpect(jsonPath("$.data.d7ReturnRate").doesNotExist());
         call(asha, get("/admin/metrics/launch"), null).andExpect(status().isForbidden());

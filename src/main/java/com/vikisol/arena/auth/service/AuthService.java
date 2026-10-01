@@ -40,6 +40,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.Set;
@@ -111,12 +113,27 @@ public class AuthService {
         if (userRepository.existsByEmailIgnoreCase(request.email())) {
             throw new BadRequestException("An account with this email already exists");
         }
+        // ARCHITECT-REVIEW-BE-1 (architect notes on B8/B9): the 18+ rule, enforced here now
+        // instead of only at activity create/join - see SignUpRequest's own comment.
+        LocalDate dateOfBirth;
+        try {
+            dateOfBirth = LocalDate.parse(request.dateOfBirth());
+        } catch (DateTimeParseException e) {
+            throw new BadRequestException("dateOfBirth must be a valid date (YYYY-MM-DD)");
+        }
+        if (dateOfBirth.isAfter(LocalDate.now())) {
+            throw new BadRequestException("dateOfBirth can't be in the future");
+        }
+        if (!com.vikisol.arena.common.util.AgeUtil.isAdult(dateOfBirth)) {
+            throw new BadRequestException("You must be " + com.vikisol.arena.common.util.AgeUtil.MINIMUM_AGE + " or older to join Arena");
+        }
         Role role = Role.fromWireValue(request.role());
         User user = User.builder()
                 .email(request.email().toLowerCase())
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .name(request.name())
                 .role(role)
+                .dateOfBirth(dateOfBirth)
                 .handle(HandleGenerator.generate(request.name(), userRepository::existsByHandle))
                 .build();
         user = userRepository.save(user);

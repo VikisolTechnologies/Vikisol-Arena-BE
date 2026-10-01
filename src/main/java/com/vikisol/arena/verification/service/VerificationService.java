@@ -78,10 +78,16 @@ public class VerificationService {
         return getStatus(userId);
     }
 
+    // ARCHITECT-REVIEW-BE-1 (architect notes on B8/B9): the 18+ rule, enforced here too - this is
+    // the onboarding path a Google/phone signup (no password form, so no SignUpRequest.dateOfBirth)
+    // uses to set theirs, and it only checked "not in the future" before.
     @Transactional
     public void setDateOfBirth(UUID userId, LocalDate dateOfBirth) {
         if (dateOfBirth.isAfter(LocalDate.now())) {
             throw new BadRequestException("Date of birth can't be in the future");
+        }
+        if (!com.vikisol.arena.common.util.AgeUtil.isAdult(dateOfBirth)) {
+            throw new BadRequestException("You must be " + com.vikisol.arena.common.util.AgeUtil.MINIMUM_AGE + " or older to join Arena");
         }
         User user = requireUser(userId);
         user.setDateOfBirth(dateOfBirth);

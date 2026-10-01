@@ -166,6 +166,48 @@ class ProfileBasicsTest extends EmbeddedPostgresAppTest {
                 .andExpect(jsonPath("$.data.newPassword").value("must be at least 8 characters"));
     }
 
+    // ARCHITECT-REVIEW-BE-1 (architect notes on B8/B9): the 18+ rule must be enforced on sign-up
+    // itself, not only at activity create/join.
+    @Test
+    void signUpRequiresBeingEighteenOrOlder() throws Exception {
+        String email = "minor-" + UUID.randomUUID() + "@test.local";
+        mvc.perform(post("/auth/signup").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Minor\",\"email\":\"" + email + "\",\"password\":\"password1\",\"role\":\"talent\","
+                                + "\"dateOfBirth\":\"" + java.time.LocalDate.now().minusYears(17) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("You must be 18 or older to join Arena"));
+        mvc.perform(post("/auth/signup").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"No DOB\",\"email\":\"" + email + "\",\"password\":\"password1\",\"role\":\"talent\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.data.dateOfBirth").value("is required"));
+        mvc.perform(post("/auth/signup").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Future\",\"email\":\"" + email + "\",\"password\":\"password1\",\"role\":\"talent\","
+                                + "\"dateOfBirth\":\"" + java.time.LocalDate.now().plusDays(1) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("dateOfBirth can't be in the future"));
+        mvc.perform(post("/auth/signup").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Adult\",\"email\":\"" + email + "\",\"password\":\"password1\",\"role\":\"talent\","
+                                + "\"dateOfBirth\":\"" + java.time.LocalDate.now().minusYears(19) + "\"}"))
+                .andExpect(status().isOk());
+    }
+
+    // ARCHITECT-REVIEW-BE-1 (architect notes on B8/B9): the onboarding path a Google/phone
+    // signup uses to set its date of birth (no password-form SignUpRequest to carry it) must
+    // enforce 18+ too, not just "not in the future".
+    @Test
+    void verificationDateOfBirthAlsoRequiresBeingEighteenOrOlder() throws Exception {
+        User googleSignup = user(Role.TALENT);
+        mvc.perform(put("/verification/date-of-birth").header("Authorization", bearer(googleSignup))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"dateOfBirth\":\"" + java.time.LocalDate.now().minusYears(16) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("You must be 18 or older to join Arena"));
+        mvc.perform(put("/verification/date-of-birth").header("Authorization", bearer(googleSignup))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"dateOfBirth\":\"" + java.time.LocalDate.now().minusYears(20) + "\"}"))
+                .andExpect(status().isOk());
+    }
+
     private User user(Role role) {
         return users.save(User.builder().email(UUID.randomUUID() + "@test.local").passwordHash("x").name("Asha")
                 .role(role).dateOfBirth(LocalDate.of(1990, 1, 1)).build());
