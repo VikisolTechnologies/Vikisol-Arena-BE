@@ -90,11 +90,17 @@ class ProfileBasicsTest extends EmbeddedPostgresAppTest {
 
     @Test
     void gap5AvailabilityIsAClosedList() throws Exception {
+        // API-ISSUES.md: validated case-insensitively, but the caller's own casing comes back
+        // unchanged - "Weekends" (the FE's AVAILABILITY Title Case) must round-trip as
+        // "Weekends", not get lowercased to "weekends", so GET /profile/me/basics exact-matches
+        // the FE's own vocabulary constant. A case-insensitive duplicate keeps the first-seen
+        // spelling.
         mvc.perform(patch("/profile/me").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"availability\":[\"Weekends\",\"evenings\",\"weekends\"]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.availability.length()").value(2))
-                .andExpect(jsonPath("$.data.availability[0]").value("weekends"));
+                .andExpect(jsonPath("$.data.availability[0]").value("Weekends"))
+                .andExpect(jsonPath("$.data.availability[1]").value("evenings"));
         mvc.perform(patch("/profile/me").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"availability\":[\"mornings\"]}"))
                 .andExpect(status().isBadRequest());
@@ -201,7 +207,12 @@ class ProfileBasicsTest extends EmbeddedPostgresAppTest {
     // enforce 18+ too, not just "not in the future".
     @Test
     void verificationDateOfBirthAlsoRequiresBeingEighteenOrOlder() throws Exception {
-        User googleSignup = user(Role.TALENT);
+        // No dateOfBirth yet, as a real Google/phone signup (no SignUpRequest.dateOfBirth) would
+        // land - user(Role) always sets one, so built directly here instead.
+        User googleSignup = users.save(User.builder().email(UUID.randomUUID() + "@test.local").passwordHash("x")
+                .name("Google Signup").role(Role.TALENT).build());
+        mvc.perform(get("/verification").header("Authorization", bearer(googleSignup)))
+                .andExpect(jsonPath("$.data.dateOfBirthSet").value(false));
         mvc.perform(put("/verification/date-of-birth").header("Authorization", bearer(googleSignup))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"dateOfBirth\":\"" + java.time.LocalDate.now().minusYears(16) + "\"}"))
@@ -211,6 +222,9 @@ class ProfileBasicsTest extends EmbeddedPostgresAppTest {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"dateOfBirth\":\"" + java.time.LocalDate.now().minusYears(20) + "\"}"))
                 .andExpect(status().isOk());
+        // API-ISSUES.md: dateOfBirthSet lets the FE skip re-asking on a second device.
+        mvc.perform(get("/verification").header("Authorization", bearer(googleSignup)))
+                .andExpect(jsonPath("$.data.dateOfBirthSet").value(true));
     }
 
     private User user(Role role) {

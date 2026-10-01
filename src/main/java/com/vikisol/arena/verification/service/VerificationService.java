@@ -42,7 +42,8 @@ public class VerificationService {
         User user = requireUser(userId);
         boolean otpPending = user.getPendingOtpHash() != null
                 && user.getPendingOtpExpiresAt() != null && user.getPendingOtpExpiresAt().isAfter(Instant.now());
-        return new VerificationStatusResponse(user.getVerificationLevel().wireValue(), user.isPhoneVerified(), user.getPhoneNumber(), otpPending);
+        return new VerificationStatusResponse(user.getVerificationLevel().wireValue(), user.isPhoneVerified(), user.getPhoneNumber(), otpPending,
+                user.getDateOfBirth() != null);
     }
 
     @Transactional
