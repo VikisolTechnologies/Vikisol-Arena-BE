@@ -47,6 +47,17 @@ of ever silently using one. `SPRING_PROFILES_ACTIVE=local` turns on the local-di
 fallback (see "Photo uploads locally" below) - harmless to leave out, but without it photo/post
 uploads just report "not set up yet" the same as before.
 
+**`SEED_ENABLED=false` matters every time, not just the first run.** `DataSeeder` only checks
+"has anyone already seeded this database" (`EnterpriseProfile` count), not `SEED_ENABLED` itself
+at that point - so if the app is ever started even once without `SEED_ENABLED=false` (an IDE run
+config with no env vars is the easy way to do this by accident), it seeds ~40 realistic-looking
+talent/company/job/post rows that are **not** marked `demo_content = true` the way the separate,
+intentional `DemoContentService` overlay is - they're permanently indistinguishable from real
+content after that, and setting `SEED_ENABLED=false` afterward only stops it from happening
+*again*, it can't undo what already got seeded. If `GET /admin/metrics/launch` or the feed looks
+suspiciously populated on a database that should be empty, that's almost certainly what happened -
+reset (above) rather than trying to hand-delete the seeded rows.
+
 Starts on `http://localhost:8081`, API base path `/api/v1` (so `http://localhost:8081/api/v1`).
 Flyway runs every migration up to the current `V44` automatically on first boot. `SEED_ENABLED=false`
 means **no demo data** — the founder wanted a clean prototype on real data, not seeded rows.
