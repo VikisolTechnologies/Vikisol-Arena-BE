@@ -37,6 +37,9 @@ public class SearchService {
     public static final Set<String> TYPES = Set.of("all", "activities", "discussions", "jobs", "projects", "companies", "people", "skills");
     static final double DEFAULT_RADIUS_KM = 5;
     static final double MAX_RADIUS_KM = 50;
+    // ARCHITECT-REVIEW-BE-1 blocker #1: 0.5 km let a caller narrow the search circle down to a
+    // near-exact point around a victim. 2 km is the smallest radius search still returns.
+    static final double MIN_RADIUS_KM = 2;
     // Upper bound on each source's candidate list - far above today's content, see SearchText.
     private static final int CANDIDATES = 1000;
 
@@ -52,7 +55,7 @@ public class SearchService {
     private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
 
     @Transactional(readOnly = true)
-    public SearchResponse search(String query, String type, int limit, UUID viewingUserId, Double nearLat, Double nearLng, Double radiusKm) {
+    public SearchResponse search(String query, String type, int limit, UUID viewingUserId, boolean nearMe, Double radiusKm) {
         List<String> terms = SearchText.terms(query);
         String t = type == null || !TYPES.contains(type) ? "all" : type;
         boolean all = t.equals("all");
@@ -61,7 +64,7 @@ public class SearchService {
         }
         if (t.equals("people") || t.equals("skills")) {
             return new SearchResponse(query, List.of(), List.of(), List.of(), List.of(), List.of(),
-                    viewingUserId == null ? List.of() : people(terms, t.equals("skills"), limit, viewingUserId, nearLat, nearLng, radiusKm));
+                    viewingUserId == null ? List.of() : people(terms, t.equals("skills"), limit, viewingUserId, nearMe, radiusKm));
         }
         // Activities and discussions come from one candidate read (PERFORMANCE.md).
         List<PostIntentType> activityKinds = List.of(PostIntentType.ACTIVITY);
@@ -81,25 +84,42 @@ public class SearchService {
                 List.of());
     }
 
-    // Row 17 / 18: people (or skills) search. Hidden profiles never appear; "nearby" ones only in
-    // a search near a point, within the radius; blocked people never appear either way.
+    // Row 17 / 18: people (or skills) search. Hidden profiles never appear; "nearby"-visibility
+    // ones only in a search near the viewer, within the radius; blocked people never appear
+    // either way.
+    //
+    // ARCHITECT-REVIEW-BE-1 blocker #1: `near` used to be an attacker-supplied lat/lng - anyone
+    // could walk a small-radius search across a grid of made-up points and triangulate a real
+    // person's location, visibility rules or not. `nearMe` now always anchors to the *viewer's
+    // own* stored location (never a caller-supplied point), the radius floor is 2 km, and the
+    // response carries a distance band, not an exact figure - none of that is precise enough to
+    // triangulate anyone from this endpoint alone.
     private List<SearchResponse.PersonResult> people(List<String> terms, boolean skillsOnly, int limit, UUID viewer,
-                                                     Double lat, Double lng, Double radiusKm) {
-        boolean near = lat != null && lng != null;
-        if (near && (Math.abs(lat) > 90 || Math.abs(lng) > 180)) throw new com.vikisol.arena.common.exception.BadRequestException("near must be lat,lng");
-        double radius = radiusKm == null ? DEFAULT_RADIUS_KM : Math.max(0.5, Math.min(radiusKm, MAX_RADIUS_KM));
-        record Hit(com.vikisol.arena.profile.entity.CandidateProfile p, int score, Integer km) {
+                                                     boolean nearMe, Double radiusKm) {
+        Double lat = null, lng = null;
+        if (nearMe) {
+            var viewerProfile = candidateProfileRepository.findByUserId(viewer).orElse(null);
+            boolean viewerLocated = viewerProfile != null && viewerProfile.getApproxLat() != null && viewerProfile.getApproxLng() != null
+                    && viewerProfile.getLocationConsent() != com.vikisol.arena.profile.entity.LocationConsent.OFF;
+            // No stored location to anchor to - a near search with nothing nearby is an empty
+            // result, not an error (matches "no one nearby yet" rather than a hard failure).
+            if (!viewerLocated) return List.of();
+            lat = viewerProfile.getApproxLat();
+            lng = viewerProfile.getApproxLng();
+        }
+        double radius = radiusKm == null ? DEFAULT_RADIUS_KM : Math.max(MIN_RADIUS_KM, Math.min(radiusKm, MAX_RADIUS_KM));
+        record Hit(com.vikisol.arena.profile.entity.CandidateProfile p, int score, Double km) {
         }
         List<Hit> hits = new java.util.ArrayList<>();
         for (var p : candidateProfileRepository.searchPeople(terms.get(0), skillsOnly, viewer, PageRequest.of(0, CANDIDATES))) {
-            Integer km = null;
+            Double km = null;
             boolean located = p.getApproxLat() != null && p.getApproxLng() != null
                     && p.getLocationConsent() != com.vikisol.arena.profile.entity.LocationConsent.OFF;
-            if (near) {
+            if (nearMe) {
                 if (!located) continue;
                 double d = haversineKm(lat, lng, p.getApproxLat(), p.getApproxLng());
                 if (d > radius) continue;
-                km = (int) Math.max(1, Math.round(d));
+                km = d;
             } else if (p.getProfileVisibility() != com.vikisol.arena.profile.entity.CandidateProfile.ProfileVisibility.EVERYONE) {
                 continue;
             }
@@ -110,14 +130,25 @@ public class SearchService {
         }
         return hits.stream()
                 .sorted(Comparator.comparingInt((Hit h) -> h.score()).reversed()
-                        .thenComparing(h -> h.km() == null ? Integer.MAX_VALUE : h.km()))
+                        .thenComparing(h -> h.km() == null ? Double.MAX_VALUE : h.km()))
                 .filter(h -> !blockService.isBlockedEitherDirection(viewer, h.p().getUser().getId()))
                 .limit(limit)
                 .map(h -> new SearchResponse.PersonResult(h.p().getUser().getId().toString(), h.p().getName(), h.p().getAvatarEmoji(),
                         fileSigningService.sign(h.p().getPhotoUrl()), h.p().getTitle(),
                         h.p().getSkills().stream().map(s -> s.getName()).limit(5).toList(),
-                        h.p().getInterests().stream().limit(5).toList(), h.km()))
+                        h.p().getInterests().stream().limit(5).toList(), h.km() == null ? null : distanceBand(h.km())))
                 .toList();
+    }
+
+    // Coarse enough that a search can't be used to triangulate - the smallest band matches the
+    // 2 km radius floor above, so "within 2 km" never reveals more than "somewhere in the search
+    // circle" already does.
+    static String distanceBand(double km) {
+        if (km <= 2) return "within 2 km";
+        if (km <= 5) return "within 5 km";
+        if (km <= 10) return "within 10 km";
+        if (km <= 25) return "within 25 km";
+        return "within 50 km";
     }
 
     static double haversineKm(double lat1, double lng1, double lat2, double lng2) {

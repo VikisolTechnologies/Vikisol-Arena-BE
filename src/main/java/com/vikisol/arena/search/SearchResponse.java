@@ -19,9 +19,11 @@ public record SearchResponse(
         // Row 17 (added): people, for type=people or type=skills and a signed-in searcher only.
         List<PersonResult> people
 ) {
-    // distanceKm: whole kilometres between the two approximate locations, only when the search
-    // was near a point and the person shares a location.
+    // distanceBand: a coarse band ("within 2 km"), never the exact distance - ARCHITECT-REVIEW-BE-1
+    // blocker #1: an exact distance from an attacker-controlled point lets someone triangulate a
+    // person's real location with a few searches. Only set when the search was near the viewer's
+    // own stored location and the person shares theirs.
     public record PersonResult(String userId, String name, String avatarEmoji, String photoUrl, String title,
-                               List<String> skills, List<String> interests, Integer distanceKm) {
+                               List<String> skills, List<String> interests, String distanceBand) {
     }
 }

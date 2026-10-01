@@ -122,28 +122,45 @@ class PeopleAppTest extends EmbeddedPostgresAppTest {
 
     @Test
     void peopleSearchFollowsProfileVisibilityDistanceAndBlocks() throws Exception {
-        locate(ravi, 17.44, 78.35);   // ~1 km from the search point
-        locate(meera, 17.70, 78.60);  // ~40 km away
+        locate(ravi, 17.44, 78.35);   // ~1 km from asha
+        locate(meera, 17.70, 78.60);  // ~40 km from asha
         call(asha, get("/search").param("type", "people").param("q", "figma"), null)
                 .andExpect(jsonPath("$.data.people.length()").value(2));
         mvc.perform(get("/search").param("type", "people").param("q", "figma")).andExpect(jsonPath("$.data.people.length()").value(0));
-        call(asha, get("/search").param("type", "skills").param("q", "figma").param("near", "17.44,78.34").param("radiusKm", "5"), null)
+
+        // ARCHITECT-REVIEW-BE-1 blocker #1: `near` can only search near the caller's own stored
+        // location now, never an arbitrary point - asha must locate herself first, and a bare
+        // "near=true" (no coordinates accepted) is the entire request.
+        locate(asha, 17.44, 78.34);
+        call(asha, get("/search").param("type", "skills").param("q", "figma").param("near", "true").param("radiusKm", "5"), null)
                 .andExpect(jsonPath("$.data.people.length()").value(1))
                 .andExpect(jsonPath("$.data.people[0].name").value("Ravi"))
-                .andExpect(jsonPath("$.data.people[0].distanceKm").value(1));
+                .andExpect(jsonPath("$.data.people[0].distanceBand").value("within 2 km"));
+        // Coordinates in the `near` value are ignored outright - still anchors to asha, not to meera.
+        call(asha, get("/search").param("type", "skills").param("q", "figma").param("near", "17.70,78.60").param("radiusKm", "5"), null)
+                .andExpect(jsonPath("$.data.people[*].name", hasItem("Ravi")))
+                .andExpect(jsonPath("$.data.people[*].name", not(hasItem("Meera"))));
+        // Below the 2 km radius floor, the search circle still never shrinks past 2 km.
+        call(asha, get("/search").param("type", "skills").param("q", "figma").param("near", "true").param("radiusKm", "0.1"), null)
+                .andExpect(jsonPath("$.data.people[0].name").value("Ravi"));
 
         call(ravi, put("/profile/me/visibility"), "{\"profile\":\"nearby\"}").andExpect(jsonPath("$.data.profile").value("nearby"));
         call(asha, get("/search").param("type", "people").param("q", "figma"), null)
                 .andExpect(jsonPath("$.data.people[*].name", not(hasItem("Ravi"))));
-        call(asha, get("/search").param("type", "people").param("q", "figma").param("near", "17.44,78.34"), null)
+        call(asha, get("/search").param("type", "people").param("q", "figma").param("near", "true"), null)
                 .andExpect(jsonPath("$.data.people[*].name", hasItem("Ravi")));
         call(ravi, put("/profile/me/visibility"), "{\"profile\":\"hidden\"}").andExpect(status().isOk());
-        call(asha, get("/search").param("type", "people").param("q", "figma").param("near", "17.44,78.34"), null)
+        call(asha, get("/search").param("type", "people").param("q", "figma").param("near", "true"), null)
                 .andExpect(jsonPath("$.data.people.length()").value(0));
         call(ravi, put("/profile/me/visibility"), "{\"profile\":\"invisible\"}").andExpect(status().isBadRequest());
 
         call(asha, post("/blocks/" + meera.getId()), null).andExpect(status().isOk());
         call(asha, get("/search").param("type", "people").param("q", "figma"), null)
+                .andExpect(jsonPath("$.data.people.length()").value(0));
+
+        // An unlocated viewer (recruiter has no CandidateProfile at all) searching "near" gets an
+        // empty result, not an error or someone else's area.
+        call(recruiter, get("/search").param("type", "people").param("q", "figma").param("near", "true"), null)
                 .andExpect(jsonPath("$.data.people.length()").value(0));
     }
 
