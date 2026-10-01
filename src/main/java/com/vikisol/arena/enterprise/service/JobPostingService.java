@@ -173,7 +173,10 @@ public class JobPostingService {
         boolean goingLive = (status == PostingStatus.OPEN || status == PostingStatus.PAUSED)
                 && (posting.getStatus() == PostingStatus.DRAFT || posting.getStatus() == PostingStatus.CLOSED);
         if (goingLive) requireRoomUnderCap(actingTenant);
-        if ((status == PostingStatus.OPEN || status == PostingStatus.PAUSED) && posting.getStatus() == PostingStatus.DRAFT) {
+        // ARCHITECT-REVIEW-BE-1 blocker #5: only checked on DRAFT->OPEN/PAUSED, so an unverified
+        // company could still CLOSED/PAUSED->OPEN a posting straight back to live. Verification
+        // is required on every transition INTO open, not just the first one.
+        if (status == PostingStatus.OPEN) {
             requirePublishAllowed(actingTenant);
         }
         posting.setStatus(status);
