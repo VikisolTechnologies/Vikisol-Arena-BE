@@ -108,6 +108,20 @@ public class PersonalDataService {
     public void erase(UUID userId) {
         entityManager.flush(); // SQL below must see this transaction's pending JPA writes
         MapSqlParameterSource p = new MapSqlParameterSource("u", userId);
+
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: notification bodies bake the actor's name into plain
+        // text at creation time (NotificationService), with no actorId column to re-render from
+        // later - the cheapest fix that doesn't need a schema change or touching every call site
+        // is to scrub the name out of every OTHER user's notifications here, before it's
+        // overwritten to "Deleted user" by the caller. Must run first, while the real name is
+        // still on the row.
+        List<String> realName = jdbc.queryForList("select name from arena_users where id = :u", p, String.class);
+        if (!realName.isEmpty() && realName.get(0) != null && !realName.get(0).isBlank()) {
+            jdbc.update("update arena_notifications set body = replace(body, :name, 'Deleted user') "
+                            + "where user_id <> :u and body like :pattern",
+                    new MapSqlParameterSource("u", userId).addValue("name", realName.get(0))
+                            .addValue("pattern", "%" + realName.get(0) + "%"));
+        }
         String myJoins = "(select j.id from arena_post_joins j where j.user_id = :u)";
         String myPosts = "(select id from arena_posts where author_user_id = :u)";
         String myResponses = "(select r.id from arena_post_responses r where r.user_id = :u)";

@@ -179,6 +179,14 @@ class PersonalDataTest extends EmbeddedPostgresAppTest {
         none.put("report evidence", "select count(*) from arena_moderation_items where reporter_user_id = '" + a + "' and evidence_json <> '[]'");
         none.forEach((what, sql) -> assertThat(jdbc.queryForObject(sql, Long.class)).as(what).isZero());
 
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: the host's own notification ("Asha responded to...")
+        // baked Asha's name into its body - that other person's row isn't deleted by erasure, but
+        // the name is scrubbed out of it so it doesn't outlive the account it named.
+        String hostNotification = jdbc.queryForObject(
+                "select body from arena_notifications where user_id = '" + host.getId() + "' and body like '%responded to%'",
+                String.class);
+        assertThat(hostNotification).doesNotContain("Asha").contains("Deleted user");
+
         // A recruiter's own notes, assessments and messages go when their account is erased.
         call(admin(), delete("/admin/users/" + recruiter.getId()), null).andExpect(status().isBadRequest()); // a company admin isn't erased this way
         User teammate = recruiterOnTeam();
