@@ -48,6 +48,14 @@ public class BusinessVerificationService {
             "outlook.com", "hotmail.com", "live.com", "msn.com", "icloud.com", "me.com", "aol.com", "proton.me",
             "protonmail.com", "rediffmail.com", "zohomail.com", "zohomail.in", "yandex.com", "gmx.com", "mail.com");
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: public suffixes (shared registry domains, never anyone's
+    // own company website) - see domainOf()'s own comment on why this is curated rather than a
+    // full public-suffix-list library.
+    static final Set<String> PUBLIC_SUFFIXES = Set.of(
+            "com", "net", "org", "co", "io", "in", "co.in", "org.in", "net.in", "gen.in", "firm.in", "ind.in",
+            "gov.in", "nic.in", "ac.in", "edu.in", "res.in", "github.io", "gitlab.io", "pages.dev", "netlify.app",
+            "vercel.app", "web.app", "herokuapp.com", "wordpress.com", "blogspot.com", "wixsite.com");
+
     private static final SecureRandom RANDOM = new SecureRandom();
 
     private final BusinessVerificationRepository repository;
@@ -292,6 +300,20 @@ public class BusinessVerificationService {
         if (host == null || !host.contains(".")) throw new BadRequestException("That website doesn't look right");
         if (host.startsWith("www.")) host = host.substring(4);
         if (FREE_MAIL.contains(host)) throw new BadRequestException("Use your company's own website");
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: a public suffix (co.in, github.io) isn't anyone's own
+        // domain - it's a shared registry suffix others' real domains sit under. FREE_MAIL alone
+        // only catches the mail providers already on that hardcoded list.
+        //
+        // The review's suggested fix was Guava's InternetDomainName (the full public-suffix
+        // list), but this build has no network access to Maven Central to add a new dependency
+        // right now (see REPORTS-BE.md) - this curated set covers the suffixes that actually
+        // matter for an Indian company-verification product (common gTLDs, India's own
+        // government/registry suffixes, and the free-hosting domains people most often mistake
+        // for "my company's website"), same hand-maintained style as FREE_MAIL just above.
+        // Swap in InternetDomainName.isPublicSuffix() once the dependency can be fetched.
+        if (PUBLIC_SUFFIXES.contains(host)) {
+            throw new BadRequestException("That's a shared domain suffix, not your company's own website");
+        }
         return host;
     }
 

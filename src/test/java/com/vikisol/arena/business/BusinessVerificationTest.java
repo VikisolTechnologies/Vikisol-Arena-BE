@@ -123,6 +123,18 @@ class BusinessVerificationTest extends EmbeddedPostgresAppTest {
                 .andExpect(status().isOk());
     }
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: a public suffix is a shared registry suffix, never
+    // anyone's own company domain.
+    @Test
+    void aPublicSuffixIsRejectedAsAWebsiteDomain() throws Exception {
+        call(admin, post("/enterprise/verification"),
+                SUBMIT.replace("https://www.greenleaf.example", "https://co.in").replace("greenleaf.example", "co.in"))
+                .andExpect(status().isBadRequest());
+        call(admin, post("/enterprise/verification"),
+                SUBMIT.replace("https://www.greenleaf.example", "https://github.io").replace("greenleaf.example", "github.io"))
+                .andExpect(status().isBadRequest());
+    }
+
     @Test
     void onlyTheCompanyAdminSubmitsAndWrongCodesRunOut() throws Exception {
         call(recruiter, post("/enterprise/verification"), SUBMIT).andExpect(status().isForbidden());
