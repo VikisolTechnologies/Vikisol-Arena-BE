@@ -79,7 +79,8 @@ public class ModerationService {
     // carry the exact same scam phrases).
     @Transactional
     public void autoFlag(Post post) {
-        String haystack = post.getBody().toLowerCase();
+        String haystack = (post.getTitle() == null ? "" : post.getTitle() + " ") + post.getBody();
+        haystack = haystack.toLowerCase();
         List<String> matched = FLAGGED_PHRASES.stream().filter(haystack::contains).toList();
         if (matched.isEmpty()) return;
         moderationItemRepository.save(ModerationItem.builder()

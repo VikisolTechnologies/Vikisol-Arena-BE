@@ -101,6 +101,17 @@ class PeopleAppTest extends EmbeddedPostgresAppTest {
                 .andExpect(jsonPath("$.data.content[0].evidenceUrls[0]").value(containsString("/report-evidence/" + asha.getId() + "/")));
     }
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: PostService.update only ran autoFlag on a description
+    // change - a title-only edit carrying the same scam phrasing slipped past moderation.
+    @Test
+    void editingOnlyTheTitleStillRunsAutoFlag() throws Exception {
+        String post = body(call(ravi, post("/posts"), "{\"intentType\":\"update\",\"body\":\"Something ordinary\"}"))
+                .path("data").path("id").asText();
+        call(ravi, patch("/posts/" + post), "{\"title\":\"guaranteed income fast\"}").andExpect(status().isOk());
+        call(admin(), get("/admin/moderation"), null)
+                .andExpect(jsonPath("$.data.content[0].reason").value(containsString("guaranteed income")));
+    }
+
     @Test
     void notificationsHaveCategoriesSnoozeDismissAndPreferences() throws Exception {
         String need = body(call(asha, post("/posts"), "{\"intentType\":\"ask\",\"body\":\"Need a ladder\"}")).path("data").path("id").asText();

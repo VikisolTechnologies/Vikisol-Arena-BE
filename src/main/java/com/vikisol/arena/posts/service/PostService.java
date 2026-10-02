@@ -574,7 +574,10 @@ public class PostService {
         }
         post.setEditedAt(Instant.now());
         post = postRepository.save(post);
-        if (changed.contains("description")) moderationService.autoFlag(post);
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: title is free text too (it's what renders in feed
+        // cards and search), but only a description edit ran autoFlag - a title-only edit slipped
+        // past moderation entirely.
+        if (changed.contains("description") || changed.contains("title")) moderationService.autoFlag(post);
         if (startMoved) reminderService.reschedule(post);
         String what = String.join(", ", changed);
         for (PostJoinRequest join : postJoinRequestRepository.findByPostIdAndStatusOrderByCreatedAtAscIdAsc(postId, PostJoinStatus.APPROVED)) {
