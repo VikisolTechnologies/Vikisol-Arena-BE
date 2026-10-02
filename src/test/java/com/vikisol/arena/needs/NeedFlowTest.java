@@ -146,6 +146,28 @@ class NeedFlowTest extends EmbeddedPostgresAppTest {
         mvc.perform(get("/needs/" + offer.getId())).andExpect(jsonPath("$.data.status").value("open")); // an offer can serve many
     }
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: GET /needs/{id} had no audience, block or paused filter -
+    // post detail's own rules now apply here too.
+    @Test
+    void getAppliesAudienceBlockAndPausedFiltering() throws Exception {
+        Post paused = newPost(PostIntentType.ASK, false);
+        paused.setStatus(com.vikisol.arena.posts.entity.PostStatus.PAUSED);
+        posts.save(paused);
+        mvc.perform(get("/needs/" + paused.getId())).andExpect(status().isNotFound());
+        call(owner, get("/needs/" + paused.getId()), null).andExpect(status().isOk()); // the author still sees it
+
+        Post followersOnly = newPost(PostIntentType.ASK, false);
+        followersOnly.setAudience(com.vikisol.arena.posts.entity.PostAudience.FOLLOWERS);
+        posts.save(followersOnly);
+        call(helper, get("/needs/" + followersOnly.getId()), null).andExpect(status().isNotFound());
+        call(owner, get("/needs/" + followersOnly.getId()), null).andExpect(status().isOk());
+
+        Post need = newPost(PostIntentType.ASK, false);
+        call(helper, post("/blocks/" + owner.getId()), null).andExpect(status().isOk());
+        call(helper, get("/needs/" + need.getId()), null).andExpect(status().isNotFound());
+        call(other, get("/needs/" + need.getId()), null).andExpect(status().isOk());
+    }
+
     @Test
     void declineAndNonNeeds() throws Exception {
         Post need = newPost(PostIntentType.ASK, false);

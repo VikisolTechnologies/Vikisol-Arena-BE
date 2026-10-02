@@ -52,12 +52,28 @@ public class NeedService {
     private final BlockService blockService;
     private final NotificationService notificationService;
     private final com.vikisol.arena.posts.service.PostService postService;
+    private final com.vikisol.arena.follows.repository.FollowRepository followRepository;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final com.vikisol.arena.profile.service.ProfileVisibilityGuard visibilityGuard;
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: requireNeed alone only checked the post exists and is an
+    // ASK/OFFER - a paused need, a FOLLOWERS-only need to a non-follower, or a need from someone
+    // who blocked (or is blocked by) the viewer all came back in full, unlike post detail's own
+    // audience/block/paused handling.
     @Transactional(readOnly = true)
     public NeedView get(UUID postId, UUID viewerId) {
-        return toView(requireNeed(postId), viewerId);
+        Post post = requireNeed(postId);
+        boolean isAuthor = viewerId != null && viewerId.equals(post.getAuthorUser().getId());
+        if (!isAuthor) {
+            visibilityGuard.requireVisibleTo(viewerId, post.getAuthorUser().getId());
+            if (post.getStatus() == PostStatus.PAUSED) throw new ResourceNotFoundException("Need not found: " + postId);
+            boolean viewerFollowsAuthor = viewerId != null
+                    && followRepository.existsByFollowerUserIdAndFollowingUserId(viewerId, post.getAuthorUser().getId());
+            if (post.getAudience() == com.vikisol.arena.posts.entity.PostAudience.FOLLOWERS && !viewerFollowsAuthor) {
+                throw new ResourceNotFoundException("Need not found: " + postId);
+            }
+        }
+        return toView(post, viewerId);
     }
 
     @Transactional
