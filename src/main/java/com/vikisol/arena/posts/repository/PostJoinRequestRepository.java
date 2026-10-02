@@ -24,6 +24,14 @@ public interface PostJoinRequestRepository extends JpaRepository<PostJoinRequest
 
     Optional<PostJoinRequest> findByIdAndPostId(UUID id, UUID postId);
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: check-in's find-or-create of the attendance row had no
+    // lock, so two concurrent check-ins on the same join (self check-in racing the host's) could
+    // both miss the existing row and both try to insert, tripping the unique constraint on
+    // join_id. Locking the join row first serializes the two attempts.
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select j from PostJoinRequest j where j.id = :id")
+    Optional<PostJoinRequest> findByIdForUpdate(@Param("id") UUID id);
+
     long countByPostIdAndStatus(UUID postId, PostJoinStatus status);
 
     // Activity attendance sheet (ActivitiesService): everyone who joined, in the order they joined.
