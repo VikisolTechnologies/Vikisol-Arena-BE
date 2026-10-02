@@ -54,6 +54,7 @@ public class TalentSearchService {
     private final CandidateProfileMapper candidateProfileMapper;
     private final ScoringService scoringService;
     private final ApplicationRepository applicationRepository;
+    private final jakarta.persistence.EntityManager entityManager;
 
     @Transactional(readOnly = true)
     public PagedResponse<TalentSearchResult> search(UUID enterpriseUserId, String text, String industry, boolean remoteOnly, Pageable pageable) {
@@ -125,8 +126,21 @@ public class TalentSearchService {
         // check below - closes both the same-candidate double-click race and the cross-candidate
         // credit-balance race, since a second concurrent unlock() for this tenant now blocks here
         // until the first transaction commits, then sees its up-to-date state.
+        //
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX, found by this fix's own race test: requireEnterprise()
+        // above already loaded this same row (unlocked) into this transaction's Hibernate session.
+        // findByIdForUpdate's query DOES still take the DB-level lock and correctly block a
+        // concurrent caller - but once unblocked, Hibernate's identity map hands back the SAME
+        // already-managed Java instance without overwriting its fields from the fresh query
+        // result, so the unblocked caller kept reading the stale unlockCreditsUsed it loaded
+        // before ever waiting on the lock. Both callers then independently computed "0 + 1" and
+        // the second write clobbered the first - two unlocks for the price of one credit, with
+        // the lock appearing to work (it serialized the two transactions) while silently not
+        // doing its job (neither read the other's state). An explicit refresh under the lock
+        // forces this transaction to see the committed value.
         EnterpriseProfile enterprise = enterpriseProfileRepository.findByIdForUpdate(enterpriseRef.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("Enterprise profile not found"));
+        entityManager.refresh(enterprise);
         if (unlockedCandidateRepository.existsByEnterpriseIdAndCandidateId(enterprise.getId(), candidateId)) {
             return; // already unlocked - idempotent
         }
