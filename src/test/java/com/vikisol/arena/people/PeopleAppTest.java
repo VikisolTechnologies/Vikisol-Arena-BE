@@ -90,6 +90,11 @@ class PeopleAppTest extends EmbeddedPostgresAppTest {
                 .andExpect(status().isBadRequest());
         call(asha, post("/posts/" + post + "/report"), "{\"reason\":\"Spam\",\"evidenceUrls\":[\"https://evil.example/x.png\"]}")
                 .andExpect(status().isBadRequest());
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: evidenceUrls is capped at 4.
+        String five = "\"" + url + "\",\"" + url + "\",\"" + url + "\",\"" + url + "\",\"" + url + "\"";
+        String anotherPost = body(call(ravi, post("/posts"), "{\"intentType\":\"update\",\"body\":\"Another\"}")).path("data").path("id").asText();
+        call(asha, post("/posts/" + anotherPost + "/report"), "{\"reason\":\"Spam\",\"evidenceUrls\":[" + five + "]}")
+                .andExpect(status().isBadRequest());
         call(asha, post("/posts/" + post + "/report"), "{\"reason\":\"Spam\",\"evidenceUrls\":[\"" + url + "\"]}").andExpect(status().isOk());
         call(admin(), get("/admin/moderation"), null)
                 .andExpect(jsonPath("$.data.content[0].reason").value("Spam"))
