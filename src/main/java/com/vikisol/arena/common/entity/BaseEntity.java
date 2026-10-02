@@ -35,4 +35,16 @@ public abstract class BaseEntity {
     // setDemoContent(true) after building, before save().
     @Column(nullable = false)
     private boolean demoContent = false;
+
+    // B11 item 2: DataSeeder (the startup bootstrap, as opposed to DemoContentService's on-demand
+    // seeder, which already calls setDemoContent(true) itself) brackets its run with
+    // DemoSeedingContext.begin()/end() - this tags every entity it inserts, regardless of which
+    // of DataSeeder's ~30 builder call sites created it, rather than relying on each one to
+    // remember the flag.
+    @PrePersist
+    private void tagDemoContentIfSeeding() {
+        if (DemoSeedingContext.isActive()) {
+            demoContent = true;
+        }
+    }
 }

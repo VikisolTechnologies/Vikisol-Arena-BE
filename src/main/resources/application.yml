@@ -139,8 +139,10 @@ app:
     api-key: ${CLOUDINARY_API_KEY:}
     api-secret: ${CLOUDINARY_API_SECRET:}
 
+  # B11 item 2: default is now false (was true) - an operator who starts the app without setting
+  # SEED_ENABLED at all now gets a clean database, not demo data they never asked for.
   seed:
-    enabled: ${SEED_ENABLED:true}
+    enabled: ${SEED_ENABLED:false}
 
   # Real platform admin. Both blank means no account is created. Never the retired demo address.
   platform-admin:
