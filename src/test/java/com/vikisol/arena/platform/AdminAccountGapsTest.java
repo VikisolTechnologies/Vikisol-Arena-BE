@@ -189,6 +189,20 @@ class AdminAccountGapsTest extends EmbeddedPostgresAppTest {
         assertThat(audits("user.signed_out")).isEqualTo(1);
     }
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: a token minted in the exact same second as the force
+    // sign-out used to read as "not before" sessionsRevokedAt and stay valid. Deterministic
+    // same-second case (no sleeping and hoping): sessionsRevokedAt is set to literally the
+    // token's own iat, which must now be rejected (strictly after is required).
+    @Test
+    void forceSignOutRejectsATokenIssuedInTheExactSameSecond() throws Exception {
+        String sameSecond = token(asha);
+        var claims = tokens.sessionClaims(sameSecond).orElseThrow();
+        User fresh = users.findById(asha.getId()).orElseThrow();
+        fresh.setSessionsRevokedAt(claims.getIssuedAt().toInstant());
+        users.save(fresh);
+        call(sameSecond, get("/profile/me/basics"), null).andExpect(status().isUnauthorized());
+    }
+
     @Test
     void staffAccountsAndYourOwnAreOutOfReach() throws Exception {
         User other = users.save(User.builder().email(UUID.randomUUID() + "@test.local").passwordHash("x").name("Staff 2")

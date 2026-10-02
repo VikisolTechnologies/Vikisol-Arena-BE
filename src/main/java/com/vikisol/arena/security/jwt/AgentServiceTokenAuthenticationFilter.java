@@ -87,8 +87,14 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
                 String requiredScope = requiredScopeFor(request.getMethod(), path);
                 if (requiredScope != null && claims.scope().contains(requiredScope)) {
                     // Rows 50-51: Jenny can't act for a suspended, banned or erased account.
+                    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: a force sign-out used to only revoke the
+                    // user's own session tokens - a service token minted before the sign-out kept
+                    // authenticating Jenny as that user until it expired on its own. Same
+                    // strictly-after rule as UserPrincipal.acceptsTokenIssuedAt.
                     var user = userRepository.findById(claims.userId())
-                            .filter(u -> u.getDeletedAt() == null && !u.isBlocked(java.time.Instant.now()));
+                            .filter(u -> u.getDeletedAt() == null && !u.isBlocked(java.time.Instant.now())
+                                    && (u.getSessionsRevokedAt() == null || claims.issuedAt() == null
+                                        || claims.issuedAt().isAfter(u.getSessionsRevokedAt())));
                     if (user.isPresent()) {
                         UserPrincipal principal = new UserPrincipal(user.get());
                         UsernamePasswordAuthenticationToken authentication =

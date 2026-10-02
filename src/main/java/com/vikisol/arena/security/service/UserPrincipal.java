@@ -33,10 +33,17 @@ public class UserPrincipal implements UserDetails {
         this.sessionsRevokedAt = user.getSessionsRevokedAt();
     }
 
-    /** False when the account is blocked, or the token was issued before a force sign-out. */
+    /**
+     * False when the account is blocked, or the token was issued at or before a force sign-out.
+     *
+     * <p>ARCHITECT-REVIEW-BE-1 SHOULD-FIX: {@code sessionsRevokedAt} is truncated to the second
+     * (see {@code AdminAccountService.forceSignOut}) and a JWT's {@code iat} is also
+     * second-precision, so a token minted in the very same second as the force sign-out used to
+     * read as "not before" it and slip through. Issued strictly after is now required.
+     */
     public boolean acceptsTokenIssuedAt(java.util.Date issuedAt) {
         if (blocked) return false;
-        return sessionsRevokedAt == null || issuedAt == null || !issuedAt.toInstant().isBefore(sessionsRevokedAt);
+        return sessionsRevokedAt == null || issuedAt == null || issuedAt.toInstant().isAfter(sessionsRevokedAt);
     }
 
     @Override
