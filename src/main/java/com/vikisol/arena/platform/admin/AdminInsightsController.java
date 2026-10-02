@@ -89,12 +89,16 @@ public class AdminInsightsController {
 
     @GetMapping(value = "/audit/export", produces = "text/csv")
     public ResponseEntity<String> exportAudit(
+            @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(required = false) Integer sinceDays, @RequestParam(required = false) String action,
             @RequestParam(required = false) UUID actorId) {
+        List<AuditEventResponse> rows = auditService.exportPlatform(actorId, action, since(sinceDays));
+        auditService.record(null, principal.getId(), com.vikisol.arena.audit.AuditActions.AUDIT_EXPORTED,
+                "platform audit log", rows.size() + " rows");
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"arena-audit-log.csv\"")
                 .contentType(MediaType.parseMediaType("text/csv"))
-                .body(AuditCsv.write(auditService.exportPlatform(actorId, action, since(sinceDays))));
+                .body(AuditCsv.write(rows));
     }
 
     // Row 49.

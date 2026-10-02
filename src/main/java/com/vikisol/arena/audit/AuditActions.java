@@ -63,4 +63,9 @@ public final class AuditActions {
     // and an admin ending one company's legacy status after review.
     public static final String BUSINESS_GRANDFATHERED = "business.grandfathered";
     public static final String BUSINESS_LEGACY_ENDED = "business.legacy_ended";
+
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: pulling the whole audit trail as a CSV is itself a
+    // sensitive action (it can carry other people's actor/target data) and was the one thing in
+    // this file that wasn't itself audited.
+    public static final String AUDIT_EXPORTED = "audit.exported";
 }

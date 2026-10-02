@@ -326,6 +326,8 @@ class AdminAccountGapsTest extends EmbeddedPostgresAppTest {
         String csv = call(staff, get("/admin/audit/export"), null).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(csv).startsWith("Time,Actor,Action,Target,Metadata").contains("\"'=HYPERLINK(\"\"x\"\")");
         call(ravi, get("/admin/audit"), null).andExpect(status().isForbidden()); // (Asha is suspended: signed out)
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: pulling the audit trail as CSV is itself audited.
+        assertThat(audits("audit.exported")).isEqualTo(1);
     }
 
     @Test
