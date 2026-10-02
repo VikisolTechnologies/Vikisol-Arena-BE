@@ -30,6 +30,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.function.Function;
@@ -133,6 +134,13 @@ public class NeedService {
             throw new BadRequestException(response.getStatus() == ResponseStatus.DECLINED
                     ? "The owner already said no to your response" : "You've already responded");
         }
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: respond->withdraw->respond had no cooldown, so
+        // someone could re-notify the owner ("Someone responded...") in a loop. Once per day per
+        // post after a withdrawal.
+        if (response != null && response.getStatus() == ResponseStatus.WITHDRAWN && response.getDecidedAt() != null
+                && response.getDecidedAt().isAfter(Instant.now().minus(Duration.ofDays(1)))) {
+            throw new BadRequestException("You withdrew from this recently - try again tomorrow");
+        }
         if (response == null) response = NeedResponse.builder().post(post).user(requireUser(userId)).build();
         response.setMessage(message.trim());
         response.setStatus(ResponseStatus.PENDING);
@@ -197,6 +205,7 @@ public class NeedService {
         NeedCompletion completion = completionRepository.findByResponseId(response.getId()).orElse(null);
         if (completion != null && completion.getCompletedAt() != null) throw new BadRequestException("This is already completed");
         response.setStatus(ResponseStatus.WITHDRAWN);
+        response.setDecidedAt(Instant.now());
         responseRepository.save(response);
         return toResponseView(response, userId, profileOf(userId), completion);
     }

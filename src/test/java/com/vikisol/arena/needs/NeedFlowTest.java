@@ -168,6 +168,16 @@ class NeedFlowTest extends EmbeddedPostgresAppTest {
         call(other, get("/needs/" + need.getId()), null).andExpect(status().isOk());
     }
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: respond -> withdraw -> respond had no cooldown, which let
+    // someone re-notify the owner in a loop.
+    @Test
+    void respondingAgainRightAfterAWithdrawalIsRateLimited() throws Exception {
+        Post need = newPost(PostIntentType.ASK, false);
+        call(helper, post("/needs/" + need.getId() + "/responses"), "{\"message\":\"I can help\"}").andExpect(status().isOk());
+        call(helper, delete("/needs/" + need.getId() + "/responses/me"), null).andExpect(status().isOk());
+        call(helper, post("/needs/" + need.getId() + "/responses"), "{\"message\":\"again\"}").andExpect(status().isBadRequest());
+    }
+
     @Test
     void declineAndNonNeeds() throws Exception {
         Post need = newPost(PostIntentType.ASK, false);
