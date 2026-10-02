@@ -125,8 +125,13 @@ class NeedFlowTest extends EmbeddedPostgresAppTest {
                 .andExpect(jsonPath("$.data[0].role").value("gave"))
                 .andExpect(jsonPath("$.data[0].title").isNotEmpty())
                 .andExpect(jsonPath("$.data[0].category").value("moving"))
-                .andExpect(jsonPath("$.data[0].userId").doesNotExist());
-        mvc.perform(get("/needs/outcomes/" + owner.getId())).andExpect(jsonPath("$.data[0].role").value("received"));
+                .andExpect(jsonPath("$.data[0].userId").doesNotExist())
+                // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: helper didn't author this post, so its id
+                // (which would let a viewer fetch it and read off the owner's identity) is hidden.
+                .andExpect(jsonPath("$.data[0].postId").doesNotExist());
+        mvc.perform(get("/needs/outcomes/" + owner.getId()))
+                .andExpect(jsonPath("$.data[0].role").value("received"))
+                .andExpect(jsonPath("$.data[0].postId").value(need.getId().toString())); // owner's own post - safe
         // A bystander never sees the private parts.
         call(other, get("/needs/" + need.getId() + "/responses"), null).andExpect(jsonPath("$.data.length()").value(0));
         call(helper, get("/needs/responses/mine"), null)

@@ -263,7 +263,13 @@ public class NeedService {
             // On a need the responder gave help; on an offer the owner gave it.
             boolean gave = ask != isOwner;
             NeedDetails d = details.get(post.getId());
-            return new OutcomeView(post.getId().toString(), ask ? "need" : "offer",
+            // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: postId is fine to show when this profile's owner
+            // IS the post's author (it's their own content - GET /posts/{id} only ever reveals
+            // them). When userId is only the responder, the post belongs to someone else, and its
+            // id lets a viewer fetch it and read off exactly who userId transacted with - the
+            // "never with whom" rule this endpoint's own comment already states. title (a short
+            // text preview, not a lookup key) stays either way.
+            return new OutcomeView(isOwner ? post.getId().toString() : null, ask ? "need" : "offer",
                     d == null ? null : d.getCategory().wireValue(), gave ? "gave" : "received", c.getCompletedAt().toString(), preview(post));
         });
     }
