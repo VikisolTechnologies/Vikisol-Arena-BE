@@ -91,6 +91,22 @@ class ApplicationLifecycleTest extends EmbeddedPostgresAppTest {
         org.assertj.core.api.Assertions.assertThat(again).isEqualTo(app);
     }
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX (access/privacy): a withdrawn application shouldn't pull
+    // the candidate's CV/profile back into the company's applicant list - direct-by-id lookup
+    // (companyCanOnlyMoveStagesForwardAndNeverReviveATerminalStage's sibling test above) still
+    // works, this is specifically about what surfaces when the company browses.
+    @Test
+    void aWithdrawnApplicationDropsOutOfTheApplicantList() throws Exception {
+        String app = apply("{\"jobId\":\"" + job.getId() + "\"}");
+        call(recruiter, get("/enterprise/postings/" + job.getId() + "/applicants"), null)
+                .andExpect(jsonPath("$.data.content[0].id").value(app));
+        call(asha, put("/applications/" + app + "/stage"), "{\"stage\":\"withdrawn\"}").andExpect(status().isOk());
+        call(recruiter, get("/enterprise/postings/" + job.getId() + "/applicants"), null)
+                .andExpect(jsonPath("$.data.content").isEmpty());
+        // Still reachable directly by id, just not through the list.
+        call(recruiter, get("/enterprise/applicants/" + app), null).andExpect(jsonPath("$.data.stage").value("withdrawn"));
+    }
+
     @Test
     void withdrawingKeepsTheRecord() throws Exception {
         String app = apply("{\"jobId\":\"" + job.getId() + "\"}");

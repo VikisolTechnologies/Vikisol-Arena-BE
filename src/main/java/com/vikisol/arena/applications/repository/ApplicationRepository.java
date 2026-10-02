@@ -1,6 +1,7 @@
 package com.vikisol.arena.applications.repository;
 
 import com.vikisol.arena.applications.entity.Application;
+import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.jobs.entity.JobPosting;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import org.springframework.data.domain.Page;
@@ -16,6 +17,11 @@ import java.util.UUID;
 public interface ApplicationRepository extends JpaRepository<Application, UUID> {
     Page<Application> findByCandidateId(UUID candidateId, Pageable pageable);
     Page<Application> findByJobPostingId(UUID jobPostingId, Pageable pageable);
+
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX (access/privacy): a withdrawn application pulled the
+    // candidate's CV and profile back into company view through the applicant list/detail -
+    // the company should see it the same way it sees an application that was never made.
+    Page<Application> findByJobPostingIdAndStageNot(UUID jobPostingId, ApplicationStage excludedStage, Pageable pageable);
 
     // G25 funnel: applications per stage for one posting.
     @org.springframework.data.jpa.repository.Query(
