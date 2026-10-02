@@ -50,6 +50,9 @@ public class ConnectService {
     // someone who'd hidden their profile entirely.
     @Transactional
     public ConnectView send(UUID senderId, UUID candidateId, UUID jobId, String note) {
+        // B11 item 17: refuse a connect request from an account with no date of birth on file.
+        com.vikisol.arena.common.util.AgeUtil.requireDateOfBirth(
+                userRepository.findById(senderId).orElseThrow(() -> new ResourceNotFoundException("User not found: " + senderId)));
         EnterpriseProfile tenant = enterpriseProfileService.getEntityForUser(senderId);
         CandidateProfile candidate = candidateProfileRepository.findById(candidateId)
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate not found: " + candidateId));

@@ -412,6 +412,10 @@ public class PostService {
     @Transactional
     public PostResponse create(UUID userId, CreatePostRequest request) {
         User author = requireUser(userId);
+        // B11 item 17: every write action refuses an account with no date of birth on file at
+        // all (phone/Google sign-up, before onboarding's age gate) - every intent type, not just
+        // ACTIVITY.
+        com.vikisol.arena.common.util.AgeUtil.requireDateOfBirth(author);
         PostIntentType intentType = PostIntentType.valueOf(request.intentType().trim().toUpperCase());
 
         // §4 age-gating: ACTIVITY is the real-world-meetup intent type. ASK/UPDATE don't carry
@@ -704,6 +708,8 @@ public class PostService {
         }
 
         User user = requireUser(userId);
+        // B11 item 17: DOB presence is required to join anything, not just an ACTIVITY.
+        com.vikisol.arena.common.util.AgeUtil.requireDateOfBirth(user);
         if (post.getIntentType() == PostIntentType.ACTIVITY) {
             requireAdult(user);
         }

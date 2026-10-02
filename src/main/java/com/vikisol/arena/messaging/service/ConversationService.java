@@ -207,9 +207,12 @@ public class ConversationService {
         if (conversation.getClosedAt() != null) {
             throw new BadRequestException("This chat was closed.");
         }
+        User sender = requireUser(userId);
+        // B11 item 17: refuse a send from an account with no date of birth on file.
+        com.vikisol.arena.common.util.AgeUtil.requireDateOfBirth(sender);
 
         ThreadMessage message = threadMessageRepository.save(ThreadMessage.builder()
-                .conversation(conversation).sender(requireUser(userId)).content(content).build());
+                .conversation(conversation).sender(sender).content(content).build());
 
         conversation.setLastMessageAt(message.getCreatedAt());
         if (conversation.getUserA().getId().equals(userId)) {

@@ -95,6 +95,9 @@ public class ApplicationService {
     // Applying again after withdrawing reopens the same application.
     @Transactional
     public ApplicationResponse applyToJob(UUID userId, UUID jobId, List<ApplyRequest.Answer> answers, String coverNote, Boolean includeCtc) {
+        // B11 item 17: refuse an application from an account with no date of birth on file.
+        com.vikisol.arena.common.util.AgeUtil.requireDateOfBirth(
+                userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("User not found: " + userId)));
         CandidateProfile candidate = candidateProfileForUser(userId);
         var existing = applicationRepository.findByCandidateIdAndJobPostingId(candidate.getId(), jobId);
         if (existing.isPresent() && existing.get().getStage() != ApplicationStage.WITHDRAWN) {
