@@ -805,7 +805,7 @@ public class PostService {
             if (post.getStatus() == PostStatus.FULL) post.setStatus(PostStatus.OPEN);
             postRepository.save(post);
         }
-        notificationService.notifyPostJoinWithdrawn(post, joinRequest.getUser().getName(), hadJoined);
+        notificationService.notifyPostJoinWithdrawn(post, joinRequest.getUser(), hadJoined);
         if (hadJoined) promoteFromWaitlist(post);
         return mapper.toResponse(joinRequest);
     }

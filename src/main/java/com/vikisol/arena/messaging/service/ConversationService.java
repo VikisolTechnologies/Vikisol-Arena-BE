@@ -225,8 +225,13 @@ public class ConversationService {
         User recipient = conversation.getUserA().getId().equals(userId) ? conversation.getUserB() : conversation.getUserA();
         // A hidden sender stays hidden in the notification too.
         boolean senderHidden = hiddenFlag(conversation, userId);
-        notificationService.notifyNewMessage(recipient,
-                senderHidden ? "Someone sent you an anonymous message." : requireUser(userId).getName() + " sent you a message.");
+        // Don't link the notification row back to the real sender when they're hidden - setting
+        // actorUser would quietly undo the anonymity the body text is already protecting.
+        if (senderHidden) {
+            notificationService.notifyNewMessage(recipient, "Someone sent you an anonymous message.");
+        } else {
+            notificationService.notifyNewMessage(recipient, requireUser(userId).getName() + " sent you a message.", sender);
+        }
 
         // Same "only audit the enterprise side" scoping as InterviewService.propose() - a
         // conversation can be sent from either participant. findEntityForUser() (not

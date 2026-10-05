@@ -215,7 +215,7 @@ public class CollabProjectService {
             User user = userRepository.getReferenceById(id);
             contributorRepository.save(ProjectContributor.builder().post(post).user(user).build());
             notificationService.notifyActivity(user, "Project completed", post.getAuthorUser().getName()
-                    + " completed \"" + title(post) + "\" and named you as a contributor. It's on your profile now.");
+                    + " completed \"" + title(post) + "\" and named you as a contributor. It's on your profile now.", post.getAuthorUser());
         }
         return toView(post, ownerId);
     }

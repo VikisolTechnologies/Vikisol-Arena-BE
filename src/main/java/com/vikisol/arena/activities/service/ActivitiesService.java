@@ -409,7 +409,7 @@ public class ActivitiesService {
         attendance.setDisputedAt(Instant.now());
         attendanceRepository.save(attendance);
         notificationService.notifyActivity(post.getAuthorUser(), "Attendance disputed",
-                join.getUser().getName() + " says they were there. Review it on the attendance sheet.");
+                join.getUser().getName() + " says they were there. Review it on the attendance sheet.", join.getUser());
         return toResponse(post, userId);
     }
 
@@ -454,7 +454,7 @@ public class ActivitiesService {
         feedback.setText(blankToNull(request.note()));
         feedback = feedbackRepository.save(feedback);
         if (isNew) {
-            notificationService.notifyActivity(to, "Private feedback", from.getName() + " left you private feedback about an activity.");
+            notificationService.notifyActivity(to, "Private feedback", from.getName() + " left you private feedback about an activity.", from);
         }
         return toFeedback(feedback);
     }

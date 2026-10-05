@@ -18,6 +18,14 @@ public class Notification extends BaseEntity {
     @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
+    // MARATHON-BE-2 step 1b: who the notification is about, when it names a specific person -
+    // null for notifications with no bound person's name in the body. Lets erase() scrub a
+    // deleted person's name out of exactly the rows about them, never a substring match over
+    // every notification in the table.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "actor_user_id")
+    private User actorUser;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private NotificationType type;

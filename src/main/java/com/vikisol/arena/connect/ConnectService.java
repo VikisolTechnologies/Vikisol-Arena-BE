@@ -96,7 +96,8 @@ public class ConnectService {
             conversationId = conversationService.getOrCreate(userId, request.getSender().getId(),
                     "About: " + (request.getJob() != null ? request.getJob().getTitle() : request.getTenant().getCompanyName())).id();
             notificationService.notifyJob(request.getSender(), "Connect request accepted",
-                    userRepository.getReferenceById(userId).getName() + " accepted. You can message them now.");
+                    userRepository.getReferenceById(userId).getName() + " accepted. You can message them now.",
+                    request.getCandidate());
         }
         return view(request, conversationId);
     }

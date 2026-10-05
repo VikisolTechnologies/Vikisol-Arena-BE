@@ -295,7 +295,7 @@ public class ApplicationService {
     }
 
     private void notifyCompany(Application application, String title, String body) {
-        notificationService.notifyJob(application.getJobPosting().getEnterprise().getUser(), title, body);
+        notificationService.notifyJob(application.getJobPosting().getEnterprise().getUser(), title, body, application.getCandidate().getUser());
     }
 
     private Application requireOwn(UUID userId, UUID applicationId) {

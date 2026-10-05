@@ -198,6 +198,30 @@ class PersonalDataTest extends EmbeddedPostgresAppTest {
         assertThat(jdbc.queryForObject("select count(*) from arena_connect_requests where sender_user_id = '" + t + "'", Long.class)).isZero();
     }
 
+    // MARATHON-BE-2 step 1b BLOCKER: the old scrub did `body like '%name%'` across every OTHER
+    // user's notifications - deleting "Ravi" would also corrupt "Ravi Kumar"'s notification,
+    // since "Ravi" is a substring of "Ravi Kumar". The actor_user_id column (V45) scopes the
+    // scrub to rows actually about the deleted person, so an unrelated person whose name
+    // contains theirs as a substring is never touched.
+    @Test
+    void erasingSomeoneDoesNotCorruptAnotherPersonsNotificationWhoseNameOverlaps() throws Exception {
+        User host2 = talent("Host2");
+        User raviUser = talent("Ravi");
+        User raviKumar = talent("Ravi Kumar");
+        String need = id(call(host2, post("/posts"), "{\"intentType\":\"ask\",\"body\":\"Need a hand\"}"));
+        call(raviUser, post("/needs/" + need + "/responses"), "{\"message\":\"I can help\"}").andExpect(status().isOk());
+        call(raviKumar, post("/needs/" + need + "/responses"), "{\"message\":\"Me too\"}").andExpect(status().isOk());
+
+        call(raviUser, delete("/profile/me"), null).andExpect(status().isOk());
+
+        List<String> bodies = jdbc.queryForList(
+                "select body from arena_notifications where user_id = '" + host2.getId() + "' and body like '%responded to%' order by created_at",
+                String.class);
+        assertThat(bodies).hasSize(2);
+        assertThat(bodies.get(0)).contains("Deleted user").doesNotContain("Ravi");
+        assertThat(bodies.get(1)).contains("Ravi Kumar");
+    }
+
     // A second recruiter on the same company, with a note, an assessment, a stage message and a
     // connect request of their own.
     private User recruiterOnTeam() throws Exception {

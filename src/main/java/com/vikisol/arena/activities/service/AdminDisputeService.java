@@ -100,7 +100,7 @@ public class AdminDisputeService {
             notificationService.notifySystem(join.getUser(), NotificationService.SAFETY, "Dispute accepted",
                     "Arena's team reviewed your dispute: you're marked present for \"" + preview(title) + "\".");
             notificationService.notifySystem(post.getAuthorUser(), NotificationService.SAFETY, "Attendance updated",
-                    "Arena's team reviewed a dispute and marked " + join.getUser().getName() + " present.");
+                    "Arena's team reviewed a dispute and marked " + join.getUser().getName() + " present.", join.getUser());
         } else {
             notificationService.notifySystem(join.getUser(), NotificationService.SAFETY, "Dispute not accepted",
                     "Arena's team reviewed your dispute about \"" + preview(title) + "\": " + note.trim());

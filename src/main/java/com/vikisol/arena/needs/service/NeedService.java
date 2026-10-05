@@ -147,7 +147,7 @@ public class NeedService {
         response.setDecidedAt(null);
         response = responseRepository.save(response);
         notificationService.notifyNeed(post.getAuthorUser(), post.getIntentType() == PostIntentType.ASK ? "Someone can help" : "Someone's interested",
-                response.getUser().getName() + " responded to \"" + preview(post) + "\".");
+                response.getUser().getName() + " responded to \"" + preview(post) + "\".", response.getUser());
         return toResponseView(response, userId, profileOf(response.getUser().getId()), null);
     }
 
@@ -181,7 +181,7 @@ public class NeedService {
         response.setDecidedAt(Instant.now());
         responseRepository.save(response);
         notificationService.notifyNeed(response.getUser(), "Accepted",
-                post.getAuthorUser().getName() + " accepted your response. You can chat now.");
+                post.getAuthorUser().getName() + " accepted your response. You can chat now.", post.getAuthorUser());
         return toResponseView(response, ownerId, profileOf(response.getUser().getId()), null);
     }
 

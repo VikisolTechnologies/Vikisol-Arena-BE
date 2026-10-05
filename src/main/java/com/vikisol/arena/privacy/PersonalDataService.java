@@ -109,18 +109,19 @@ public class PersonalDataService {
         entityManager.flush(); // SQL below must see this transaction's pending JPA writes
         MapSqlParameterSource p = new MapSqlParameterSource("u", userId);
 
-        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: notification bodies bake the actor's name into plain
-        // text at creation time (NotificationService), with no actorId column to re-render from
-        // later - the cheapest fix that doesn't need a schema change or touching every call site
-        // is to scrub the name out of every OTHER user's notifications here, before it's
-        // overwritten to "Deleted user" by the caller. Must run first, while the real name is
-        // still on the row.
+        // MARATHON-BE-2 step 1b BLOCKER fix: a substring `like '%name%'` replace used to scrub
+        // this person's name out of every OTHER user's notification body - corrupting unrelated
+        // rows whenever the name was a substring of someone else's text (e.g. "Ravi" inside "Ravi
+        // Kumar", or just "An"). NotificationService now tags the actor's user id (V45) on every
+        // row whose body names a specific person, so the replace below runs only against rows
+        // actually about this person - the substring match can no longer reach anyone else's
+        // notification, no matter whose name overlaps. Old rows with no recorded actor (pre-V45)
+        // are left alone rather than guessed at.
         List<String> realName = jdbc.queryForList("select name from arena_users where id = :u", p, String.class);
         if (!realName.isEmpty() && realName.get(0) != null && !realName.get(0).isBlank()) {
-            jdbc.update("update arena_notifications set body = replace(body, :name, 'Deleted user') "
-                            + "where user_id <> :u and body like :pattern",
-                    new MapSqlParameterSource("u", userId).addValue("name", realName.get(0))
-                            .addValue("pattern", "%" + realName.get(0) + "%"));
+            jdbc.update("update arena_notifications set body = replace(body, :name, 'Deleted user'), actor_user_id = null "
+                            + "where actor_user_id = :u and user_id <> :u",
+                    new MapSqlParameterSource("u", userId).addValue("name", realName.get(0)));
         }
         String myJoins = "(select j.id from arena_post_joins j where j.user_id = :u)";
         String myPosts = "(select id from arena_posts where author_user_id = :u)";
