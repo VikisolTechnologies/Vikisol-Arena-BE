@@ -153,6 +153,11 @@ app:
     # Company admin stays optional. Platform admin must enroll before /admin APIs answer.
     platform-admin-2fa-required: ${ADMIN_2FA_REQUIRED:true}
 
+  proxy:
+    # B-PROXY: set only on a real proxied deployment. When present outside the local profile,
+    # every non-health request must carry this exact secret from the Vercel same-origin proxy.
+    secret: ${ARENA_PROXY_SECRET:}
+
   # ARENA-WEB-AND-SEED.md Part 4 - the on-demand, labeled, removable demo-content overlay
   # (DemoContentService/DemoContentController), distinct from the `app.seed` bootstrap above.
   # Off by default, unlike app.seed.enabled - "Never enabled in the production environment" is

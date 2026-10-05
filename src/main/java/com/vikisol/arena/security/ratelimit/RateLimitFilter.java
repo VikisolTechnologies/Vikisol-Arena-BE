@@ -1,6 +1,7 @@
 package com.vikisol.arena.security.ratelimit;
 
 import com.vikisol.arena.security.service.UserPrincipal;
+import com.vikisol.arena.security.proxy.TrustedProxyFilter;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -129,16 +130,18 @@ public class RateLimitFilter extends OncePerRequestFilter {
         return new Bucket("default", defaultPerMinute);
     }
 
-    // Unauthenticated endpoints (sign-in/sign-up, before a principal exists) key by client IP -
-    // request.getRemoteAddr() already reflects X-Forwarded-For correctly behind Railway's proxy
-    // once server.forward-headers-strategy=framework is set (see application.yml). Authenticated
-    // endpoints key by user id instead, since IP-based limiting alone would let one office/NAT
-    // full of legitimate recruiters throttle each other.
+    // Unauthenticated endpoints (sign-in/sign-up, before a principal exists) key by client IP.
+    // Behind the Vercel proxy, TrustedProxyFilter accepts only the shared secret and validated
+    // X-Arena-Client-Ip value, then stores that IP as a request attribute; tunnel-provided
+    // X-Forwarded-For is deliberately not identity. Local/unproxied traffic falls back to the
+    // servlet remote address. Authenticated endpoints key by user id instead, since IP-based
+    // limiting alone would let one office/NAT full of legitimate recruiters throttle each other.
     private String identityFor(HttpServletRequest request) {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         if (auth != null && auth.getPrincipal() instanceof UserPrincipal principal) {
             return "user:" + principal.getId();
         }
-        return "ip:" + request.getRemoteAddr();
+        String trustedProxyIp = TrustedProxyFilter.trustedClientIp(request);
+        return "ip:" + (trustedProxyIp == null ? request.getRemoteAddr() : trustedProxyIp);
     }
 }

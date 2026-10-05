@@ -7,6 +7,7 @@ import com.vikisol.arena.security.jwt.AgentServiceTokenAuthenticationFilter;
 import com.vikisol.arena.security.jwt.JwtAuthenticationEntryPoint;
 import com.vikisol.arena.security.jwt.JwtAuthenticationFilter;
 import com.vikisol.arena.security.mfa.PlatformAdminMfaFilter;
+import com.vikisol.arena.security.proxy.TrustedProxyFilter;
 import com.vikisol.arena.security.ratelimit.RateLimitFilter;
 import com.vikisol.arena.security.service.CustomUserDetailsService;
 import jakarta.servlet.DispatcherType;
@@ -43,6 +44,7 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final AgentServiceTokenAuthenticationFilter agentServiceTokenAuthenticationFilter;
     private final RateLimitFilter rateLimitFilter;
+    private final TrustedProxyFilter trustedProxyFilter;
     private final PlatformAdminMfaFilter platformAdminMfaFilter;
     private final CustomUserDetailsService userDetailsService;
     private final ObjectMapper objectMapper;
@@ -177,6 +179,7 @@ public class SecurityConfig {
                 // fails verification here (different secret, see the filter's own class doc) and
                 // falls through untouched, so ordering relative to JwtAuthenticationFilter has no
                 // effect on normal requests.
+                .addFilterBefore(trustedProxyFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(agentServiceTokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 // After JWT auth so an authenticated bucket can key by user id, not just IP -
@@ -208,6 +211,13 @@ public class SecurityConfig {
     @Bean
     public FilterRegistrationBean<PlatformAdminMfaFilter> platformAdminMfaFilterRegistration(PlatformAdminMfaFilter filter) {
         FilterRegistrationBean<PlatformAdminMfaFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<TrustedProxyFilter> trustedProxyFilterRegistration(TrustedProxyFilter filter) {
+        FilterRegistrationBean<TrustedProxyFilter> registration = new FilterRegistrationBean<>(filter);
         registration.setEnabled(false);
         return registration;
     }
