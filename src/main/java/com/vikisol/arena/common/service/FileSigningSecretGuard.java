@@ -30,7 +30,7 @@ public class FileSigningSecretGuard {
             throw new IllegalStateException(
                     "FILE_SIGNING_SECRET is still the checked-in local-dev fallback outside the 'local' profile - "
                             + "refusing to start with a publicly-known signing key for file URLs. Set FILE_SIGNING_SECRET "
-                            + "to a real secret, or SPRING_PROFILES_ACTIVE=local if this really is a local/dev environment.");
+                            + "to a real secret.");
         }
     }
 }

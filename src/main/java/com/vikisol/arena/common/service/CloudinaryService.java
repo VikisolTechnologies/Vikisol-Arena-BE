@@ -141,6 +141,11 @@ public class CloudinaryService {
     // {"secure_url": "..."} response shape. Returns the bare, unsigned file URL - signed fresh on
     // every read by PostMapper, never persisted signed (a signature baked in at upload time would
     // expire and the photo would 404 forever once FILE_SIGNED_URL_TTL_MS passes).
+    // MARATHON-BE-2 step 1b item 3: the signature itself never expired - once valid, always valid,
+    // so a captured signature could be replayed indefinitely. Same window Cloudinary itself uses
+    // for its own signed uploads.
+    private static final long SIGNATURE_TTL_SECONDS = 3600;
+
     public String localUpload(MultipartFile file, String folder, String timestamp, String signature) {
         if (!isLocalFallbackActive()) {
             throw new BadRequestException("Photo and video uploads aren't set up yet.");
@@ -151,6 +156,15 @@ public class CloudinaryService {
         if (signature == null || !MessageDigest.isEqual(
                 localSign(params).getBytes(StandardCharsets.UTF_8), signature.getBytes(StandardCharsets.UTF_8))) {
             throw new BadRequestException("Invalid upload signature");
+        }
+        long issuedAt;
+        try {
+            issuedAt = Long.parseLong(timestamp);
+        } catch (NumberFormatException e) {
+            throw new BadRequestException("Invalid upload signature");
+        }
+        if (Math.abs(Instant.now().getEpochSecond() - issuedAt) > SIGNATURE_TTL_SECONDS) {
+            throw new BadRequestException("This upload signature has expired - request a new one");
         }
         // A fresh id per upload (there's no post yet to scope this to - matches Cloudinary's own
         // flow, where media is uploaded before the post that will reference it exists).
@@ -204,7 +218,7 @@ public class CloudinaryService {
         return hash(sortedParams, apiSecret);
     }
 
-    private String localSign(Map<String, String> sortedParams) {
+    String localSign(Map<String, String> sortedParams) {
         return hash(sortedParams, LOCAL_SECRET);
     }
 

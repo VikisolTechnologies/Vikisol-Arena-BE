@@ -137,8 +137,7 @@ public class DataSeeder implements ApplicationRunner {
         if (!environment.matchesProfiles("local")) {
             throw new IllegalStateException(
                     "SEED_ENABLED is true but the active profile isn't 'local' - refusing to seed demo data into "
-                            + "what looks like a real deployment. Set SEED_ENABLED=false, or SPRING_PROFILES_ACTIVE=local "
-                            + "if this really is a local/dev environment.");
+                            + "what looks like a real deployment. Set SEED_ENABLED=false.");
         }
         // Was userRepository.count() > 0 - broke on a genuinely fresh database (first hit
         // deploying to Railway staging) because RoleMigration.backfillDemoAccounts() runs first

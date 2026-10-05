@@ -124,6 +124,22 @@ class CloudinaryServiceTest {
                 .isInstanceOf(BadRequestException.class);
     }
 
+    // MARATHON-BE-2 step 1b item 3: a correctly-signed-but-old signature used to be valid forever -
+    // a captured signature+file could be replayed at any later time. Now it expires like a real
+    // Cloudinary signature does.
+    @Test
+    void localUploadRejectsAnExpiredButOtherwiseValidSignature() throws Exception {
+        goLocal();
+        Map<String, String> params = new TreeMap<>();
+        params.put("folder", "post-media");
+        params.put("timestamp", "1700000000"); // long past
+        String signature = service.localSign(params);
+        var file = new MockMultipartFile("file", "a.jpg", "image/jpeg", new byte[]{1, 2, 3});
+        assertThatThrownBy(() -> service.localUpload(file, "post-media", "1700000000", signature))
+                .isInstanceOf(BadRequestException.class)
+                .hasMessageContaining("expired");
+    }
+
     @Test
     void localFallbackAcceptsOwnLocalUrlsAndRejectsOthers() {
         goLocal();
