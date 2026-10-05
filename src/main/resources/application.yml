@@ -119,7 +119,9 @@ app:
     jennysol-gateway-url: ${JENNYSOL_GATEWAY_URL:}
 
   cors:
-    allowed-origins: ${CORS_ORIGINS:http://localhost:3000,http://localhost:3001}
+    # B-PROXY: production browser calls are same-origin through Vercel /api/v1, so CORS should
+    # be empty unless explicitly set. The local profile supplies localhost defaults in code.
+    allowed-origins: ${CORS_ORIGINS:}
 
   storage:
     # Local disk for now, behind FileStorageService so swapping in Cloudinary later (once

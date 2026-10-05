@@ -40,6 +40,7 @@ public abstract class EmbeddedPostgresAppTest {
         registry.add("spring.datasource.password", () -> "");
         // No demo seeding, bootstrap seeding or Cloudinary in tests.
         registry.add("app.seed.enabled", () -> "false");
+        registry.add("app.cors.allowed-origins", () -> "http://localhost:3000,http://localhost:3001");
         // Not the checked-in dev fallback - most tests here don't activate the 'local' profile,
         // and FileSigningSecretGuard now fails startup outside 'local' if left on that fallback.
         registry.add("app.storage.signing-secret", () -> "embedded-postgres-test-signing-secret-not-the-dev-fallback");

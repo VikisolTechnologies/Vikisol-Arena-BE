@@ -17,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -31,7 +32,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -48,8 +48,9 @@ public class SecurityConfig {
     private final PlatformAdminMfaFilter platformAdminMfaFilter;
     private final CustomUserDetailsService userDetailsService;
     private final ObjectMapper objectMapper;
+    private final Environment environment;
 
-    @Value("${app.cors.allowed-origins:http://localhost:3000}")
+    @Value("${app.cors.allowed-origins:}")
     private String allowedOrigins;
 
     // Browsers cache a preflight answer this long, so a signed-in page doesn't send an OPTIONS
@@ -63,7 +64,7 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(request -> {
                     var config = new org.springframework.web.cors.CorsConfiguration();
                     config.setAllowCredentials(true);
-                    config.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
+                    config.setAllowedOrigins(CorsOriginPolicy.allowedOrigins(allowedOrigins, environment));
                     config.addAllowedHeader("*");
                     config.addAllowedMethod("*");
                     // PageLimits' paging headers on the bare-array list endpoints.
