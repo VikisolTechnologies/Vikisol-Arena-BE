@@ -127,6 +127,7 @@ public class DataSeeder implements ApplicationRunner {
     private final RoomMessageRepository roomMessageRepository;
     private final FollowRepository followRepository;
     private final org.springframework.core.env.Environment environment;
+    private final jakarta.persistence.EntityManager entityManager;
 
     @Override
     @Transactional
@@ -171,6 +172,13 @@ public class DataSeeder implements ApplicationRunner {
             log.info("Seed complete: {} companies, {} candidates, {} postings. Demo password is ARENA_DEMO_PASSWORD and is not logged.",
                     companies.size(), candidates.size(), postings.size());
         } finally {
+            // MARATHON-BE-2 step 1b item 4: cascade-persisted children (e.g. a collection saved
+            // via its parent, never directly through a repository) don't get their @PrePersist
+            // hook run until Hibernate actually flushes the insert - without this, that could
+            // happen after DemoSeedingContext.end() below has already cleared the thread-local,
+            // leaving them untagged. Flushing here, still inside the try block, guarantees every
+            // pending insert fires while the context is still active.
+            entityManager.flush();
             com.vikisol.arena.common.entity.DemoSeedingContext.end();
         }
     }
