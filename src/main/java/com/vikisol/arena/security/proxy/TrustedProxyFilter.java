@@ -54,7 +54,11 @@ public class TrustedProxyFilter extends OncePerRequestFilter {
         }
 
         String clientIp = request.getHeader(CLIENT_IP_HEADER);
-        if (!StringUtils.hasText(clientIp) || !InetAddresses.isInetAddress(clientIp.trim())) {
+        if (!StringUtils.hasText(clientIp)) {
+            chain.doFilter(request, response);
+            return;
+        }
+        if (!InetAddresses.isInetAddress(clientIp.trim())) {
             response.setStatus(HttpServletResponse.SC_BAD_REQUEST);
             response.setContentType(MediaType.APPLICATION_JSON_VALUE);
             response.getWriter().write("{\"success\":false,\"message\":\"Invalid proxy client IP\"}");

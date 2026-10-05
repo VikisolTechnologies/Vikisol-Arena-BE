@@ -75,6 +75,20 @@ class TrustedProxyFilterTest {
     }
 
     @Test
+    void acceptedRequestWithoutClientIpFallsBackToRemoteAddressLater() throws Exception {
+        TrustedProxyFilter filter = filter("shared-proxy-secret", new MockEnvironment());
+        MockHttpServletRequest request = new MockHttpServletRequest("POST", "/auth/signup");
+        request.addHeader(TrustedProxyFilter.PROXY_SECRET_HEADER, "shared-proxy-secret");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).isEqualTo(200);
+        assertThat(TrustedProxyFilter.trustedClientIp(request)).isNull();
+        verify(chain).doFilter(request, response);
+    }
+
+    @Test
     void validSecretWithInvalidClientIpIsBadRequest() throws Exception {
         TrustedProxyFilter filter = filter("shared-proxy-secret", new MockEnvironment());
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/profile/me");
