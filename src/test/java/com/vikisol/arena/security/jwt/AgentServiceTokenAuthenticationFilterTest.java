@@ -67,13 +67,56 @@ class AgentServiceTokenAuthenticationFilterTest {
         when(request.getMethod()).thenReturn("POST");
         when(request.getServletPath()).thenReturn("/applications");
         when(verifier.verify("a-real-looking-token"))
-                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.applyToJob")));
+                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.applyToJob"), java.time.Instant.now()));
         when(userRepository.findById(userId)).thenReturn(Optional.of(fakeUser(userId)));
 
         filter.doFilter(request, response, chain);
 
         assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
         assertThat(SecurityContextHolder.getContext().getAuthentication().getName()).isEqualTo("talent@example.com");
+        verify(chain).doFilter(request, response);
+    }
+
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: a force sign-out used to only revoke the user's own
+    // session tokens - a service token minted before it kept authenticating Jenny as that user.
+    @Test
+    void aForceSignOutAfterTheTokenWasIssuedStopsItFromAuthenticating() throws Exception {
+        UUID userId = UUID.randomUUID();
+        java.time.Instant issuedAt = java.time.Instant.now().minusSeconds(60);
+        when(request.getHeader("Authorization")).thenReturn("Bearer a-real-looking-token");
+        when(request.getMethod()).thenReturn("POST");
+        when(request.getServletPath()).thenReturn("/applications");
+        when(verifier.verify("a-real-looking-token"))
+                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.applyToJob"), issuedAt));
+        User user = fakeUser(userId);
+        user.setSessionsRevokedAt(issuedAt.plusSeconds(1)); // revoked after the token was issued
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNull();
+        verify(chain).doFilter(request, response); // falls through unauthenticated, not a hard error
+    }
+
+    // MARATHON-BE-2 step 1b item 5: a token minted in the exact same instant as sessionsRevokedAt
+    // (the realistic same-request reissue case - see UserPrincipal.acceptsTokenIssuedAt's comment)
+    // must still authenticate, not be rejected by an overly strict boundary.
+    @Test
+    void aTokenIssuedInTheExactSameInstantAsTheRevocationStillAuthenticates() throws Exception {
+        UUID userId = UUID.randomUUID();
+        java.time.Instant issuedAt = java.time.Instant.now();
+        when(request.getHeader("Authorization")).thenReturn("Bearer a-real-looking-token");
+        when(request.getMethod()).thenReturn("POST");
+        when(request.getServletPath()).thenReturn("/applications");
+        when(verifier.verify("a-real-looking-token"))
+                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.applyToJob"), issuedAt));
+        User user = fakeUser(userId);
+        user.setSessionsRevokedAt(issuedAt); // same instant, not strictly before it
+        when(userRepository.findById(userId)).thenReturn(Optional.of(user));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(SecurityContextHolder.getContext().getAuthentication()).isNotNull();
         verify(chain).doFilter(request, response);
     }
 
@@ -85,7 +128,7 @@ class AgentServiceTokenAuthenticationFilterTest {
         when(request.getServletPath()).thenReturn("/applications");
         // Scoped only for reading jobs, not for applying - must not authenticate this request.
         when(verifier.verify("a-real-looking-token"))
-                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.searchJobs")));
+                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.searchJobs"), java.time.Instant.now()));
 
         when(response.getWriter()).thenReturn(new java.io.PrintWriter(new java.io.StringWriter()));
 
@@ -104,7 +147,7 @@ class AgentServiceTokenAuthenticationFilterTest {
         when(request.getMethod()).thenReturn("DELETE");
         when(request.getServletPath()).thenReturn("/applications/some-id");
         when(verifier.verify("a-real-looking-token"))
-                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.applyToJob")));
+                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.applyToJob"), java.time.Instant.now()));
 
         filter.doFilter(request, response, chain);
 
@@ -140,7 +183,7 @@ class AgentServiceTokenAuthenticationFilterTest {
         when(request.getMethod()).thenReturn("POST");
         when(request.getServletPath()).thenReturn("/applications");
         when(verifier.verify("a-real-looking-token"))
-                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.applyToJob")));
+                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.applyToJob"), java.time.Instant.now()));
         when(userRepository.findById(userId)).thenReturn(Optional.empty());
 
         filter.doFilter(request, response, chain);
@@ -158,7 +201,7 @@ class AgentServiceTokenAuthenticationFilterTest {
         when(request.getMethod()).thenReturn("POST");
         when(request.getServletPath()).thenReturn("/applications");
         when(verifier.verify("a-real-looking-token"))
-                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.applyToJob")));
+                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.applyToJob"), java.time.Instant.now()));
         when(userRepository.findById(userId)).thenReturn(Optional.of(fakeUser(userId)));
 
         filter.doFilter(request, response, chain);
@@ -176,7 +219,7 @@ class AgentServiceTokenAuthenticationFilterTest {
         when(request.getMethod()).thenReturn("POST");
         when(request.getServletPath()).thenReturn("/applications");
         when(verifier.verify("a-real-looking-token"))
-                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.searchJobs")));
+                .thenReturn(new AgentServiceTokenVerifier.VerifiedClaims(userId, "TALENT", List.of("arena.searchJobs"), java.time.Instant.now()));
         when(response.getWriter()).thenReturn(new java.io.PrintWriter(new java.io.StringWriter()));
 
         filter.doFilter(request, response, chain);

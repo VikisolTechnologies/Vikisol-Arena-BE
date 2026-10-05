@@ -74,6 +74,25 @@ public class User extends BaseEntity {
     // reactivatable suspension (that's TenantStatus.SUSPENDED at the tenant level instead).
     private Instant deletedAt;
 
+    // V41, FE-API-GAPS rows 50-51: an admin suspension (suspendedUntil null = until restored),
+    // a permanent ban, and force sign-out (access tokens issued before sessionsRevokedAt stop
+    // working). Checked at every sign-in, refresh and request (see isBlocked).
+    private Instant suspendedAt;
+    private Instant suspendedUntil;
+    @Column(length = 500)
+    private String suspensionReason;
+    private Instant bannedAt;
+    private Instant sessionsRevokedAt;
+
+    // V41: last sign-in or session refresh (row 49), and the last data download (row 51).
+    private Instant lastActiveAt;
+    private Instant lastDataExportAt;
+
+    /** Suspended (and not yet expired) or banned: no sign-in, no refresh, no request. */
+    public boolean isBlocked(Instant now) {
+        return bannedAt != null || (suspendedAt != null && (suspendedUntil == null || suspendedUntil.isAfter(now)));
+    }
+
     // ARENA-V2-PRODUCT-ARCHITECTURE.md §4 safety suite (Phase B). Self-attested, not
     // cryptographically verified - see DECISIONS.md. Null = not yet captured; every
     // ACTIVITY-post create/join gate requires this to be set and >= 18 years ago.

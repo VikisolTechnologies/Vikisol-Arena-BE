@@ -309,6 +309,7 @@ public class ActivitiesService {
         Instant closes = post.getEndsAt() != null ? post.getEndsAt() : post.getStartsAt().plus(ActivityRules.CHECK_IN_DEFAULT_LENGTH);
         if (now.isBefore(opens)) throw new BadRequestException("Check-in opens an hour before the start");
         if (now.isAfter(closes)) throw new BadRequestException("Check-in has closed for this activity");
+        joinRepository.findByIdForUpdate(join.getId());
         ActivityAttendance attendance = attendanceFor(join);
         if (attendance.getCheckedInAt() == null) {
             attendance.setCheckedInAt(now);
@@ -327,6 +328,7 @@ public class ActivitiesService {
         PostJoinRequest join = joinRepository.findByIdAndPostId(joinId, postId)
                 .filter(j -> j.getStatus() == PostJoinStatus.APPROVED)
                 .orElseThrow(() -> new BadRequestException("Only people who joined can be checked in"));
+        joinRepository.findByIdForUpdate(join.getId());
         ActivityAttendance attendance = attendanceFor(join);
         if (attendance.getCheckedInAt() == null) attendance.setCheckedInAt(Instant.now());
         if (attendance.getDisputeStatus() == DisputeStatus.OPEN) {
@@ -357,6 +359,7 @@ public class ActivitiesService {
             }
             dispute(userId, postId, request.dispute());
         }
+        joinRepository.findByIdForUpdate(join.getId());
         ActivityAttendance attendance = attendanceFor(join);
         attendance.setJoinerAttended(request.attended());
         attendance.setJoinerConfirmedAt(Instant.now());
@@ -406,7 +409,7 @@ public class ActivitiesService {
         attendance.setDisputedAt(Instant.now());
         attendanceRepository.save(attendance);
         notificationService.notifyActivity(post.getAuthorUser(), "Attendance disputed",
-                join.getUser().getName() + " says they were there. Review it on the attendance sheet.");
+                join.getUser().getName() + " says they were there. Review it on the attendance sheet.", join.getUser());
         return toResponse(post, userId);
     }
 
@@ -451,7 +454,7 @@ public class ActivitiesService {
         feedback.setText(blankToNull(request.note()));
         feedback = feedbackRepository.save(feedback);
         if (isNew) {
-            notificationService.notifyActivity(to, "Private feedback", from.getName() + " left you private feedback about an activity.");
+            notificationService.notifyActivity(to, "Private feedback", from.getName() + " left you private feedback about an activity.", from);
         }
         return toFeedback(feedback);
     }

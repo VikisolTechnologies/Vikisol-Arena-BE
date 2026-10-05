@@ -92,6 +92,7 @@ public class PostService {
     private final CloudinaryService cloudinaryService;
     private final com.vikisol.arena.communities.repository.CommunityRepository communityRepository;
     private final com.vikisol.arena.communities.repository.CommunityMemberRepository communityMemberRepository;
+    private final com.vikisol.arena.profile.service.ProfileVisibilityGuard visibilityGuard;
 
     @Transactional(readOnly = true)
     public List<PostResponse> getFeed(UUID viewingUserId, int page, int size) {
@@ -174,6 +175,9 @@ public class PostService {
     // excluded (nothing to show a visitor about a post that never happened).
     @Transactional(readOnly = true)
     public PagedResponse<PostResponse> getUserPosts(UUID targetUserId, UUID viewingUserId, Pageable pageable) {
+        // ARCHITECT-REVIEW-BE-1 blocker #2: permitAll(), used to answer for a hidden/blocked/
+        // banned/deleted person too.
+        visibilityGuard.requireVisibleTo(viewingUserId, targetUserId);
         boolean viewerFollowsTarget = viewingUserId != null
                 && followRepository.existsByFollowerUserIdAndFollowingUserId(viewingUserId, targetUserId);
         boolean isSelf = viewingUserId != null && viewingUserId.equals(targetUserId);
@@ -408,6 +412,10 @@ public class PostService {
     @Transactional
     public PostResponse create(UUID userId, CreatePostRequest request) {
         User author = requireUser(userId);
+        // B11 item 17: every write action refuses an account with no date of birth on file at
+        // all (phone/Google sign-up, before onboarding's age gate) - every intent type, not just
+        // ACTIVITY.
+        com.vikisol.arena.common.util.AgeUtil.requireDateOfBirth(author);
         PostIntentType intentType = PostIntentType.valueOf(request.intentType().trim().toUpperCase());
 
         // §4 age-gating: ACTIVITY is the real-world-meetup intent type. ASK/UPDATE don't carry
@@ -570,7 +578,10 @@ public class PostService {
         }
         post.setEditedAt(Instant.now());
         post = postRepository.save(post);
-        if (changed.contains("description")) moderationService.autoFlag(post);
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: title is free text too (it's what renders in feed
+        // cards and search), but only a description edit ran autoFlag - a title-only edit slipped
+        // past moderation entirely.
+        if (changed.contains("description") || changed.contains("title")) moderationService.autoFlag(post);
         if (startMoved) reminderService.reschedule(post);
         String what = String.join(", ", changed);
         for (PostJoinRequest join : postJoinRequestRepository.findByPostIdAndStatusOrderByCreatedAtAscIdAsc(postId, PostJoinStatus.APPROVED)) {
@@ -697,6 +708,8 @@ public class PostService {
         }
 
         User user = requireUser(userId);
+        // B11 item 17: DOB presence is required to join anything, not just an ACTIVITY.
+        com.vikisol.arena.common.util.AgeUtil.requireDateOfBirth(user);
         if (post.getIntentType() == PostIntentType.ACTIVITY) {
             requireAdult(user);
         }
@@ -792,7 +805,7 @@ public class PostService {
             if (post.getStatus() == PostStatus.FULL) post.setStatus(PostStatus.OPEN);
             postRepository.save(post);
         }
-        notificationService.notifyPostJoinWithdrawn(post, joinRequest.getUser().getName(), hadJoined);
+        notificationService.notifyPostJoinWithdrawn(post, joinRequest.getUser(), hadJoined);
         if (hadJoined) promoteFromWaitlist(post);
         return mapper.toResponse(joinRequest);
     }

@@ -1,5 +1,7 @@
 package com.vikisol.arena.activities.service;
 
+import com.vikisol.arena.audit.AuditActions;
+
 import com.vikisol.arena.activities.ActivityRules;
 import com.vikisol.arena.activities.entity.ActivityAttendance;
 import com.vikisol.arena.activities.entity.DisputeStatus;
@@ -33,24 +35,48 @@ public class AdminDisputeService {
     private final PostJoinRequestRepository joinRepository;
     private final UserRepository userRepository;
     private final NotificationService notificationService;
+    private final com.vikisol.arena.audit.AuditService auditService;
 
     public record DisputeView(String attendanceId, String joinId, String postId, String activity, String hostId, String hostName,
                               String userId, String name, String outcome, String hostCheckedInAt, Boolean joinerAttended,
                               String disputeReason, String disputedAt, String disputeOpenUntil, String status,
-                              String resolutionNote, String resolvedAt) {
+                              String resolutionNote, String resolvedAt,
+                              // FE-API-GAPS row 46: the same dispute in the admin screen's terms.
+                              String id, String activityTitle, String joinerName, String openedAt, String deadlineAt,
+                              String state, String note) {
     }
 
+    // Row 46: Arena's team answers a dispute within 72 hours of it being opened.
+    static final java.time.Duration REVIEW_SLA = java.time.Duration.ofHours(72);
+
+    // `status` takes the original values (open, accepted, rejected) and row 46's: resolved_joiner
+    // (= accepted), resolved_host (= rejected), and expired (open past the 72-hour review SLA).
+    // "open" lists every open dispute, overdue ones included.
     @Transactional(readOnly = true)
     public Page<DisputeView> queue(String status, Pageable pageable) {
+        String wire = status == null ? "" : status.trim().toLowerCase(Locale.ROOT);
+        Instant slaStart = Instant.now().minus(REVIEW_SLA);
+        switch (wire) {
+            case "resolved_joiner" -> status = "accepted";
+            case "resolved_host" -> status = "rejected";
+            case "expired" -> {
+                return attendanceRepository.findByDisputeStatusAndDisputedAtBeforeOrderByDisputedAtAscIdAsc(DisputeStatus.OPEN, slaStart, pageable)
+                        .map(AdminDisputeService::view);
+            }
+            default -> {
+            }
+        }
         DisputeStatus s;
         try {
             s = status == null || status.isBlank() ? DisputeStatus.OPEN : DisputeStatus.valueOf(status.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-            throw new BadRequestException("status must be one of open, accepted, rejected");
+            throw new BadRequestException(STATUSES);
         }
-        if (s == DisputeStatus.NONE) throw new BadRequestException("status must be one of open, accepted, rejected");
+        if (s == DisputeStatus.NONE) throw new BadRequestException(STATUSES);
         return attendanceRepository.findByDisputeStatusOrderByDisputedAtAscIdAsc(s, pageable).map(AdminDisputeService::view);
     }
+
+    private static final String STATUSES = "status must be one of open, expired, resolved_host, resolved_joiner (or accepted, rejected)";
 
     @Transactional
     public DisputeView decide(UUID adminId, UUID attendanceId, boolean accept, String note) {
@@ -66,13 +92,15 @@ public class AdminDisputeService {
         attendanceRepository.save(a);
         Post post = join.getPost();
         String title = post.getTitle() != null ? post.getTitle() : post.getBody();
+        auditService.record(null, adminId, AuditActions.DISPUTE_RESOLVED,
+                "dispute " + a.getId() + " (" + (accept ? "joiner" : "host") + ")", note == null || note.isBlank() ? "no reason given" : note.trim());
         if (accept) {
             join.setOutcome(PostJoinOutcome.ATTENDED);
             joinRepository.save(join);
             notificationService.notifySystem(join.getUser(), NotificationService.SAFETY, "Dispute accepted",
                     "Arena's team reviewed your dispute: you're marked present for \"" + preview(title) + "\".");
             notificationService.notifySystem(post.getAuthorUser(), NotificationService.SAFETY, "Attendance updated",
-                    "Arena's team reviewed a dispute and marked " + join.getUser().getName() + " present.");
+                    "Arena's team reviewed a dispute and marked " + join.getUser().getName() + " present.", join.getUser());
         } else {
             notificationService.notifySystem(join.getUser(), NotificationService.SAFETY, "Dispute not accepted",
                     "Arena's team reviewed your dispute about \"" + preview(title) + "\": " + note.trim());
@@ -94,6 +122,20 @@ public class AdminDisputeService {
                 a.getDisputedAt() == null ? null : a.getDisputedAt().toString(),
                 a.getOutcomeRecordedAt() == null ? null : a.getOutcomeRecordedAt().plus(ActivityRules.DISPUTE_WINDOW).toString(),
                 a.getDisputeStatus().wireValue(), a.getDisputeResolutionNote(),
-                a.getDisputeResolvedAt() == null ? null : a.getDisputeResolvedAt().toString());
+                a.getDisputeResolvedAt() == null ? null : a.getDisputeResolvedAt().toString(),
+                a.getId().toString(), preview(p.getTitle() != null ? p.getTitle() : p.getBody()), j.getUser().getName(),
+                a.getDisputedAt() == null ? null : a.getDisputedAt().toString(),
+                a.getDisputedAt() == null ? null : a.getDisputedAt().plus(REVIEW_SLA).toString(),
+                state(a), a.getDisputeReason());
+    }
+
+    // Row 46's status words.
+    private static String state(ActivityAttendance a) {
+        return switch (a.getDisputeStatus()) {
+            case ACCEPTED -> "resolved_joiner";
+            case REJECTED -> "resolved_host";
+            case OPEN -> a.getDisputedAt() != null && a.getDisputedAt().plus(REVIEW_SLA).isBefore(Instant.now()) ? "expired" : "open";
+            default -> a.getDisputeStatus().wireValue();
+        };
     }
 }

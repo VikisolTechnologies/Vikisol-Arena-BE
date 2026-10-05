@@ -55,6 +55,8 @@ class ActivityFlowTest extends EmbeddedPostgresAppTest {
     @Autowired PostJoinRequestRepository joins;
     @Autowired ActivityAttendanceRepository attendance;
     @Autowired EntityManager em;
+    @Autowired com.vikisol.arena.activities.service.ActivitiesService activitiesService;
+    @Autowired org.springframework.transaction.PlatformTransactionManager transactions;
     @MockBean TokenDenylistService denylist;
 
     private User host, asha, ravi, meera;
@@ -185,6 +187,46 @@ class ActivityFlowTest extends EmbeddedPostgresAppTest {
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.viewer.checkedInAt").exists());
         call(asha, post("/activities/" + later.getId() + "/check-in"), null).andExpect(status().isBadRequest());
         call(ravi, post("/activities/" + soon.getId() + "/check-in"), null).andExpect(status().isBadRequest());
+    }
+
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: the attendance row's find-or-create had no lock, so the
+    // joiner self-checking-in at the same moment as the host checking them in could both miss the
+    // existing row and both try to INSERT, tripping the unique constraint on join_id uncaught.
+    // findByIdForUpdate on the join row now serializes the two attempts.
+    @Test
+    @org.springframework.transaction.annotation.Transactional(propagation = org.springframework.transaction.annotation.Propagation.NOT_SUPPORTED)
+    void concurrentSelfAndHostCheckInNeverDoubleInsertAttendance() throws Exception {
+        var tx = new org.springframework.transaction.support.TransactionTemplate(transactions);
+        record Ids(UUID hostId, UUID postId, UUID joinerId, UUID joinId) {}
+        Ids ids = tx.execute(status -> {
+            User h = users.save(User.builder().email(UUID.randomUUID() + "@test.local").passwordHash("x").name("Host")
+                    .role(Role.TALENT).dateOfBirth(LocalDate.of(1990, 1, 1)).build());
+            User joiner = users.save(User.builder().email(UUID.randomUUID() + "@test.local").passwordHash("x").name("Joiner")
+                    .role(Role.TALENT).dateOfBirth(LocalDate.of(1990, 1, 1)).build());
+            Post p = posts.save(Post.builder().authorUser(h).intentType(PostIntentType.ACTIVITY).body("Sunrise run")
+                    .visibility(PostVisibility.PUBLIC).startsAt(Instant.now().minus(10, ChronoUnit.MINUTES)).build());
+            PostJoinRequest j = joins.save(PostJoinRequest.builder().post(p).user(joiner)
+                    .status(com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED).build());
+            return new Ids(h.getId(), p.getId(), joiner.getId(), j.getId());
+        });
+        var gate = new java.util.concurrent.CountDownLatch(1);
+        try (var pool = java.util.concurrent.Executors.newFixedThreadPool(2)) {
+            var selfCheckIn = pool.submit(() -> {
+                gate.await();
+                activitiesService.checkIn(ids.joinerId(), ids.postId());
+                return true;
+            });
+            var hostCheckIn = pool.submit(() -> {
+                gate.await();
+                activitiesService.hostCheckIn(ids.hostId(), ids.postId(), ids.joinId());
+                return true;
+            });
+            gate.countDown();
+            assertThat(selfCheckIn.get(15, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            assertThat(hostCheckIn.get(15, java.util.concurrent.TimeUnit.SECONDS)).isTrue();
+            tx.executeWithoutResult(status ->
+                    assertThat(attendance.findByJoinRequestIdIn(List.of(ids.joinId())).size()).isEqualTo(1));
+        }
     }
 
     // --- G11 attendance + 72h dispute ---

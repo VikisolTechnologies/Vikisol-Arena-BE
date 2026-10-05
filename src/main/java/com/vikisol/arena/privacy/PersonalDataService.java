@@ -83,14 +83,20 @@ public class PersonalDataService {
         // People app (V37)
         EXPORT.put("connectRequestsReceived", "select e.company_name, c.note, c.status, c.created_at, c.decided_at from arena_connect_requests c join arena_enterprise_profiles e on e.id = c.tenant_id where c.candidate_user_id = :u");
         EXPORT.put("connectRequestsSent", "select e.company_name, c.note, c.status, c.created_at from arena_connect_requests c join arena_enterprise_profiles e on e.id = c.tenant_id where c.sender_user_id = :u");
-        EXPORT.put("notificationPreferences", "select activity, need, job, message from arena_notification_preferences where user_id = :u");
+        EXPORT.put("notificationPreferences", "select activity, need, job, message, jenny, marketing from arena_notification_preferences where user_id = :u");
+        // V41: the days they were active (sign-in or session refresh), and staff launch areas.
+        EXPORT.put("activeDays", "select day from arena_user_active_days where user_id = :u order by day");
+        EXPORT.put("staffLaunchAreas", "select area from arena_staff_launch_areas where user_id = :u");
         EXPORT.put("reportEvidence", "select id as report_id, reason, evidence_json, created_at from arena_moderation_items where reporter_user_id = :u and evidence_json <> '[]'");
     }
 
-    @Transactional(readOnly = true)
+    // Both export endpoints come through here; the time is shown to admins (row 51 flags).
+    @Transactional
     public Map<String, List<Map<String, Object>>> export(UUID userId) {
         entityManager.flush(); // SQL below must see this transaction's pending JPA writes
         MapSqlParameterSource p = new MapSqlParameterSource("u", userId);
+        var user = entityManager.find(com.vikisol.arena.auth.entity.User.class, userId);
+        if (user != null) user.setLastDataExportAt(java.time.Instant.now());
         Map<String, List<Map<String, Object>>> out = new LinkedHashMap<>();
         EXPORT.forEach((section, sql) -> out.put(section, jdbc.queryForList(sql, p).stream().map(PersonalDataService::plain).toList()));
         return out;
@@ -102,6 +108,21 @@ public class PersonalDataService {
     public void erase(UUID userId) {
         entityManager.flush(); // SQL below must see this transaction's pending JPA writes
         MapSqlParameterSource p = new MapSqlParameterSource("u", userId);
+
+        // MARATHON-BE-2 step 1b BLOCKER fix: a substring `like '%name%'` replace used to scrub
+        // this person's name out of every OTHER user's notification body - corrupting unrelated
+        // rows whenever the name was a substring of someone else's text (e.g. "Ravi" inside "Ravi
+        // Kumar", or just "An"). NotificationService now tags the actor's user id (V45) on every
+        // row whose body names a specific person, so the replace below runs only against rows
+        // actually about this person - the substring match can no longer reach anyone else's
+        // notification, no matter whose name overlaps. Old rows with no recorded actor (pre-V45)
+        // are left alone rather than guessed at.
+        List<String> realName = jdbc.queryForList("select name from arena_users where id = :u", p, String.class);
+        if (!realName.isEmpty() && realName.get(0) != null && !realName.get(0).isBlank()) {
+            jdbc.update("update arena_notifications set body = replace(body, :name, 'Deleted user'), actor_user_id = null "
+                            + "where actor_user_id = :u and user_id <> :u",
+                    new MapSqlParameterSource("u", userId).addValue("name", realName.get(0)));
+        }
         String myJoins = "(select j.id from arena_post_joins j where j.user_id = :u)";
         String myPosts = "(select id from arena_posts where author_user_id = :u)";
         String myResponses = "(select r.id from arena_post_responses r where r.user_id = :u)";
@@ -150,6 +171,8 @@ public class PersonalDataService {
                 "delete from arena_connect_requests where candidate_user_id = :u",
                 "update arena_connect_requests set sender_user_id = null where sender_user_id = :u",
                 "delete from arena_notification_preferences where user_id = :u",
+                "delete from arena_user_active_days where user_id = :u",
+                "delete from arena_staff_launch_areas where user_id = :u",
                 "delete from arena_notifications where user_id = :u",
                 "update arena_moderation_items set evidence_json = '[]' where reporter_user_id = :u",
                 // Company verification they submitted: the work email is theirs

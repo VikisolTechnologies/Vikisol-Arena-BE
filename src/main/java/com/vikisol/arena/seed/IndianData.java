@@ -96,6 +96,7 @@ public final class IndianData {
     }
 
     public static List<Industry> INDUSTRIES_LIST() {
-        return List.of(Industry.values());
+        // The five built-ins: the seed skills and titles are keyed by them.
+        return List.of(Industry.ENGINEERING, Industry.DESIGN, Industry.SALES, Industry.HEALTHCARE, Industry.LOGISTICS);
     }
 }

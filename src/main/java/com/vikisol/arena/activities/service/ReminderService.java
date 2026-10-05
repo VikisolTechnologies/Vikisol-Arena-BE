@@ -89,7 +89,12 @@ public class ReminderService {
     @Scheduled(fixedDelayString = "${app.reminders.interval-ms:60000}")
     @Transactional
     public void sendDue() {
-        for (PostReminder r : reminderRepository.findTop200BySentAtIsNullAndRemindAtLessThanEqualOrderByRemindAtAsc(Instant.now())) {
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: lockNextDueBatch's FOR UPDATE SKIP LOCKED claims a
+        // batch of ids first, so a second replica's run on the same tick skips rows this one
+        // already has locked rather than double-sending them.
+        List<UUID> dueIds = reminderRepository.lockNextDueBatch(Instant.now());
+        if (dueIds.isEmpty()) return;
+        for (PostReminder r : reminderRepository.findByIdIn(dueIds)) {
             r.setSentAt(Instant.now());
             reminderRepository.save(r);
             Post post = r.getPost();

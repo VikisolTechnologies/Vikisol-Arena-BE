@@ -30,6 +30,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
 import java.util.function.Function;
@@ -52,11 +53,28 @@ public class NeedService {
     private final BlockService blockService;
     private final NotificationService notificationService;
     private final com.vikisol.arena.posts.service.PostService postService;
+    private final com.vikisol.arena.follows.repository.FollowRepository followRepository;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final com.vikisol.arena.profile.service.ProfileVisibilityGuard visibilityGuard;
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: requireNeed alone only checked the post exists and is an
+    // ASK/OFFER - a paused need, a FOLLOWERS-only need to a non-follower, or a need from someone
+    // who blocked (or is blocked by) the viewer all came back in full, unlike post detail's own
+    // audience/block/paused handling.
     @Transactional(readOnly = true)
     public NeedView get(UUID postId, UUID viewerId) {
-        return toView(requireNeed(postId), viewerId);
+        Post post = requireNeed(postId);
+        boolean isAuthor = viewerId != null && viewerId.equals(post.getAuthorUser().getId());
+        if (!isAuthor) {
+            visibilityGuard.requireVisibleTo(viewerId, post.getAuthorUser().getId());
+            if (post.getStatus() == PostStatus.PAUSED) throw new ResourceNotFoundException("Need not found: " + postId);
+            boolean viewerFollowsAuthor = viewerId != null
+                    && followRepository.existsByFollowerUserIdAndFollowingUserId(viewerId, post.getAuthorUser().getId());
+            if (post.getAudience() == com.vikisol.arena.posts.entity.PostAudience.FOLLOWERS && !viewerFollowsAuthor) {
+                throw new ResourceNotFoundException("Need not found: " + postId);
+            }
+        }
+        return toView(post, viewerId);
     }
 
     @Transactional
@@ -116,13 +134,20 @@ public class NeedService {
             throw new BadRequestException(response.getStatus() == ResponseStatus.DECLINED
                     ? "The owner already said no to your response" : "You've already responded");
         }
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: respond->withdraw->respond had no cooldown, so
+        // someone could re-notify the owner ("Someone responded...") in a loop. Once per day per
+        // post after a withdrawal.
+        if (response != null && response.getStatus() == ResponseStatus.WITHDRAWN && response.getDecidedAt() != null
+                && response.getDecidedAt().isAfter(Instant.now().minus(Duration.ofDays(1)))) {
+            throw new BadRequestException("You withdrew from this recently - try again tomorrow");
+        }
         if (response == null) response = NeedResponse.builder().post(post).user(requireUser(userId)).build();
         response.setMessage(message.trim());
         response.setStatus(ResponseStatus.PENDING);
         response.setDecidedAt(null);
         response = responseRepository.save(response);
         notificationService.notifyNeed(post.getAuthorUser(), post.getIntentType() == PostIntentType.ASK ? "Someone can help" : "Someone's interested",
-                response.getUser().getName() + " responded to \"" + preview(post) + "\".");
+                response.getUser().getName() + " responded to \"" + preview(post) + "\".", response.getUser());
         return toResponseView(response, userId, profileOf(response.getUser().getId()), null);
     }
 
@@ -156,7 +181,7 @@ public class NeedService {
         response.setDecidedAt(Instant.now());
         responseRepository.save(response);
         notificationService.notifyNeed(response.getUser(), "Accepted",
-                post.getAuthorUser().getName() + " accepted your response. You can chat now.");
+                post.getAuthorUser().getName() + " accepted your response. You can chat now.", post.getAuthorUser());
         return toResponseView(response, ownerId, profileOf(response.getUser().getId()), null);
     }
 
@@ -180,6 +205,7 @@ public class NeedService {
         NeedCompletion completion = completionRepository.findByResponseId(response.getId()).orElse(null);
         if (completion != null && completion.getCompletedAt() != null) throw new BadRequestException("This is already completed");
         response.setStatus(ResponseStatus.WITHDRAWN);
+        response.setDecidedAt(Instant.now());
         responseRepository.save(response);
         return toResponseView(response, userId, profileOf(userId), completion);
     }
@@ -222,8 +248,11 @@ public class NeedService {
     }
 
     // G17: confirmed outcomes on a public profile. Only what and when - never the other person.
+    // ARCHITECT-REVIEW-BE-1 blocker #2: this endpoint is permitAll() and used to answer for a
+    // hidden/blocked/banned/deleted person too.
     @Transactional(readOnly = true)
-    public Page<OutcomeView> outcomes(UUID userId, Pageable pageable) {
+    public Page<OutcomeView> outcomes(UUID userId, UUID viewerId, Pageable pageable) {
+        visibilityGuard.requireVisibleTo(viewerId, userId);
         Page<NeedCompletion> page = completionRepository.findCompletedFor(userId, pageable);
         Map<UUID, NeedDetails> details = detailsRepository.findByPostIdIn(page.stream().map(c -> c.getResponse().getPost().getId()).toList())
                 .stream().collect(Collectors.toMap(d -> d.getPost().getId(), Function.identity()));
@@ -234,7 +263,13 @@ public class NeedService {
             // On a need the responder gave help; on an offer the owner gave it.
             boolean gave = ask != isOwner;
             NeedDetails d = details.get(post.getId());
-            return new OutcomeView(post.getId().toString(), ask ? "need" : "offer",
+            // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: postId is fine to show when this profile's owner
+            // IS the post's author (it's their own content - GET /posts/{id} only ever reveals
+            // them). When userId is only the responder, the post belongs to someone else, and its
+            // id lets a viewer fetch it and read off exactly who userId transacted with - the
+            // "never with whom" rule this endpoint's own comment already states. title (a short
+            // text preview, not a lookup key) stays either way.
+            return new OutcomeView(isOwner ? post.getId().toString() : null, ask ? "need" : "offer",
                     d == null ? null : d.getCategory().wireValue(), gave ? "gave" : "received", c.getCompletedAt().toString(), preview(post));
         });
     }

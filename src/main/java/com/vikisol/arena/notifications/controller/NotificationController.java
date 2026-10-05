@@ -100,13 +100,15 @@ public class NotificationController {
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
-    // Row 18: which categories to receive. safety is always on.
+    // Row 18: which categories to receive. safety is always on. Row 52 (B+) names them in the
+    // plural (messages, activities, needs, jobs) and adds jenny and marketing (opt-in); both
+    // spellings are read and written.
     @GetMapping("/preferences")
     @Transactional(readOnly = true)
     public ResponseEntity<ApiResponse<Preferences>> preferences(@AuthenticationPrincipal UserPrincipal principal) {
         return ResponseEntity.ok(ApiResponse.ok(preferenceRepository.findByUserId(principal.getId())
-                .map(p -> new Preferences(p.isActivity(), p.isNeed(), p.isJob(), p.isMessage(), true))
-                .orElse(new Preferences(true, true, true, true, true))));
+                .map(p -> Preferences.of(p.isActivity(), p.isNeed(), p.isJob(), p.isMessage(), p.isJenny(), p.isMarketing()))
+                .orElse(Preferences.of(true, true, true, true, true, false))));
     }
 
     @PutMapping("/preferences")
@@ -117,15 +119,29 @@ public class NotificationController {
         }
         var p = preferenceRepository.findByUserId(principal.getId()).orElseGet(() -> com.vikisol.arena.notifications.entity.NotificationPreference
                 .builder().user(userRepository.getReferenceById(principal.getId())).build());
-        if (request.activity() != null) p.setActivity(request.activity());
-        if (request.need() != null) p.setNeed(request.need());
-        if (request.job() != null) p.setJob(request.job());
-        if (request.message() != null) p.setMessage(request.message());
+        Boolean activity = either(request.activity(), request.activities());
+        Boolean need = either(request.need(), request.needs());
+        Boolean job = either(request.job(), request.jobs());
+        Boolean message = either(request.message(), request.messages());
+        if (activity != null) p.setActivity(activity);
+        if (need != null) p.setNeed(need);
+        if (job != null) p.setJob(job);
+        if (message != null) p.setMessage(message);
+        if (request.jenny() != null) p.setJenny(request.jenny());
+        if (request.marketing() != null) p.setMarketing(request.marketing());
         preferenceRepository.save(p);
         return preferences(principal);
     }
 
-    public record Preferences(Boolean activity, Boolean need, Boolean job, Boolean message, Boolean safety) {
+    private static Boolean either(Boolean singular, Boolean plural) {
+        return singular != null ? singular : plural;
+    }
+
+    public record Preferences(Boolean activity, Boolean need, Boolean job, Boolean message, Boolean safety,
+                              Boolean activities, Boolean needs, Boolean jobs, Boolean messages, Boolean jenny, Boolean marketing) {
+        static Preferences of(boolean activity, boolean need, boolean job, boolean message, boolean jenny, boolean marketing) {
+            return new Preferences(activity, need, job, message, true, activity, need, job, message, jenny, marketing);
+        }
     }
 
     private Notification requireOwn(UUID userId, UUID id) {

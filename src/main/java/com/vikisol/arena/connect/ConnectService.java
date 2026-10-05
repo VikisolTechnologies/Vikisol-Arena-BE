@@ -8,7 +8,6 @@ import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.common.policy.ProtectedAttributes;
 import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
-import com.vikisol.arena.follows.service.BlockService;
 import com.vikisol.arena.jobs.entity.JobPosting;
 import com.vikisol.arena.jobs.repository.JobPostingRepository;
 import com.vikisol.arena.messaging.service.ConversationService;
@@ -36,24 +35,29 @@ public class ConnectService {
     private final EnterpriseProfileService enterpriseProfileService;
     private final JobPostingRepository jobPostingRepository;
     private final UserRepository userRepository;
-    private final BlockService blockService;
     private final NotificationService notificationService;
     private final ConversationService conversationService;
     private final BusinessVerificationRepository verificationRepository;
+    private final com.vikisol.arena.profile.service.ProfileVisibilityGuard visibilityGuard;
 
     public record ConnectView(String id, String companyId, String companyName, String companyEmoji, boolean companyVerified,
                               String jobId, String jobTitle, String note, String status, String createdAt, String conversationId) {
     }
 
     // Employer side. {candidateId} is the talent-search id (CandidateProfile id).
+    // ARCHITECT-REVIEW-BE-1 blocker #2: only checked deletedAt and a block before - not banned,
+    // and not hidden/nearby visibility, so an employer could still open a connect request to
+    // someone who'd hidden their profile entirely.
     @Transactional
     public ConnectView send(UUID senderId, UUID candidateId, UUID jobId, String note) {
+        // B11 item 17: refuse a connect request from an account with no date of birth on file.
+        com.vikisol.arena.common.util.AgeUtil.requireDateOfBirth(
+                userRepository.findById(senderId).orElseThrow(() -> new ResourceNotFoundException("User not found: " + senderId)));
         EnterpriseProfile tenant = enterpriseProfileService.getEntityForUser(senderId);
         CandidateProfile candidate = candidateProfileRepository.findById(candidateId)
-                .filter(c -> c.getUser().getDeletedAt() == null)
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate not found: " + candidateId));
         UUID candidateUserId = candidate.getUser().getId();
-        if (blockService.isBlockedEitherDirection(senderId, candidateUserId)) throw new BadRequestException("You can't contact this person");
+        visibilityGuard.requireVisibleTo(senderId, candidateUserId);
         ProtectedAttributes.reject("the note", note);
         JobPosting job = null;
         if (jobId != null) {
@@ -92,7 +96,8 @@ public class ConnectService {
             conversationId = conversationService.getOrCreate(userId, request.getSender().getId(),
                     "About: " + (request.getJob() != null ? request.getJob().getTitle() : request.getTenant().getCompanyName())).id();
             notificationService.notifyJob(request.getSender(), "Connect request accepted",
-                    userRepository.getReferenceById(userId).getName() + " accepted. You can message them now.");
+                    userRepository.getReferenceById(userId).getName() + " accepted. You can message them now.",
+                    request.getCandidate());
         }
         return view(request, conversationId);
     }

@@ -47,4 +47,8 @@ public interface ModerationItemRepository extends JpaRepository<ModerationItem, 
         UUID getPostId();
         long getCnt();
     }
+
+    // Row 61: one open report of a person per reporter.
+    boolean existsByContentTypeAndReporterIdAndReportedUserIdAndStatus(ModerationContentType contentType, UUID reporterId,
+                                                                       UUID reportedUserId, ModerationStatus status);
 }

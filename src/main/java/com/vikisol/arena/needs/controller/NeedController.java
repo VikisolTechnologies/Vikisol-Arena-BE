@@ -89,7 +89,8 @@ public class NeedController {
     @PreAuthorize("permitAll()")
     @GetMapping("/outcomes/{userId}")
     public ResponseEntity<ApiResponse<List<OutcomeView>>> outcomes(
+            @AuthenticationPrincipal UserPrincipal principal,
             @PathVariable UUID userId, @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "100") int size) {
-        return PageLimits.ok(needService.outcomes(userId, PageLimits.of(page, size)));
+        return PageLimits.ok(needService.outcomes(userId, principal == null ? null : principal.getId(), PageLimits.of(page, size)));
     }
 }

@@ -52,7 +52,7 @@ public class ApplicantService {
         if (!posting.getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your posting");
         }
-        var page = applicationRepository.findByJobPostingId(postingId, pageable);
+        var page = applicationRepository.findByJobPostingIdAndStageNot(postingId, ApplicationStage.WITHDRAWN, pageable);
         Map<UUID, CareerProfile> careers = careerProfileRepository.mapByUserId(
                 page.getContent().stream().map(a -> a.getCandidate().getUser().getId()).toList());
         return PagedResponse.of(page, a -> toResponse(a, careers.get(a.getCandidate().getUser().getId())));
@@ -64,11 +64,24 @@ public class ApplicantService {
     // enterprise caller - that page has been silently broken in real mode since it was built.
     @Transactional(readOnly = true)
     public ApplicantResponse getApplicant(UUID enterpriseUserId, UUID applicantId) {
+        // Unlike the applicant list (below), a direct-by-id lookup stays visible after withdrawal -
+        // the recruiter who already knows this application exists still needs to see that it was
+        // withdrawn (ApplicationLifecycleTest.aCandidateCanOnlyWithdrawNeverPromoteThemself), just
+        // not discover or re-surface it through a listing.
         Application application = applicationRepository.findById(applicantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Applicant not found: " + applicantId));
         EnterpriseProfile actingTenant = enterpriseProfileService.getEntityForUser(enterpriseUserId);
         if (!application.getJobPosting().getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your applicant");
+        }
+        // MARATHON-BE-2 step 1b item 2: knowing the application exists and its stage is fine, but
+        // the detail URL used to still hand the company the candidate's full CV/profile/CTC after
+        // withdrawal - a stage-only stub closes that off while the "still reachable by id" test
+        // (ApplicationLifecycleTest) keeps working.
+        if (application.getStage() == com.vikisol.arena.applications.entity.ApplicationStage.WITHDRAWN) {
+            return new ApplicantResponse(application.getId().toString(), application.getJobPosting().getId().toString(),
+                    application.getCandidate().getId().toString(), application.getStage().wireValue(),
+                    application.getAppliedAt().toString(), null, null);
         }
         return toResponse(application);
     }

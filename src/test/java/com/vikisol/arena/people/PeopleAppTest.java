@@ -90,10 +90,26 @@ class PeopleAppTest extends EmbeddedPostgresAppTest {
                 .andExpect(status().isBadRequest());
         call(asha, post("/posts/" + post + "/report"), "{\"reason\":\"Spam\",\"evidenceUrls\":[\"https://evil.example/x.png\"]}")
                 .andExpect(status().isBadRequest());
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: evidenceUrls is capped at 4.
+        String five = "\"" + url + "\",\"" + url + "\",\"" + url + "\",\"" + url + "\",\"" + url + "\"";
+        String anotherPost = body(call(ravi, post("/posts"), "{\"intentType\":\"update\",\"body\":\"Another\"}")).path("data").path("id").asText();
+        call(asha, post("/posts/" + anotherPost + "/report"), "{\"reason\":\"Spam\",\"evidenceUrls\":[" + five + "]}")
+                .andExpect(status().isBadRequest());
         call(asha, post("/posts/" + post + "/report"), "{\"reason\":\"Spam\",\"evidenceUrls\":[\"" + url + "\"]}").andExpect(status().isOk());
         call(admin(), get("/admin/moderation"), null)
                 .andExpect(jsonPath("$.data.content[0].reason").value("Spam"))
                 .andExpect(jsonPath("$.data.content[0].evidenceUrls[0]").value(containsString("/report-evidence/" + asha.getId() + "/")));
+    }
+
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: PostService.update only ran autoFlag on a description
+    // change - a title-only edit carrying the same scam phrasing slipped past moderation.
+    @Test
+    void editingOnlyTheTitleStillRunsAutoFlag() throws Exception {
+        String post = body(call(ravi, post("/posts"), "{\"intentType\":\"update\",\"body\":\"Something ordinary\"}"))
+                .path("data").path("id").asText();
+        call(ravi, patch("/posts/" + post), "{\"title\":\"guaranteed income fast\"}").andExpect(status().isOk());
+        call(admin(), get("/admin/moderation"), null)
+                .andExpect(jsonPath("$.data.content[0].reason").value(containsString("guaranteed income")));
     }
 
     @Test
@@ -122,29 +138,95 @@ class PeopleAppTest extends EmbeddedPostgresAppTest {
 
     @Test
     void peopleSearchFollowsProfileVisibilityDistanceAndBlocks() throws Exception {
-        locate(ravi, 17.44, 78.35);   // ~1 km from the search point
-        locate(meera, 17.70, 78.60);  // ~40 km away
+        locate(ravi, 17.44, 78.35);   // ~1 km from asha
+        locate(meera, 17.70, 78.60);  // ~40 km from asha
         call(asha, get("/search").param("type", "people").param("q", "figma"), null)
                 .andExpect(jsonPath("$.data.people.length()").value(2));
         mvc.perform(get("/search").param("type", "people").param("q", "figma")).andExpect(jsonPath("$.data.people.length()").value(0));
-        call(asha, get("/search").param("type", "skills").param("q", "figma").param("near", "17.44,78.34").param("radiusKm", "5"), null)
+
+        // ARCHITECT-REVIEW-BE-1 blocker #1: `near` can only search near the caller's own stored
+        // location now, never an arbitrary point - asha must locate herself first, and a bare
+        // "near=true" (no coordinates accepted) is the entire request.
+        locate(asha, 17.44, 78.34);
+        call(asha, get("/search").param("type", "skills").param("q", "figma").param("near", "true").param("radiusKm", "5"), null)
                 .andExpect(jsonPath("$.data.people.length()").value(1))
                 .andExpect(jsonPath("$.data.people[0].name").value("Ravi"))
-                .andExpect(jsonPath("$.data.people[0].distanceKm").value(1));
+                .andExpect(jsonPath("$.data.people[0].distanceBand").value("within 2 km"));
+        // Coordinates in the `near` value are ignored outright - still anchors to asha, not to meera.
+        call(asha, get("/search").param("type", "skills").param("q", "figma").param("near", "17.70,78.60").param("radiusKm", "5"), null)
+                .andExpect(jsonPath("$.data.people[*].name", hasItem("Ravi")))
+                .andExpect(jsonPath("$.data.people[*].name", not(hasItem("Meera"))));
+        // Below the 2 km radius floor, the search circle still never shrinks past 2 km.
+        call(asha, get("/search").param("type", "skills").param("q", "figma").param("near", "true").param("radiusKm", "0.1"), null)
+                .andExpect(jsonPath("$.data.people[0].name").value("Ravi"));
 
         call(ravi, put("/profile/me/visibility"), "{\"profile\":\"nearby\"}").andExpect(jsonPath("$.data.profile").value("nearby"));
         call(asha, get("/search").param("type", "people").param("q", "figma"), null)
                 .andExpect(jsonPath("$.data.people[*].name", not(hasItem("Ravi"))));
-        call(asha, get("/search").param("type", "people").param("q", "figma").param("near", "17.44,78.34"), null)
+        call(asha, get("/search").param("type", "people").param("q", "figma").param("near", "true"), null)
                 .andExpect(jsonPath("$.data.people[*].name", hasItem("Ravi")));
         call(ravi, put("/profile/me/visibility"), "{\"profile\":\"hidden\"}").andExpect(status().isOk());
-        call(asha, get("/search").param("type", "people").param("q", "figma").param("near", "17.44,78.34"), null)
+        call(asha, get("/search").param("type", "people").param("q", "figma").param("near", "true"), null)
                 .andExpect(jsonPath("$.data.people.length()").value(0));
         call(ravi, put("/profile/me/visibility"), "{\"profile\":\"invisible\"}").andExpect(status().isBadRequest());
 
         call(asha, post("/blocks/" + meera.getId()), null).andExpect(status().isOk());
         call(asha, get("/search").param("type", "people").param("q", "figma"), null)
                 .andExpect(jsonPath("$.data.people.length()").value(0));
+
+        // An unlocated viewer (recruiter has no CandidateProfile at all) searching "near" gets an
+        // empty result, not an error or someone else's area.
+        call(recruiter, get("/search").param("type", "people").param("q", "figma").param("near", "true"), null)
+                .andExpect(jsonPath("$.data.people.length()").value(0));
+    }
+
+    // ARCHITECT-REVIEW-BE-1 blocker #2: GET /profile/{id} was the only endpoint that hid a
+    // hidden/blocked/banned person - every one of these five used to answer anyway.
+    @Test
+    void hiddenBlockedAndBannedProfilesAreInvisibleEverywhereNotJustGetProfile() throws Exception {
+        EnterpriseProfile acme = enterprises.save(EnterpriseProfile.builder().user(recruiter).companyName("Acme").logoEmoji("A")
+                .industry(Industry.DESIGN).size(CompanySize.S_11_50).build());
+        String ravisProfileId = profiles.findByUserId(ravi.getId()).orElseThrow().getId().toString();
+
+        call(ravi, put("/profile/me/visibility"), "{\"profile\":\"hidden\"}").andExpect(status().isOk());
+        call(asha, get("/needs/outcomes/" + ravi.getId()), null).andExpect(status().isNotFound());
+        call(asha, get("/projects/of/" + ravi.getId()), null).andExpect(status().isNotFound());
+        call(asha, get("/profile/" + ravi.getId() + "/stats"), null).andExpect(status().isNotFound());
+        call(asha, get("/posts/by-user/" + ravi.getId()), null).andExpect(status().isNotFound());
+        call(asha, post("/profile/" + ravi.getId() + "/report"), "{\"reason\":\"Spam\"}").andExpect(status().isNotFound());
+        call(recruiter, post("/enterprise/talent/" + ravisProfileId + "/connect"), "{\"note\":\"Hi\"}").andExpect(status().isNotFound());
+        // The owner can always see their own.
+        call(ravi, get("/profile/" + ravi.getId() + "/stats"), null).andExpect(status().isOk());
+        call(ravi, put("/profile/me/visibility"), "{\"profile\":\"everyone\"}").andExpect(status().isOk());
+
+        User banned = talent("Banned");
+        banned.setBannedAt(Instant.now());
+        users.save(banned);
+        call(asha, get("/profile/" + banned.getId() + "/stats"), null).andExpect(status().isNotFound());
+        call(asha, get("/posts/by-user/" + banned.getId()), null).andExpect(status().isNotFound());
+
+        call(asha, post("/blocks/" + meera.getId()), null).andExpect(status().isOk());
+        call(asha, get("/projects/of/" + meera.getId()), null).andExpect(status().isNotFound());
+        call(meera, get("/projects/of/" + asha.getId()), null).andExpect(status().isNotFound()); // either direction
+
+        // A stranger with no CandidateProfile at all (e.g. the recruiter) is always visible -
+        // this guard is about talent profiles, not every user row.
+        call(asha, get("/posts/by-user/" + recruiter.getId()), null).andExpect(status().isOk());
+    }
+
+    // ARCHITECT-REVIEW-BE-1 blocker #3: MessagingPolicy.mayStartChat fail-opened (returned true)
+    // for an employer-role account with no enterprise profile at all, and for a recipient id that
+    // doesn't resolve to a real user - both now fail closed.
+    @Test
+    void unlinkedEmployersCannotMessageTalent() throws Exception {
+        User unlinkedRecruiter = user(Role.RECRUITER, "No Company Yet"); // no EnterpriseProfile row
+        call(unlinkedRecruiter, post("/messages/conversations"), "{\"participantUserId\":\"" + ravi.getId() + "\"}")
+                .andExpect(status().isBadRequest());
+
+        EnterpriseProfile acme = enterprises.save(EnterpriseProfile.builder().user(recruiter).companyName("Acme").logoEmoji("A")
+                .industry(Industry.DESIGN).size(CompanySize.S_11_50).build());
+        call(recruiter, post("/messages/conversations"), "{\"participantUserId\":\"" + UUID.randomUUID() + "\"}")
+                .andExpect(status().isBadRequest());
     }
 
     @Test

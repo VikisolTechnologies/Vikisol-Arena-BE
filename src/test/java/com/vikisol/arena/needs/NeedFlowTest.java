@@ -125,8 +125,13 @@ class NeedFlowTest extends EmbeddedPostgresAppTest {
                 .andExpect(jsonPath("$.data[0].role").value("gave"))
                 .andExpect(jsonPath("$.data[0].title").isNotEmpty())
                 .andExpect(jsonPath("$.data[0].category").value("moving"))
-                .andExpect(jsonPath("$.data[0].userId").doesNotExist());
-        mvc.perform(get("/needs/outcomes/" + owner.getId())).andExpect(jsonPath("$.data[0].role").value("received"));
+                .andExpect(jsonPath("$.data[0].userId").doesNotExist())
+                // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: helper didn't author this post, so its id
+                // (which would let a viewer fetch it and read off the owner's identity) is hidden.
+                .andExpect(jsonPath("$.data[0].postId").doesNotExist());
+        mvc.perform(get("/needs/outcomes/" + owner.getId()))
+                .andExpect(jsonPath("$.data[0].role").value("received"))
+                .andExpect(jsonPath("$.data[0].postId").value(need.getId().toString())); // owner's own post - safe
         // A bystander never sees the private parts.
         call(other, get("/needs/" + need.getId() + "/responses"), null).andExpect(jsonPath("$.data.length()").value(0));
         call(helper, get("/needs/responses/mine"), null)
@@ -144,6 +149,38 @@ class NeedFlowTest extends EmbeddedPostgresAppTest {
         call(helper, post(base + "/confirm"), null);
         mvc.perform(get("/needs/outcomes/" + owner.getId())).andExpect(jsonPath("$.data[0].role").value("gave"));
         mvc.perform(get("/needs/" + offer.getId())).andExpect(jsonPath("$.data.status").value("open")); // an offer can serve many
+    }
+
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: GET /needs/{id} had no audience, block or paused filter -
+    // post detail's own rules now apply here too.
+    @Test
+    void getAppliesAudienceBlockAndPausedFiltering() throws Exception {
+        Post paused = newPost(PostIntentType.ASK, false);
+        paused.setStatus(com.vikisol.arena.posts.entity.PostStatus.PAUSED);
+        posts.save(paused);
+        mvc.perform(get("/needs/" + paused.getId())).andExpect(status().isNotFound());
+        call(owner, get("/needs/" + paused.getId()), null).andExpect(status().isOk()); // the author still sees it
+
+        Post followersOnly = newPost(PostIntentType.ASK, false);
+        followersOnly.setAudience(com.vikisol.arena.posts.entity.PostAudience.FOLLOWERS);
+        posts.save(followersOnly);
+        call(helper, get("/needs/" + followersOnly.getId()), null).andExpect(status().isNotFound());
+        call(owner, get("/needs/" + followersOnly.getId()), null).andExpect(status().isOk());
+
+        Post need = newPost(PostIntentType.ASK, false);
+        call(helper, post("/blocks/" + owner.getId()), null).andExpect(status().isOk());
+        call(helper, get("/needs/" + need.getId()), null).andExpect(status().isNotFound());
+        call(other, get("/needs/" + need.getId()), null).andExpect(status().isOk());
+    }
+
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: respond -> withdraw -> respond had no cooldown, which let
+    // someone re-notify the owner in a loop.
+    @Test
+    void respondingAgainRightAfterAWithdrawalIsRateLimited() throws Exception {
+        Post need = newPost(PostIntentType.ASK, false);
+        call(helper, post("/needs/" + need.getId() + "/responses"), "{\"message\":\"I can help\"}").andExpect(status().isOk());
+        call(helper, delete("/needs/" + need.getId() + "/responses/me"), null).andExpect(status().isOk());
+        call(helper, post("/needs/" + need.getId() + "/responses"), "{\"message\":\"again\"}").andExpect(status().isBadRequest());
     }
 
     @Test

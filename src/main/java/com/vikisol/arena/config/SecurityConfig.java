@@ -7,6 +7,7 @@ import com.vikisol.arena.security.jwt.AgentServiceTokenAuthenticationFilter;
 import com.vikisol.arena.security.jwt.JwtAuthenticationEntryPoint;
 import com.vikisol.arena.security.jwt.JwtAuthenticationFilter;
 import com.vikisol.arena.security.mfa.PlatformAdminMfaFilter;
+import com.vikisol.arena.security.proxy.TrustedProxyFilter;
 import com.vikisol.arena.security.ratelimit.RateLimitFilter;
 import com.vikisol.arena.security.service.CustomUserDetailsService;
 import jakarta.servlet.DispatcherType;
@@ -16,6 +17,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -30,7 +32,6 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -43,12 +44,19 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final AgentServiceTokenAuthenticationFilter agentServiceTokenAuthenticationFilter;
     private final RateLimitFilter rateLimitFilter;
+    private final TrustedProxyFilter trustedProxyFilter;
     private final PlatformAdminMfaFilter platformAdminMfaFilter;
     private final CustomUserDetailsService userDetailsService;
     private final ObjectMapper objectMapper;
+    private final Environment environment;
 
-    @Value("${app.cors.allowed-origins:http://localhost:3000}")
+    @Value("${app.cors.allowed-origins:}")
     private String allowedOrigins;
+
+    // Browsers cache a preflight answer this long, so a signed-in page doesn't send an OPTIONS
+    // before every API call. Chrome caps it at 2 hours, Firefox at 24.
+    @Value("${app.cors.max-age-seconds:3600}")
+    private long corsMaxAgeSeconds;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -56,11 +64,12 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(request -> {
                     var config = new org.springframework.web.cors.CorsConfiguration();
                     config.setAllowCredentials(true);
-                    config.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
+                    config.setAllowedOrigins(CorsOriginPolicy.allowedOrigins(allowedOrigins, environment));
                     config.addAllowedHeader("*");
                     config.addAllowedMethod("*");
                     // PageLimits' paging headers on the bare-array list endpoints.
                     config.setExposedHeaders(List.of(PageLimits.TOTAL_COUNT_HEADER, PageLimits.HAS_MORE_HEADER));
+                    config.setMaxAge(corsMaxAgeSeconds);
                     return config;
                 }))
                 .csrf(csrf -> csrf.disable())
@@ -171,6 +180,7 @@ public class SecurityConfig {
                 // fails verification here (different secret, see the filter's own class doc) and
                 // falls through untouched, so ordering relative to JwtAuthenticationFilter has no
                 // effect on normal requests.
+                .addFilterBefore(trustedProxyFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(agentServiceTokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 // After JWT auth so an authenticated bucket can key by user id, not just IP -
@@ -202,6 +212,13 @@ public class SecurityConfig {
     @Bean
     public FilterRegistrationBean<PlatformAdminMfaFilter> platformAdminMfaFilterRegistration(PlatformAdminMfaFilter filter) {
         FilterRegistrationBean<PlatformAdminMfaFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<TrustedProxyFilter> trustedProxyFilterRegistration(TrustedProxyFilter filter) {
+        FilterRegistrationBean<TrustedProxyFilter> registration = new FilterRegistrationBean<>(filter);
         registration.setEnabled(false);
         return registration;
     }

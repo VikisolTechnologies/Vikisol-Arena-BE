@@ -54,6 +54,7 @@ public class CollabProjectService {
     private final com.vikisol.arena.common.service.FileStorageService fileStorageService;
     private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
     private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+    private final com.vikisol.arena.profile.service.ProfileVisibilityGuard visibilityGuard;
 
     static final int MAX_MILESTONES = 30;
 
@@ -214,7 +215,7 @@ public class CollabProjectService {
             User user = userRepository.getReferenceById(id);
             contributorRepository.save(ProjectContributor.builder().post(post).user(user).build());
             notificationService.notifyActivity(user, "Project completed", post.getAuthorUser().getName()
-                    + " completed \"" + title(post) + "\" and named you as a contributor. It's on your profile now.");
+                    + " completed \"" + title(post) + "\" and named you as a contributor. It's on your profile now.", post.getAuthorUser());
         }
         return toView(post, ownerId);
     }
@@ -310,8 +311,11 @@ public class CollabProjectService {
         }).toList();
     }
 
+    // ARCHITECT-REVIEW-BE-1 blocker #2: permitAll(), used to answer for a hidden/blocked/
+    // banned/deleted person too.
     @Transactional(readOnly = true)
-    public Page<ProjectCard> projectsOf(UUID userId, Pageable pageable) {
+    public Page<ProjectCard> projectsOf(UUID userId, UUID viewerId, Pageable pageable) {
+        visibilityGuard.requireVisibleTo(viewerId, userId);
         Page<Post> page = postRepository.findCollabProjectsOf(userId, pageable);
         Map<UUID, ProjectDetails> details = detailsRepository.findByPostIdIn(page.stream().map(Post::getId).toList()).stream()
                 .collect(Collectors.toMap(d -> d.getPost().getId(), Function.identity()));
@@ -327,10 +331,11 @@ public class CollabProjectService {
     }
 
     // G32: the profile's Hosted / Joined / Helped / Projects row.
+    // ARCHITECT-REVIEW-BE-1 blocker #2: only checked deletedAt before - not banned, blocked, or
+    // hidden/nearby visibility, so a stranger could still read anyone's stats.
     @Transactional(readOnly = true)
-    public ProfileStats stats(UUID userId) {
-        userRepository.findById(userId).filter(u -> u.getDeletedAt() == null)
-                .orElseThrow(() -> new ResourceNotFoundException("Profile not found"));
+    public ProfileStats stats(UUID userId, UUID viewerId) {
+        visibilityGuard.requireVisibleTo(viewerId, userId);
         return new ProfileStats(
                 postRepository.countHostedActivities(userId),
                 joinRepository.countJoinedActivities(userId, Instant.now().minus(ActivityRules.DISPUTE_WINDOW)),

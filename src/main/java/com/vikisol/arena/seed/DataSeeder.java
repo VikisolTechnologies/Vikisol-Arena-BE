@@ -88,10 +88,15 @@ import java.util.Set;
  * mock/seed.ts. Idempotent: skips entirely if any users already exist, so it only ever runs once
  * against a fresh database. Disable with SEED_ENABLED=false.
  */
+// B11 item 2: default is now false (was matchIfMissing = true) - an operator who forgets to set
+// SEED_ENABLED at all now gets no seeding, not demo data they never asked for. The property is
+// evaluated fresh on every startup (Spring's @ConditionalOnProperty, not a one-time check), so
+// this already "respects SEED_ENABLED on every start" for whether the bean runs at all; the
+// separate skip-guard inside run() only governs whether an already-seeded database seeds again.
 @Component
 @RequiredArgsConstructor
 @Slf4j
-@ConditionalOnProperty(value = "app.seed.enabled", havingValue = "true", matchIfMissing = true)
+@ConditionalOnProperty(value = "app.seed.enabled", havingValue = "true", matchIfMissing = false)
 public class DataSeeder implements ApplicationRunner {
 
     public static final String DEMO_TALENT_EMAIL = "demo.talent@vikisol.dev";
@@ -121,10 +126,20 @@ public class DataSeeder implements ApplicationRunner {
     private final RoomMemberRepository roomMemberRepository;
     private final RoomMessageRepository roomMessageRepository;
     private final FollowRepository followRepository;
+    private final org.springframework.core.env.Environment environment;
+    private final jakarta.persistence.EntityManager entityManager;
 
     @Override
     @Transactional
     public void run(ApplicationArguments args) {
+        // B11 item 2: demo data must never seed a production-like environment, even if someone
+        // sets SEED_ENABLED=true there by mistake - fail startup loudly instead of quietly
+        // populating a real database with fake companies and candidates.
+        if (!environment.matchesProfiles("local")) {
+            throw new IllegalStateException(
+                    "SEED_ENABLED is true but the active profile isn't 'local' - refusing to seed demo data into "
+                            + "what looks like a real deployment. Set SEED_ENABLED=false.");
+        }
         // Was userRepository.count() > 0 - broke on a genuinely fresh database (first hit
         // deploying to Railway staging) because RoleMigration.backfillDemoAccounts() runs first
         // (@Order(HIGHEST_PRECEDENCE)) and unconditionally seeds exactly one user, the platform
@@ -140,17 +155,32 @@ public class DataSeeder implements ApplicationRunner {
         }
         log.info("Seeding demo data into vikisol_arena...");
 
-        List<EnterpriseProfile> companies = seedCompanies();
-        List<CandidateProfile> candidates = seedCandidates();
-        List<JobPosting> postings = seedJobPostings(companies);
-        seedApplicationsAndInterviews(candidates, postings);
-        seedMarketplace(companies, candidates);
-        seedEnterpriseEngagement(companies.get(0), candidates);
-        seedDemoActivityAndNotifications(candidates.get(0));
-        seedPostsRoomsAndFollows(candidates);
+        // B11 item 2: every entity this seeder inserts is tagged demo_content=true (see
+        // DemoSeedingContext / BaseEntity's @PrePersist hook) so it's never indistinguishable
+        // from real user content the way it was before this fix.
+        com.vikisol.arena.common.entity.DemoSeedingContext.begin();
+        try {
+            List<EnterpriseProfile> companies = seedCompanies();
+            List<CandidateProfile> candidates = seedCandidates();
+            List<JobPosting> postings = seedJobPostings(companies);
+            seedApplicationsAndInterviews(candidates, postings);
+            seedMarketplace(companies, candidates);
+            seedEnterpriseEngagement(companies.get(0), candidates);
+            seedDemoActivityAndNotifications(candidates.get(0));
+            seedPostsRoomsAndFollows(candidates);
 
-        log.info("Seed complete: {} companies, {} candidates, {} postings. Demo password is ARENA_DEMO_PASSWORD and is not logged.",
-                companies.size(), candidates.size(), postings.size());
+            log.info("Seed complete: {} companies, {} candidates, {} postings. Demo password is ARENA_DEMO_PASSWORD and is not logged.",
+                    companies.size(), candidates.size(), postings.size());
+        } finally {
+            // MARATHON-BE-2 step 1b item 4: cascade-persisted children (e.g. a collection saved
+            // via its parent, never directly through a repository) don't get their @PrePersist
+            // hook run until Hibernate actually flushes the insert - without this, that could
+            // happen after DemoSeedingContext.end() below has already cleared the thread-local,
+            // leaving them untagged. Flushing here, still inside the try block, guarantees every
+            // pending insert fires while the context is still active.
+            entityManager.flush();
+            com.vikisol.arena.common.entity.DemoSeedingContext.end();
+        }
     }
 
     public static final String DEMO_RECRUITER_EMAIL = "demo.recruiter@vikisol.dev";
@@ -273,7 +303,7 @@ public class DataSeeder implements ApplicationRunner {
                     .openTo(openTo)
                     .careerHealth(50)
                     .consent(new ConsentSettings(IndianData.RANDOM.nextDouble() < 0.7, IndianData.RANDOM.nextDouble() < 0.85))
-                    .autonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED, AutonomyLevel.AUTOPILOT)))
+                    .autonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED)))
                     .bio(experienceYears + "+ years in " + industry.wireValue().toLowerCase() + ", based in " + IndianData.pick(IndianData.LOCATIONS) + ".")
                     .build();
             // Phase B: the first 8 candidates get real PRECISE-consent coordinates scattered a

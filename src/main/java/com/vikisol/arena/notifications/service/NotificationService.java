@@ -33,21 +33,31 @@ public class NotificationService {
     public static final String JOB = "job";
     public static final String MESSAGE = "message";
     public static final String SAFETY = "safety";
+    // Row 52. Nothing is sent in these yet; a sender that uses them honours the toggle.
+    // Marketing is opt-in: without a saved preference it is not sent.
+    public static final String JENNY = "jenny";
+    public static final String MARKETING = "marketing";
 
     // Always stored (seeds rely on the returned row); the category follows the type.
     @Transactional
     public Notification notify(User user, NotificationType type, String title, String body) {
-        return notificationRepository.save(Notification.builder()
-                .user(user).type(type).category(defaultCategory(type)).title(title).body(body).read(false).build());
+        return notify(user, type, defaultCategory(type), title, body, null);
     }
 
     // Row 18: respects the person's preferences for that category. Returns null when they turned
     // it off (nothing is stored).
     @Transactional
     public Notification notify(User user, NotificationType type, String category, String title, String body) {
+        return notify(user, type, category, title, body, null);
+    }
+
+    // actor: the specific person the body names, if any (see actorUser on Notification) - null
+    // for notifications with no bound person's name in the text.
+    @Transactional
+    public Notification notify(User user, NotificationType type, String category, String title, String body, User actor) {
         if (!wants(user, category)) return null;
         return notificationRepository.save(Notification.builder()
-                .user(user).type(type).category(category).title(title).body(body).read(false).build());
+                .user(user).type(type).category(category).title(title).body(body).actorUser(actor).read(false).build());
     }
 
     public boolean wants(User user, String category) {
@@ -57,8 +67,10 @@ public class NotificationService {
             case NEED -> p.isNeed();
             case JOB -> p.isJob();
             case MESSAGE -> p.isMessage();
+            case JENNY -> p.isJenny();
+            case MARKETING -> p.isMarketing();
             default -> true;
-        }).orElse(true);
+        }).orElse(!MARKETING.equals(category));
     }
 
     private static String defaultCategory(NotificationType type) {
@@ -72,11 +84,15 @@ public class NotificationService {
         notify(recipient, NotificationType.SYSTEM, MESSAGE, "New message", body);
     }
 
+    public void notifyNewMessage(User recipient, String body, User actor) {
+        notify(recipient, NotificationType.SYSTEM, MESSAGE, "New message", body, actor);
+    }
+
     public void notifyApplicationSubmitted(CandidateProfile candidate, JobPosting job) {
         notify(candidate.getUser(), NotificationType.AGENT, JOB, "Application submitted",
                 "Your application to " + job.getTitle() + " at " + job.getEnterprise().getCompanyName() + " was submitted.");
         notify(job.getEnterprise().getUser(), NotificationType.SYSTEM, JOB, "New applicant",
-                candidate.getName() + " applied to " + job.getTitle() + ".");
+                candidate.getName() + " applied to " + job.getTitle() + ".", candidate.getUser());
     }
 
     public void notifyStageChanged(Application application) {
@@ -95,12 +111,14 @@ public class NotificationService {
         notify(application.getCandidate().getUser(), NotificationType.INTERVIEW, JOB, "Interview confirmed",
                 "Your interview for " + application.getJobPosting().getTitle() + " is confirmed.");
         notify(application.getJobPosting().getEnterprise().getUser(), NotificationType.INTERVIEW, JOB, "Interview confirmed",
-                application.getCandidate().getName() + " confirmed an interview slot for " + application.getJobPosting().getTitle() + ".");
+                application.getCandidate().getName() + " confirmed an interview slot for " + application.getJobPosting().getTitle() + ".",
+                application.getCandidate().getUser());
     }
 
     public void notifyBidPlaced(Project project, Bid bid) {
         notify(project.getPostedByUser(), NotificationType.BID, JOB, "New bid received",
-                bid.getBidderUser().getName() + " placed a bid of ₹" + bid.getAmount() + " on " + project.getTitle() + ".");
+                bid.getBidderUser().getName() + " placed a bid of ₹" + bid.getAmount() + " on " + project.getTitle() + ".",
+                bid.getBidderUser());
     }
 
     public void notifyBidAwarded(Bid bid) {
@@ -123,7 +141,8 @@ public class NotificationService {
     // hand-mirrored on both frontend and backend and these events all fit "system" semantics.
     public void notifyPostJoinRequested(Post post, PostJoinRequest joinRequest) {
         notify(post.getAuthorUser(), NotificationType.SYSTEM, ACTIVITY, "New join request",
-                joinRequest.getUser().getName() + " wants to join \"" + preview(post.getBody()) + "\".");
+                joinRequest.getUser().getName() + " wants to join \"" + preview(post.getBody()) + "\".",
+                joinRequest.getUser());
     }
 
     public void notifyPostJoinApproved(PostJoinRequest joinRequest) {
@@ -131,10 +150,11 @@ public class NotificationService {
                 "You're in! \"" + preview(joinRequest.getPost().getBody()) + "\" now has a room.");
     }
 
-    public void notifyPostJoinWithdrawn(Post post, String participantName, boolean hadJoined) {
+    public void notifyPostJoinWithdrawn(Post post, User participant, boolean hadJoined) {
         notify(post.getAuthorUser(), NotificationType.SYSTEM, ACTIVITY,
                 hadJoined ? "Someone left" : "Join request withdrawn",
-                participantName + (hadJoined ? " left \"" : " withdrew their request to join \"") + preview(post.getBody()) + "\".");
+                participant.getName() + (hadJoined ? " left \"" : " withdrew their request to join \"") + preview(post.getBody()) + "\".",
+                participant);
     }
 
     public void notifyJoinOutcome(PostJoinRequest joinRequest) {
@@ -151,7 +171,8 @@ public class NotificationService {
     }
 
     public void notifyNewFollower(User following, User follower) {
-        notify(following, NotificationType.SYSTEM, "New follower", follower.getName() + " started following you.");
+        notify(following, NotificationType.SYSTEM, null, "New follower",
+                follower.getName() + " started following you.", follower);
     }
 
     public void notifyPostCancelled(User recipient, Post post) {
@@ -180,16 +201,33 @@ public class NotificationService {
         notify(recipient, NotificationType.SYSTEM, category, title, body);
     }
 
+    // actor: the specific person the body names (see actorUser on Notification), or null.
+    public void notifySystem(User recipient, String category, String title, String body, User actor) {
+        notify(recipient, NotificationType.SYSTEM, category, title, body, actor);
+    }
+
     public void notifyActivity(User recipient, String title, String body) {
         notifySystem(recipient, ACTIVITY, title, body);
+    }
+
+    public void notifyActivity(User recipient, String title, String body, User actor) {
+        notifySystem(recipient, ACTIVITY, title, body, actor);
     }
 
     public void notifyNeed(User recipient, String title, String body) {
         notifySystem(recipient, NEED, title, body);
     }
 
+    public void notifyNeed(User recipient, String title, String body, User actor) {
+        notifySystem(recipient, NEED, title, body, actor);
+    }
+
     public void notifyJob(User recipient, String title, String body) {
         notifySystem(recipient, JOB, title, body);
+    }
+
+    public void notifyJob(User recipient, String title, String body, User actor) {
+        notifySystem(recipient, JOB, title, body, actor);
     }
 
     private String preview(String body) {

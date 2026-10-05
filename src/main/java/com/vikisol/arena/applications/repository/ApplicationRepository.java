@@ -1,6 +1,7 @@
 package com.vikisol.arena.applications.repository;
 
 import com.vikisol.arena.applications.entity.Application;
+import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.jobs.entity.JobPosting;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import org.springframework.data.domain.Page;
@@ -17,6 +18,11 @@ public interface ApplicationRepository extends JpaRepository<Application, UUID> 
     Page<Application> findByCandidateId(UUID candidateId, Pageable pageable);
     Page<Application> findByJobPostingId(UUID jobPostingId, Pageable pageable);
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX (access/privacy): a withdrawn application pulled the
+    // candidate's CV and profile back into company view through the applicant list/detail -
+    // the company should see it the same way it sees an application that was never made.
+    Page<Application> findByJobPostingIdAndStageNot(UUID jobPostingId, ApplicationStage excludedStage, Pageable pageable);
+
     // G25 funnel: applications per stage for one posting.
     @org.springframework.data.jpa.repository.Query(
             "select a.stage as stage, count(a) as cnt from Application a where a.jobPosting.id = :postingId group by a.stage")
@@ -31,6 +37,10 @@ public interface ApplicationRepository extends JpaRepository<Application, UUID> 
     boolean existsByCandidateIdAndJobPostingEnterpriseId(UUID candidateId, UUID enterpriseId);
     java.util.List<Application> findByCandidate(CandidateProfile candidate);
     java.util.List<Application> findByJobPosting(JobPosting jobPosting);
+
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX (business): JobPostingService.setStatus only needs to
+    // know whether anyone has applied, not load every Application row to check .isEmpty().
+    boolean existsByJobPostingId(java.util.UUID jobPostingId);
 
     // Batched form of existsByCandidateIdAndJobPostingEnterpriseId for a whole page of candidates
     // at once - one query instead of one-per-row. Callers turn this into a Set for O(1) lookups.

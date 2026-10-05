@@ -44,7 +44,7 @@ class AnonymityTest extends EmbeddedPostgresAppTest {
 
     private User user(String name) {
         return users.save(User.builder().email(name.toLowerCase() + "-" + UUID.randomUUID() + "@test.local")
-                .passwordHash("x").name(name).role(Role.TALENT).build());
+                .passwordHash("x").name(name).role(Role.TALENT).dateOfBirth(java.time.LocalDate.of(1990, 1, 1)).build());
     }
 
     private static CreatePostRequest ask(String body, boolean anonymous) {

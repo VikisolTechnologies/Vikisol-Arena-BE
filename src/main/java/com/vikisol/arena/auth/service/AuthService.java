@@ -40,6 +40,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
 import java.util.Base64;
 import java.util.Set;
@@ -77,6 +79,7 @@ public class AuthService {
     private final EmailProvider emailProvider;
     private final PhoneOtpProvider phoneOtpProvider;
     private final GoogleIdTokenVerifier googleIdTokenVerifier;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbc;
 
     // application.yml's actual key is "app.frontend-url" (hyphenated) - a dotted
     // "app.frontend.url" here silently resolves to the fallback rather than erroring, which is
@@ -110,12 +113,27 @@ public class AuthService {
         if (userRepository.existsByEmailIgnoreCase(request.email())) {
             throw new BadRequestException("An account with this email already exists");
         }
+        // ARCHITECT-REVIEW-BE-1 (architect notes on B8/B9): the 18+ rule, enforced here now
+        // instead of only at activity create/join - see SignUpRequest's own comment.
+        LocalDate dateOfBirth;
+        try {
+            dateOfBirth = LocalDate.parse(request.dateOfBirth());
+        } catch (DateTimeParseException e) {
+            throw new BadRequestException("dateOfBirth must be a valid date (YYYY-MM-DD)");
+        }
+        if (dateOfBirth.isAfter(LocalDate.now())) {
+            throw new BadRequestException("dateOfBirth can't be in the future");
+        }
+        if (!com.vikisol.arena.common.util.AgeUtil.isAdult(dateOfBirth)) {
+            throw new BadRequestException("You must be " + com.vikisol.arena.common.util.AgeUtil.MINIMUM_AGE + " or older to join Arena");
+        }
         Role role = Role.fromWireValue(request.role());
         User user = User.builder()
                 .email(request.email().toLowerCase())
                 .passwordHash(passwordEncoder.encode(request.password()))
                 .name(request.name())
                 .role(role)
+                .dateOfBirth(dateOfBirth)
                 .handle(HandleGenerator.generate(request.name(), userRepository::existsByHandle))
                 .build();
         user = userRepository.save(user);
@@ -559,11 +577,17 @@ public class AuthService {
     /** Rotates the presented refresh token and mints a fresh access token. Throws
      * BadCredentialsException (translated to 401) if the refresh token is invalid, expired, or a
      * detected reuse - callers should treat that as "the session is over," not retry. */
-    @Transactional(readOnly = true)
+    @Transactional
     public RefreshResult refreshAccessToken(String refreshToken) {
         RefreshTokenService.Result rotated = refreshTokenService.rotate(refreshToken);
         User user = userRepository.findById(rotated.userId())
                 .orElseThrow(() -> new BadCredentialsException("Account not found"));
+        // Rows 50-51: a suspended, banned or erased account's session ends here.
+        if (user.getDeletedAt() != null || user.isBlocked(Instant.now())) {
+            refreshTokenService.revokeAllForUser(user.getId());
+            throw new BadCredentialsException("This account can't sign in");
+        }
+        recordActive(user);
         String accessToken = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
         return new RefreshResult(accessToken, rotated.token());
     }
@@ -635,7 +659,20 @@ public class AuthService {
         userRepository.save(user);
     }
 
+    // Every way into a session ends here, so a suspended, banned or erased account is refused on
+    // all of them (password, code, Google, phone, 2FA). Rows 50-51.
+    // ARCHITECT-REVIEW-BE-1 blocker #6: this only checked isBlocked() (suspended/banned), not
+    // deletedAt - an erased account's (now-tombstoned, but still technically present) credentials
+    // could still issue a session. refreshAccessToken already checked deletedAt; this didn't.
     private SignInOutcome.Success issueSession(User user) {
+        if (user.getDeletedAt() != null || user.isBlocked(Instant.now())) {
+            throw new BadRequestException(user.getBannedAt() != null
+                    ? "This account has been closed by Arena's team."
+                    : user.getDeletedAt() != null
+                            ? "This account can't sign in."
+                            : "This account is suspended. Contact Vikisol support for help.");
+        }
+        recordActive(user);
         // See currentSession()'s comment - this is the User.id, not the CandidateProfile PK.
         String candidateId = user.getRole() == Role.TALENT ? user.getId().toString() : null;
         String accessToken = jwtTokenProvider.generateToken(user.getId(), user.getEmail(), user.getName(), user.getRole());
@@ -647,6 +684,15 @@ public class AuthService {
                 user.getRole().wireValue(), candidateId, user.getName(), user.getEmail(), accessToken,
                 enrollmentRequired, user.isTotpEnabled());
         return new SignInOutcome.Success(session, refreshToken);
+    }
+
+    // Rows 42 and 49: last activity, and one row per active day for the launch return rates.
+    // Written in the caller's transaction (every caller is a writable one).
+    private void recordActive(User user) {
+        user.setLastActiveAt(Instant.now());
+        userRepository.saveAndFlush(user); // the insert below references the row
+        jdbc.update("insert into arena_user_active_days (user_id, day) values (?, (now() at time zone 'utc')::date) on conflict do nothing",
+                user.getId());
     }
 
     private User requireUser(UUID userId) {

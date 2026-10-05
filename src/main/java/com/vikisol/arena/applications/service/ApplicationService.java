@@ -95,6 +95,9 @@ public class ApplicationService {
     // Applying again after withdrawing reopens the same application.
     @Transactional
     public ApplicationResponse applyToJob(UUID userId, UUID jobId, List<ApplyRequest.Answer> answers, String coverNote, Boolean includeCtc) {
+        // B11 item 17: refuse an application from an account with no date of birth on file.
+        com.vikisol.arena.common.util.AgeUtil.requireDateOfBirth(
+                userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("User not found: " + userId)));
         CandidateProfile candidate = candidateProfileForUser(userId);
         var existing = applicationRepository.findByCandidateIdAndJobPostingId(candidate.getId(), jobId);
         if (existing.isPresent() && existing.get().getStage() != ApplicationStage.WITHDRAWN) {
@@ -224,11 +227,23 @@ public class ApplicationService {
         return advanceStageAsEnterprise(enterpriseUserId, applicationId, stage, null);
     }
 
+    // ARCHITECT-REVIEW-BE-1 blocker #4: any stage -> any stage let a recruiter revive a WITHDRAWN
+    // application (bringing back CV/CTC visibility) or jump straight APPLIED -> HIRED, skipping
+    // the candidate's own offer decision. Only a forward move along the pipeline, or ->REJECTED
+    // from any open stage, is allowed; WITHDRAWN/REJECTED/HIRED are terminal for the company -
+    // HIRED is set only by decideOffer(), when the candidate accepts an OFFER themself.
+    private static final java.util.Map<ApplicationStage, java.util.Set<ApplicationStage>> ALLOWED_COMPANY_TRANSITIONS = java.util.Map.of(
+            ApplicationStage.APPLIED, java.util.Set.of(ApplicationStage.SCREENING, ApplicationStage.REJECTED),
+            ApplicationStage.SCREENING, java.util.Set.of(ApplicationStage.INTERVIEW, ApplicationStage.REJECTED),
+            ApplicationStage.INTERVIEW, java.util.Set.of(ApplicationStage.OFFER, ApplicationStage.REJECTED),
+            ApplicationStage.OFFER, java.util.Set.of(ApplicationStage.REJECTED));
+
     // Row 31: the company's message goes to the candidate with the change. "Not selected" always
     // carries a kind message - the company's own, or Arena's standard one.
     @Transactional
     public Application advanceStageAsEnterprise(UUID enterpriseUserId, UUID applicationId, ApplicationStage stage, String message) {
         if (stage == ApplicationStage.WITHDRAWN) throw new BadRequestException("Only the candidate can withdraw an application");
+        if (stage == ApplicationStage.HIRED) throw new BadRequestException("Only the candidate can accept an offer");
         String note = message == null || message.isBlank() ? null : message.trim();
         if (note == null && stage == ApplicationStage.REJECTED) note = KIND_NOT_SELECTED;
         Application application = applicationRepository.findById(applicationId)
@@ -238,6 +253,12 @@ public class ApplicationService {
         // posting's tenant can move its applicants, not just whoever created it.
         if (!application.getJobPosting().getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your posting");
+        }
+        // Setting the same stage again is a no-op (e.g. InterviewService's HOLD recommendation
+        // re-asserts INTERVIEW), not a transition the map needs to allow explicitly.
+        if (application.getStage() != stage
+                && !ALLOWED_COMPANY_TRANSITIONS.getOrDefault(application.getStage(), java.util.Set.of()).contains(stage)) {
+            throw new BadRequestException("Can't move from " + application.getStage().wireValue() + " to " + stage.wireValue());
         }
         application.setStage(stage);
         Application saved = applicationRepository.save(application);
@@ -274,7 +295,7 @@ public class ApplicationService {
     }
 
     private void notifyCompany(Application application, String title, String body) {
-        notificationService.notifyJob(application.getJobPosting().getEnterprise().getUser(), title, body);
+        notificationService.notifyJob(application.getJobPosting().getEnterprise().getUser(), title, body, application.getCandidate().getUser());
     }
 
     private Application requireOwn(UUID userId, UUID applicationId) {

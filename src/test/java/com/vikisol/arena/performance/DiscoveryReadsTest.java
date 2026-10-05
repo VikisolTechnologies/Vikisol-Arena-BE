@@ -89,9 +89,9 @@ class DiscoveryReadsTest extends EmbeddedPostgresAppTest {
         em.flush();
         em.clear();
 
-        var all = searchService.search("chess", "all", 5, viewer.getId(), null, null, null);
-        var activities = searchService.search("chess", "activities", 5, viewer.getId(), null, null, null);
-        var discussions = searchService.search("chess", "discussions", 5, viewer.getId(), null, null, null);
+        var all = searchService.search("chess", "all", 5, viewer.getId(), false, null);
+        var activities = searchService.search("chess", "activities", 5, viewer.getId(), false, null);
+        var discussions = searchService.search("chess", "discussions", 5, viewer.getId(), false, null);
         assertThat(all.activities()).hasSize(5).extracting(PostResponse::id)
                 .containsExactlyElementsOf(activities.activities().stream().map(PostResponse::id).toList());
         assertThat(all.discussions()).hasSize(5).extracting(PostResponse::id)

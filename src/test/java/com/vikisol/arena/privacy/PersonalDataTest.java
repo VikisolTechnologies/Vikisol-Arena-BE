@@ -86,7 +86,8 @@ class PersonalDataTest extends EmbeddedPostgresAppTest {
             "arena_job_screening_questions", "the company's job content",
             "arena_project_roles", "part of the project post",
             "arena_project_details", "part of the project post (category, cover, outcome)",
-            "arena_business_verifications", "the company's record; the submitter's work email is handled in erase()");
+            "arena_business_verifications", "the company's record; the submitter's work email is handled in erase()",
+            "arena_industries", "the staff-managed industry list (V44): reference data, no person's entries");
 
     @BeforeEach
     void setUp() {
@@ -178,6 +179,14 @@ class PersonalDataTest extends EmbeddedPostgresAppTest {
         none.put("report evidence", "select count(*) from arena_moderation_items where reporter_user_id = '" + a + "' and evidence_json <> '[]'");
         none.forEach((what, sql) -> assertThat(jdbc.queryForObject(sql, Long.class)).as(what).isZero());
 
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: the host's own notification ("Asha responded to...")
+        // baked Asha's name into its body - that other person's row isn't deleted by erasure, but
+        // the name is scrubbed out of it so it doesn't outlive the account it named.
+        String hostNotification = jdbc.queryForObject(
+                "select body from arena_notifications where user_id = '" + host.getId() + "' and body like '%responded to%'",
+                String.class);
+        assertThat(hostNotification).doesNotContain("Asha").contains("Deleted user");
+
         // A recruiter's own notes, assessments and messages go when their account is erased.
         call(admin(), delete("/admin/users/" + recruiter.getId()), null).andExpect(status().isBadRequest()); // a company admin isn't erased this way
         User teammate = recruiterOnTeam();
@@ -187,6 +196,30 @@ class PersonalDataTest extends EmbeddedPostgresAppTest {
         assertThat(jdbc.queryForObject("select count(*) from arena_application_evidence where assessed_by_user_id = '" + t + "'", Long.class)).isZero();
         assertThat(jdbc.queryForObject("select count(*) from arena_application_events where actor_user_id = '" + t + "'", Long.class)).isZero();
         assertThat(jdbc.queryForObject("select count(*) from arena_connect_requests where sender_user_id = '" + t + "'", Long.class)).isZero();
+    }
+
+    // MARATHON-BE-2 step 1b BLOCKER: the old scrub did `body like '%name%'` across every OTHER
+    // user's notifications - deleting "Ravi" would also corrupt "Ravi Kumar"'s notification,
+    // since "Ravi" is a substring of "Ravi Kumar". The actor_user_id column (V45) scopes the
+    // scrub to rows actually about the deleted person, so an unrelated person whose name
+    // contains theirs as a substring is never touched.
+    @Test
+    void erasingSomeoneDoesNotCorruptAnotherPersonsNotificationWhoseNameOverlaps() throws Exception {
+        User host2 = talent("Host2");
+        User raviUser = talent("Ravi");
+        User raviKumar = talent("Ravi Kumar");
+        String need = id(call(host2, post("/posts"), "{\"intentType\":\"ask\",\"body\":\"Need a hand\"}"));
+        call(raviUser, post("/needs/" + need + "/responses"), "{\"message\":\"I can help\"}").andExpect(status().isOk());
+        call(raviKumar, post("/needs/" + need + "/responses"), "{\"message\":\"Me too\"}").andExpect(status().isOk());
+
+        call(raviUser, delete("/profile/me"), null).andExpect(status().isOk());
+
+        List<String> bodies = jdbc.queryForList(
+                "select body from arena_notifications where user_id = '" + host2.getId() + "' and body like '%responded to%' order by created_at",
+                String.class);
+        assertThat(bodies).hasSize(2);
+        assertThat(bodies.get(0)).contains("Deleted user").doesNotContain("Ravi");
+        assertThat(bodies.get(1)).contains("Ravi Kumar");
     }
 
     // A second recruiter on the same company, with a note, an assessment, a stage message and a
@@ -256,6 +289,7 @@ class PersonalDataTest extends EmbeddedPostgresAppTest {
         call(recruiter, post("/enterprise/applicants/" + app.getId() + "/notes"), "{\"text\":\"Strong on logistics\"}").andExpect(status().isOk());
         call(recruiter, put("/enterprise/applicants/" + app.getId() + "/requirements/" + mustHave), "{\"assessment\":\"met\",\"note\":\"Clear examples\"}")
                 .andExpect(status().isOk());
+        call(recruiter, put("/enterprise/applicants/" + app.getId() + "/stage"), "{\"stage\":\"screening\"}").andExpect(status().isOk());
         call(recruiter, put("/enterprise/applicants/" + app.getId() + "/stage"), "{\"stage\":\"interview\",\"message\":\"Let's talk\"}").andExpect(status().isOk());
         Interview interview = interviews.save(Interview.builder().application(applications.findById(app.getId()).orElseThrow()).build());
         call(recruiter, post("/interviews/" + interview.getId() + "/feedback"),

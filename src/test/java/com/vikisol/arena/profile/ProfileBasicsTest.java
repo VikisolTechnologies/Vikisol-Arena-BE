@@ -90,11 +90,17 @@ class ProfileBasicsTest extends EmbeddedPostgresAppTest {
 
     @Test
     void gap5AvailabilityIsAClosedList() throws Exception {
+        // API-ISSUES.md: validated case-insensitively, but the caller's own casing comes back
+        // unchanged - "Weekends" (the FE's AVAILABILITY Title Case) must round-trip as
+        // "Weekends", not get lowercased to "weekends", so GET /profile/me/basics exact-matches
+        // the FE's own vocabulary constant. A case-insensitive duplicate keeps the first-seen
+        // spelling.
         mvc.perform(patch("/profile/me").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"availability\":[\"Weekends\",\"evenings\",\"weekends\"]}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.availability.length()").value(2))
-                .andExpect(jsonPath("$.data.availability[0]").value("weekends"));
+                .andExpect(jsonPath("$.data.availability[0]").value("Weekends"))
+                .andExpect(jsonPath("$.data.availability[1]").value("evenings"));
         mvc.perform(patch("/profile/me").header("Authorization", auth).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"availability\":[\"mornings\"]}"))
                 .andExpect(status().isBadRequest());
@@ -164,6 +170,61 @@ class ProfileBasicsTest extends EmbeddedPostgresAppTest {
                         .content("{\"email\":\"a@test.local\",\"token\":\"t\",\"newPassword\":\"short12\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.data.newPassword").value("must be at least 8 characters"));
+    }
+
+    // ARCHITECT-REVIEW-BE-1 (architect notes on B8/B9): the 18+ rule must be enforced on sign-up
+    // itself, not only at activity create/join.
+    @Test
+    void signUpRequiresBeingEighteenOrOlder() throws Exception {
+        // A unique X-Forwarded-For per test keeps this from sharing the IP-keyed auth rate-limit
+        // bucket (10/min) with every other test hitting /auth/* in the same full-suite run -
+        // forward-headers-strategy: framework means RateLimitFilter honors it, same as behind
+        // Railway's real proxy.
+        String ip = "10.77." + (int) (Math.random() * 255) + "." + (int) (Math.random() * 255);
+        String email = "minor-" + UUID.randomUUID() + "@test.local";
+        mvc.perform(post("/auth/signup").header("X-Forwarded-For", ip).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Minor\",\"email\":\"" + email + "\",\"password\":\"password1\",\"role\":\"talent\","
+                                + "\"dateOfBirth\":\"" + java.time.LocalDate.now().minusYears(17) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("You must be 18 or older to join Arena"));
+        mvc.perform(post("/auth/signup").header("X-Forwarded-For", ip).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"No DOB\",\"email\":\"" + email + "\",\"password\":\"password1\",\"role\":\"talent\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.data.dateOfBirth").value("is required"));
+        mvc.perform(post("/auth/signup").header("X-Forwarded-For", ip).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Future\",\"email\":\"" + email + "\",\"password\":\"password1\",\"role\":\"talent\","
+                                + "\"dateOfBirth\":\"" + java.time.LocalDate.now().plusDays(1) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("dateOfBirth can't be in the future"));
+        mvc.perform(post("/auth/signup").header("X-Forwarded-For", ip).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Adult\",\"email\":\"" + email + "\",\"password\":\"password1\",\"role\":\"talent\","
+                                + "\"dateOfBirth\":\"" + java.time.LocalDate.now().minusYears(19) + "\"}"))
+                .andExpect(status().isOk());
+    }
+
+    // ARCHITECT-REVIEW-BE-1 (architect notes on B8/B9): the onboarding path a Google/phone
+    // signup uses to set its date of birth (no password-form SignUpRequest to carry it) must
+    // enforce 18+ too, not just "not in the future".
+    @Test
+    void verificationDateOfBirthAlsoRequiresBeingEighteenOrOlder() throws Exception {
+        // No dateOfBirth yet, as a real Google/phone signup (no SignUpRequest.dateOfBirth) would
+        // land - user(Role) always sets one, so built directly here instead.
+        User googleSignup = users.save(User.builder().email(UUID.randomUUID() + "@test.local").passwordHash("x")
+                .name("Google Signup").role(Role.TALENT).build());
+        mvc.perform(get("/verification").header("Authorization", bearer(googleSignup)))
+                .andExpect(jsonPath("$.data.dateOfBirthSet").value(false));
+        mvc.perform(put("/verification/date-of-birth").header("Authorization", bearer(googleSignup))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"dateOfBirth\":\"" + java.time.LocalDate.now().minusYears(16) + "\"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("You must be 18 or older to join Arena"));
+        mvc.perform(put("/verification/date-of-birth").header("Authorization", bearer(googleSignup))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"dateOfBirth\":\"" + java.time.LocalDate.now().minusYears(20) + "\"}"))
+                .andExpect(status().isOk());
+        // API-ISSUES.md: dateOfBirthSet lets the FE skip re-asking on a second device.
+        mvc.perform(get("/verification").header("Authorization", bearer(googleSignup)))
+                .andExpect(jsonPath("$.data.dateOfBirthSet").value(true));
     }
 
     private User user(Role role) {

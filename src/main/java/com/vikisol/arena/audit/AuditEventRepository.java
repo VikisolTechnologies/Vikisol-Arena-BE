@@ -38,6 +38,22 @@ public interface AuditEventRepository extends JpaRepository<AuditEvent, UUID> {
     Page<AuditEvent> search(@Param("tenantId") UUID tenantId, @Param("actorId") UUID actorId,
                              @Param("action") String action, @Param("since") Instant since, Pageable pageable);
 
+    // FE-API-GAPS rows 47-48: the platform-wide audit (every tenant and none), same filter rules
+    // as search() above. `actions` narrows to a set (Jenny's agent.action.* rows); null = any.
+    @EntityGraph(attributePaths = "actor")
+    @Query("""
+            select e from AuditEvent e
+            where (:actorId is null or e.actor.id = :actorId)
+            and (:action is null or e.action = :action)
+            and e.createdAt >= :since
+            order by e.createdAt desc
+            """)
+    Page<AuditEvent> searchPlatform(@Param("actorId") UUID actorId, @Param("action") String action,
+                                    @Param("since") Instant since, Pageable pageable);
+
+    @EntityGraph(attributePaths = "actor")
+    Page<AuditEvent> findByActionInOrderByCreatedAtDesc(java.util.Collection<String> actions, Pageable pageable);
+
     List<AuditEvent> findByTenantIdAndActorIdAndCreatedAtAfter(UUID tenantId, UUID actorId, Instant since);
 
     // AdminDashboardService.getDashboard() used to call the finder above once per team member and

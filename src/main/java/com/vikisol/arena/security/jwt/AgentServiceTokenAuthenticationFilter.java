@@ -86,7 +86,16 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
                 String endpointKey = request.getMethod() + " " + path;
                 String requiredScope = requiredScopeFor(request.getMethod(), path);
                 if (requiredScope != null && claims.scope().contains(requiredScope)) {
-                    var user = userRepository.findById(claims.userId());
+                    // Rows 50-51: Jenny can't act for a suspended, banned or erased account.
+                    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: a force sign-out used to only revoke the
+                    // user's own session tokens - a service token minted before the sign-out kept
+                    // authenticating Jenny as that user until it expired on its own. Same
+                    // at-or-after boundary as UserPrincipal.acceptsTokenIssuedAt - see its comment
+                    // for why strictly-after was relaxed back (MARATHON-BE-2 step 1b item 5).
+                    var user = userRepository.findById(claims.userId())
+                            .filter(u -> u.getDeletedAt() == null && !u.isBlocked(java.time.Instant.now())
+                                    && (u.getSessionsRevokedAt() == null || claims.issuedAt() == null
+                                        || !claims.issuedAt().isBefore(u.getSessionsRevokedAt())));
                     if (user.isPresent()) {
                         UserPrincipal principal = new UserPrincipal(user.get());
                         UsernamePasswordAuthenticationToken authentication =
@@ -100,7 +109,7 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
                         // where a real tenant-scoped audit entry, if any, belongs.
                         auditService.record(null, claims.userId(), AuditActions.AGENT_ACTION_AUTHORIZED, endpointKey);
                     } else {
-                        log.warn("Agent service token named a user id that no longer exists: {}", claims.userId());
+                        log.warn("Agent service token named a user id that no longer exists or is blocked: {}", claims.userId());
                     }
                 } else if (requiredScope != null) {
                     log.warn("Agent service token presented for {} but its scope did not authorize it", endpointKey);

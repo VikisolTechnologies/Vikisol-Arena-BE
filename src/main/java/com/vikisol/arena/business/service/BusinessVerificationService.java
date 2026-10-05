@@ -153,9 +153,10 @@ public class BusinessVerificationService {
         } else {
             BusinessVerification.Status s;
             try {
-                s = BusinessVerification.Status.valueOf(status.trim().toUpperCase(Locale.ROOT));
+                String wire = status.trim().toUpperCase(Locale.ROOT);
+                s = BusinessVerification.Status.valueOf(wire.equals("APPROVED") ? "VERIFIED" : wire); // row 43 says "approved"
             } catch (IllegalArgumentException e) {
-                throw new BadRequestException("status must be one of pending, verified, rejected");
+                throw new BadRequestException("status must be one of pending, verified (or approved), rejected");
             }
             page = repository.findByStatusOrderByReviewedAtDescIdDesc(s, pageable);
         }
@@ -245,7 +246,8 @@ public class BusinessVerificationService {
                 v.getDomain(), v.getWorkEmail(), v.getSubmitterRole().name().toLowerCase(Locale.ROOT), t.getGstin(), t.getCin(),
                 t.getHqCity(), v.getStatus().name().toLowerCase(Locale.ROOT),
                 v.getDomainConfirmedAt() == null ? null : v.getDomainConfirmedAt().toString(), v.getReviewNote(),
-                v.getReviewedAt() == null ? null : v.getReviewedAt().toString());
+                v.getReviewedAt() == null ? null : v.getReviewedAt().toString(),
+                v.getCreatedAt() == null ? null : v.getCreatedAt().toString(), v.getDomainConfirmedAt() != null);
     }
 
     // GSTIN: 15 characters (state code, PAN, entity, Z, check). CIN: 21 characters.
@@ -290,6 +292,18 @@ public class BusinessVerificationService {
         if (host == null || !host.contains(".")) throw new BadRequestException("That website doesn't look right");
         if (host.startsWith("www.")) host = host.substring(4);
         if (FREE_MAIL.contains(host)) throw new BadRequestException("Use your company's own website");
+        // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: a public suffix (co.in, github.io) isn't anyone's own
+        // domain - it's a shared registry suffix others' real domains sit under. FREE_MAIL alone
+        // only catches the mail providers already on that hardcoded list.
+        //
+        // MARATHON-BE-2 step 3: the curated PUBLIC_SUFFIXES set (a MARATHON-BE stopgap, offline
+        // Maven couldn't resolve Guava then) is replaced with the real public-suffix-list lookup
+        // now that the dependency can be fetched - every suffix the registry knows about, not
+        // just the ones hand-picked as likely for this product.
+        if (com.google.common.net.InternetDomainName.isValid(host)
+                && com.google.common.net.InternetDomainName.from(host).isPublicSuffix()) {
+            throw new BadRequestException("That's a shared domain suffix, not your company's own website");
+        }
         return host;
     }
 

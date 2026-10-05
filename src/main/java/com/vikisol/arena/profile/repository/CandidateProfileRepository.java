@@ -45,7 +45,7 @@ public interface CandidateProfileRepository extends JpaRepository<CandidateProfi
     // their name, title, skills or interests (skillsOnly: skills alone). Ranked in memory.
     @Query("""
             select distinct c from CandidateProfile c left join c.skills s left join c.interests i
-            where c.user.deletedAt is null and c.user.id <> :viewerId
+            where c.user.deletedAt is null and c.user.id <> :viewerId and c.user.bannedAt is null
               and c.profileVisibility <> com.vikisol.arena.profile.entity.CandidateProfile.ProfileVisibility.HIDDEN
               and (lower(s.name) like concat('%', :term, '%')
                    or (:skillsOnly = false and (lower(c.name) like concat('%', :term, '%') or lower(c.title) like concat('%', :term, '%')

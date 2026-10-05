@@ -31,7 +31,6 @@ public class JobPosting extends BaseEntity {
     @Column(nullable = false)
     private String title;
 
-    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Industry industry;
 

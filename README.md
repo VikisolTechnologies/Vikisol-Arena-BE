@@ -6,60 +6,107 @@ project - own repo, own package (`com.vikisol.arena`), own database (`vikisol_ar
 dependency edges to `HRLMS-BE` or `vikisol_one`; conventions were read from `HRLMS-BE` for
 consistency only.
 
-## Running it locally
+## Running it locally (macOS, no Docker)
 
-### 1. Postgres
+Two things are required: a local Postgres and a local Redis (`RefreshTokenService`,
+`TokenDenylistService`, and `RateLimitFilter` are all Redis-backed — the app will not start
+without one). Docker Compose is the other option if Docker is installed; this section covers the
+Homebrew path used to run B9's local integration backend.
 
-You need a local PostgreSQL server reachable at `localhost:5432`. On this machine, PostgreSQL 16
-is already installed at `C:\Program Files\PostgreSQL\16` and runs as the Windows service
-`postgresql-x64-16`. On a fresh machine:
+### 1. One-time setup
 
-1. Install PostgreSQL 16+ (the Windows installer from postgresql.org, or `choco install postgresql`).
-2. Make sure the service is running (`Get-Service postgresql*` in PowerShell).
-3. Create the database and set a password matching the app's default (or override via env vars -
-   see below):
-   ```
-   psql -U postgres -c "CREATE DATABASE vikisol_arena;"
-   ```
-   Default expected credentials (same convention as `HRLMS-BE`): user `postgres`, password
-   `Welcome@12345#`. Override with `DB_USERNAME` / `DB_PASSWORD` / `DB_PORT` / `DB_NAME` env vars
-   if your local instance differs.
+```bash
+brew install postgresql@16 redis   # skip anything already installed
+brew services start postgresql@16
+brew services start redis
 
-**Note on this machine specifically:** the local `vikisol_arena` database already contained 13
-unrelated tables from a prior, different project (an assessment/quiz platform - `questions`,
-`professionals`, `assessment_attempts`, etc. - nothing related to Arena's talent-marketplace
-domain). Rather than dropping that database, every table this app owns is prefixed `arena_`
-(`arena_users`, `arena_jobs`, `arena_projects`, ...) so `ddl-auto: update` can never collide with
-or touch that pre-existing data. A full `pg_dump` backup of the pre-existing data was taken before
-any schema changes, in case it turns out to matter to something else. If you want to start from a
-truly clean database, drop and recreate `vikisol_arena` yourself; the app doesn't require it.
-
-### 2. Run the app
-
+# Pick your own local-only password here - DB_PASSWORD has no default (ARCHITECT-REVIEW-BE-1
+# blocker #7), so whatever you choose, you type it again as an env var in step 2.
+psql postgres -c "CREATE ROLE postgres LOGIN SUPERUSER PASSWORD 'type-your-own-local-password-here';"
+createdb -U postgres -h localhost vikisol_arena
 ```
+
+If your local Postgres role/username differs, override `DB_USERNAME` / `DB_PORT` / `DB_NAME`
+too instead of changing the role. Redis needs no auth locally — the default
+`redis://localhost:6379` (see `REDIS_URL`) just works once `brew services start redis` is up.
+
+### 2. Start the app
+
+```bash
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21   # or wherever your JDK 21 lives
+DB_PASSWORD="the-same-password-from-step-1" \
+SEED_ENABLED=false \
+SPRING_PROFILES_ACTIVE=local \
+PLATFORM_ADMIN_EMAIL="you@vikisol.dev" \
+PLATFORM_ADMIN_PASSWORD="type-your-own-password-here" \
 ./mvnw spring-boot:run
 ```
 
-Starts on `http://localhost:8081`, API base path `/api/v1`. First run seeds the database with
-realistic demo data automatically (see below) - subsequent runs skip seeding once `arena_users`
-has any rows. Disable seeding with `SEED_ENABLED=false`.
+`DB_PASSWORD` is required - there's no built-in default any more, so startup fails loudly instead
+of ever silently using one. `SPRING_PROFILES_ACTIVE=local` turns on the local-disk photo-upload
+fallback (see "Photo uploads locally" below) - harmless to leave out, but without it photo/post
+uploads just report "not set up yet" the same as before.
+
+**`SEED_ENABLED=false` matters every time, not just the first run.** `DataSeeder` only checks
+"has anyone already seeded this database" (`EnterpriseProfile` count), not `SEED_ENABLED` itself
+at that point - so if the app is ever started even once without `SEED_ENABLED=false` (an IDE run
+config with no env vars is the easy way to do this by accident), it seeds ~40 realistic-looking
+talent/company/job/post rows that are **not** marked `demo_content = true` the way the separate,
+intentional `DemoContentService` overlay is - they're permanently indistinguishable from real
+content after that, and setting `SEED_ENABLED=false` afterward only stops it from happening
+*again*, it can't undo what already got seeded. If `GET /admin/metrics/launch` or the feed looks
+suspiciously populated on a database that should be empty, that's almost certainly what happened -
+reset (above) rather than trying to hand-delete the seeded rows.
+
+Starts on `http://localhost:8081`, API base path `/api/v1` (so `http://localhost:8081/api/v1`).
+Flyway runs every migration up to the current `V44` automatically on first boot. `SEED_ENABLED=false`
+means **no demo data** — the founder wanted a clean prototype on real data, not seeded rows.
+CORS already allows `http://localhost:3000` and `http://localhost:3001` by default
+(`CORS_ORIGINS`), no extra config needed for the frontend to call this.
 
 Swagger UI: `http://localhost:8081/api/v1/swagger-ui.html`
 Health check: `http://localhost:8081/api/v1/actuator/health`
 
-### 3. Demo logins (created by the seeder)
+### 3. Reset the database
 
-Set `ARENA_DEMO_PASSWORD` before a local seed. The value is not stored in this repo and is not
-printed at startup. `SEED_ENABLED=false` skips creating demo accounts.
+```bash
+dropdb -U postgres -h localhost vikisol_arena && createdb -U postgres -h localhost vikisol_arena
+```
 
-| Role | Email |
-|---|---|
-| Talent | `demo.talent@vikisol.dev` |
-| Enterprise | `demo.enterprise@vikisol.dev` |
+Flyway rebuilds the schema from scratch the next time the app starts. Nothing needs to be dropped
+in Redis — it only holds refresh tokens, denylist entries, and rate-limit counters, all disposable.
 
-Plus 9 more seeded companies and 39 more seeded candidates (emails `candidate{N}@example.com`).
-The old platform-admin demo address is disabled. A real platform admin comes from
-`PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD`, and must turn on two-factor authentication.
+### Photo uploads locally (no Cloudinary)
+
+Post/activity photos normally go browser → Cloudinary directly (`POST /media/upload-signature`,
+see `CloudinaryService`'s own comment for why). With no `CLOUDINARY_*` env vars set, that reports
+"Photo and video uploads aren't set up yet" — fine for most local work, but blocks verifying the
+photo-cover path specifically.
+
+With `SPRING_PROFILES_ACTIVE=local` set (step 2 above) and Cloudinary still unconfigured,
+`POST /media/upload-signature` instead points the browser at this server's own
+`POST /media/local-upload`, which stores the file on local disk through the same
+`FileStorageService` every other upload (CVs, profile photos) already uses, and returns the same
+`{"secure_url": "..."}` shape Cloudinary would — arena-web's upload code needs no changes to use
+either one. **Images only** (`png`/`jpg`/`jpeg`/`webp`/`gif`) — no video support locally yet.
+
+This fallback is dev-only by design: it's never active unless the `local` profile is explicitly
+set, and `CloudinaryService` logs a loud warning at startup if Cloudinary is unconfigured and the
+`local` profile *isn't* active either (i.e. a real deployment with Cloudinary missing) - that
+should never go unnoticed the way a quiet per-upload 400 could.
+
+### 4. The first platform admin (local, one-time)
+
+There is no seeded platform-admin account when `SEED_ENABLED=false` (the old demo address,
+`admin@vikisol.dev`, is permanently disabled — see `DemoAccountLockdown`). Instead, set
+`PLATFORM_ADMIN_EMAIL` and `PLATFORM_ADMIN_PASSWORD` as env vars (as in step 2) before the first
+boot: `DemoAccountLockdown` (an `ApplicationRunner`) creates that one platform-admin account from
+the environment if it doesn't already exist, and never logs the password. Type your own password
+directly in the shell — don't commit it or paste it into a chat/PR. Platform admin logins require
+TOTP two-factor enrollment on first sign-in (`ADMIN_2FA_REQUIRED`, on by default).
+
+Once created, the account persists across restarts as long as you keep the same Postgres database
+(re-set the env vars only if you reset the database per step 3).
 
 ### Config / env vars
 
@@ -67,12 +114,15 @@ All in `src/main/resources/application.yml`, same override style as `HRLMS-BE`:
 
 | Var | Default | Purpose |
 |---|---|---|
-| `DB_PORT` / `DB_NAME` / `DB_USERNAME` / `DB_PASSWORD` | `5432` / `vikisol_arena` / `postgres` / `Welcome@12345#` | Postgres connection |
+| `DB_PORT` / `DB_NAME` / `DB_USERNAME` | `5432` / `vikisol_arena` / `postgres` | Postgres connection |
+| `DB_PASSWORD` | *(required, no default)* | Postgres connection - startup fails without it (ARCHITECT-REVIEW-BE-1 blocker #7) |
 | `JWT_SECRET` | local-dev fallback (do not reuse anywhere real) | JWT signing key |
 | `JWT_EXPIRATION_MS` | `86400000` (24h) | Access token TTL |
 | `CORS_ORIGINS` | `http://localhost:3000,http://localhost:3001` | Allowed frontend origins |
 | `STORAGE_ROOT_DIR` | `./uploads` | Local-disk file storage root |
-| `SEED_ENABLED` | `true` | Toggle demo data seeding |
+| `SEED_ENABLED` | `true` | Toggle demo data seeding - set `false` for a clean/real-data run |
+| `REDIS_URL` | `redis://localhost:6379` | Refresh tokens, token denylist, rate limiting |
+| `PLATFORM_ADMIN_EMAIL` / `PLATFORM_ADMIN_PASSWORD` | *(blank)* | One-time bootstrap of the real platform admin on first boot - see "The first platform admin" above |
 | `RESEND_API_KEY` | *(blank)* | Resend API key - blank means `NoopEmailProvider` (log-only) stays active, see Integrations below |
 | `RESEND_FROM` | `Vikisol Arena <no-reply@arena.vikisol.dev>` | Resend "from" address |
 | `WHATSAPP_ACCESS_TOKEN` / `WHATSAPP_PHONE_NUMBER_ID` | *(blank)* | Meta WhatsApp Cloud API creds - blank means `NoopWhatsAppProvider` stays active (not wired at any call site yet either way, see Integrations) |
@@ -92,6 +142,27 @@ mark-all-read) - Activity feed - Local-disk file storage behind a swappable inte
 meeting-link integration scaffolding (see Integrations below).
 
 That covers every domain named in the brief, in the requested priority order.
+
+## Railway deploy readiness (`arena-api`, `feature/admin-account-gaps`) — not deployed yet
+
+What the Railway service needs before this branch can deploy (the architect reviews PR #2 → #3 →
+#4 first; the founder merges; Railway deploys after):
+
+- **Env vars (names only — set real values directly in Railway, never in this repo):**
+  `DB_URL` (or the individual `DB_*` parts), `REDIS_URL`, `JWT_SECRET`, `JWT_REQUIRE_REAL_SECRET=true`,
+  `FILE_SIGNING_SECRET`, `PLATFORM_ADMIN_EMAIL`, `PLATFORM_ADMIN_PASSWORD`, `SEED_ENABLED=false`,
+  `CORS_ORIGINS`, `FRONTEND_URL`, `ARENA_SEED_MODE` (leave unset/`false` in production),
+  `SERVICE_TOKEN_SECRET_ARENA` / `JENNYSOL_GATEWAY_URL` (once JennySol is wired),
+  `RESEND_API_KEY` / `RESEND_FROM` (once Resend is provisioned), `RAILWAY_GIT_COMMIT_SHA`
+  (auto-injected by Railway, not set manually).
+- **Memory:** 1 GB service. The Dockerfile already sizes the JVM heap off the container
+  (`JAVA_OPTS="-XX:MaxRAMPercentage=60 -XX:+ExitOnOutOfMemoryError"`, ~600 MB heap on 1 GB) — no
+  change needed, just confirm the Railway service plan is 1 GB.
+- **Migrations:** V38–V44 run automatically on boot (Flyway, `baseline-on-migrate: true`) — same
+  as the local run above, no manual migration step on Railway.
+- **CORS:** add `https://preview-arena.vikisol.in` to `CORS_ORIGINS` for this branch's preview
+  (alongside whatever production origins are already set) — it isn't in the default
+  `http://localhost:3000,http://localhost:3001` and must be set explicitly as a Railway env var.
 
 ## What's not implemented / deferred
 

@@ -123,6 +123,29 @@ class BusinessVerificationTest extends EmbeddedPostgresAppTest {
                 .andExpect(status().isOk());
     }
 
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: a public suffix is a shared registry suffix, never
+    // anyone's own company domain.
+    @Test
+    void aPublicSuffixIsRejectedAsAWebsiteDomain() throws Exception {
+        call(admin, post("/enterprise/verification"),
+                SUBMIT.replace("https://www.greenleaf.example", "https://co.in").replace("greenleaf.example", "co.in"))
+                .andExpect(status().isBadRequest());
+        call(admin, post("/enterprise/verification"),
+                SUBMIT.replace("https://www.greenleaf.example", "https://github.io").replace("greenleaf.example", "github.io"))
+                .andExpect(status().isBadRequest());
+    }
+
+    // MARATHON-BE-2 step 3: domainOf() now checks Guava's real public-suffix list instead of the
+    // small curated set the MARATHON-BE pass used as a stopgap (offline Maven couldn't resolve the
+    // dependency then) - "azurewebsites.net" was never in that curated set, so this only passes
+    // against the real library.
+    @Test
+    void aPublicSuffixNotInTheOldCuratedListIsStillRejected() throws Exception {
+        call(admin, post("/enterprise/verification"),
+                SUBMIT.replace("https://www.greenleaf.example", "https://azurewebsites.net").replace("greenleaf.example", "azurewebsites.net"))
+                .andExpect(status().isBadRequest());
+    }
+
     @Test
     void onlyTheCompanyAdminSubmitsAndWrongCodesRunOut() throws Exception {
         call(recruiter, post("/enterprise/verification"), SUBMIT).andExpect(status().isForbidden());
@@ -183,11 +206,18 @@ class BusinessVerificationTest extends EmbeddedPostgresAppTest {
         call(admin, post("/enterprise/postings"), job + "}").andExpect(status().isBadRequest());
         String draft = body(call(admin, post("/enterprise/postings"), job + ",\"status\":\"draft\"}").andExpect(status().isOk()));
         call(admin, put("/enterprise/postings/" + draft + "/status"), "{\"status\":\"open\"}").andExpect(status().isBadRequest());
+        // ARCHITECT-REVIEW-BE-1 blocker #5: CLOSED->OPEN used to skip the verification check
+        // entirely (only DRAFT->OPEN was gated) - `first` was published before the flag went on,
+        // then closed, so this is the still-unverified company trying to reopen it.
+        call(admin, put("/enterprise/postings/" + first + "/status"), "{\"status\":\"open\"}").andExpect(status().isBadRequest());
         verifications.save(com.vikisol.arena.business.entity.BusinessVerification.builder().tenant(company).legalName("GreenLeaf")
                 .website("https://greenleaf.example").domain("greenleaf.example").workEmail("asha@greenleaf.example")
                 .submitterRole(com.vikisol.arena.business.entity.BusinessVerification.SubmitterRole.FOUNDER)
                 .status(com.vikisol.arena.business.entity.BusinessVerification.Status.VERIFIED).verifiedAt(Instant.now()).build());
         call(admin, put("/enterprise/postings/" + draft + "/status"), "{\"status\":\"open\"}").andExpect(status().isOk());
+        // Free plan allows one active posting - close it before reopening `first`.
+        call(admin, put("/enterprise/postings/" + draft + "/status"), "{\"status\":\"closed\"}").andExpect(status().isOk());
+        call(admin, put("/enterprise/postings/" + first + "/status"), "{\"status\":\"open\"}").andExpect(status().isOk());
     }
 
     @Test

@@ -82,13 +82,34 @@ class ApplicationLifecycleTest extends EmbeddedPostgresAppTest {
         }
         call(asha, put("/applications/" + app + "/stage"), "{\"stage\":\"withdrawn\"}")
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.stage").value("withdrawn"));
-        call(recruiter, get("/enterprise/applicants/" + app), null).andExpect(jsonPath("$.data.stage").value("withdrawn"));
+        // MARATHON-BE-2 step 1b item 2: a withdrawn application's detail URL is a stage-only stub -
+        // no CV, no profile fields, no CTC - not the intended behaviour, not a loosened assertion.
+        call(recruiter, get("/enterprise/applicants/" + app), null).andExpect(jsonPath("$.data.stage").value("withdrawn"))
+                .andExpect(jsonPath("$.data.candidate").doesNotExist())
+                .andExpect(jsonPath("$.data.career").doesNotExist());
         // Only the candidate withdraws.
         call(recruiter, put("/enterprise/applicants/" + app + "/stage"), "{\"stage\":\"withdrawn\"}").andExpect(status().isBadRequest());
         // Applying again reopens the same application.
         call(asha, get("/applications/exists").param("jobId", job.getId().toString()), null).andExpect(jsonPath("$.data").value(false));
         String again = apply("{\"jobId\":\"" + job.getId() + "\"}");
         org.assertj.core.api.Assertions.assertThat(again).isEqualTo(app);
+    }
+
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX (access/privacy): a withdrawn application shouldn't pull
+    // the candidate's CV/profile back into the company's applicant list - direct-by-id lookup
+    // (companyCanOnlyMoveStagesForwardAndNeverReviveATerminalStage's sibling test above) still
+    // works, this is specifically about what surfaces when the company browses.
+    @Test
+    void aWithdrawnApplicationDropsOutOfTheApplicantList() throws Exception {
+        String app = apply("{\"jobId\":\"" + job.getId() + "\"}");
+        call(recruiter, get("/enterprise/postings/" + job.getId() + "/applicants"), null)
+                .andExpect(jsonPath("$.data.content[0].id").value(app));
+        call(asha, put("/applications/" + app + "/stage"), "{\"stage\":\"withdrawn\"}").andExpect(status().isOk());
+        call(recruiter, get("/enterprise/postings/" + job.getId() + "/applicants"), null)
+                .andExpect(jsonPath("$.data.content").isEmpty());
+        // Still reachable directly by id, just not through the list - as a stage-only stub.
+        call(recruiter, get("/enterprise/applicants/" + app), null).andExpect(jsonPath("$.data.stage").value("withdrawn"))
+                .andExpect(jsonPath("$.data.candidate").doesNotExist());
     }
 
     @Test
@@ -102,7 +123,14 @@ class ApplicationLifecycleTest extends EmbeddedPostgresAppTest {
     void offerAcceptMakesAHireAndDeclineWithdraws() throws Exception {
         String app = apply("{\"jobId\":\"" + job.getId() + "\"}");
         call(asha, post("/applications/" + app + "/offer/accept"), null).andExpect(status().isBadRequest()); // no offer yet
+        // ARCHITECT-REVIEW-BE-1 blocker #4: offer is only reachable via screening -> interview now,
+        // not a direct APPLIED -> offer jump.
+        call(recruiter, put("/enterprise/applicants/" + app + "/stage"), "{\"stage\":\"offer\"}").andExpect(status().isBadRequest());
+        call(recruiter, put("/enterprise/applicants/" + app + "/stage"), "{\"stage\":\"screening\"}").andExpect(status().isOk());
+        call(recruiter, put("/enterprise/applicants/" + app + "/stage"), "{\"stage\":\"interview\"}").andExpect(status().isOk());
         call(recruiter, put("/enterprise/applicants/" + app + "/stage"), "{\"stage\":\"offer\"}").andExpect(status().isOk());
+        call(recruiter, put("/enterprise/applicants/" + app + "/stage"), "{\"stage\":\"hired\"}")
+                .andExpect(status().isBadRequest()); // only the candidate's own accept sets hired
         call(asha, put("/applications/" + app + "/outcome"), "{\"showOnProfile\":true}").andExpect(status().isBadRequest()); // not hired yet
         call(asha, post("/applications/" + app + "/offer/accept"), null).andExpect(jsonPath("$.data.stage").value("hired"));
         call(asha, put("/applications/" + app + "/outcome"), "{\"showOnProfile\":true}").andExpect(status().isOk());
@@ -111,9 +139,32 @@ class ApplicationLifecycleTest extends EmbeddedPostgresAppTest {
         profiles.save(CandidateProfile.builder().user(ravi).name("Ravi").avatarEmoji("*").title("Designer")
                 .industry(Industry.DESIGN).location("Hyderabad").remote(false).consent(new ConsentSettings(false, true)).build());
         String other = body(call(ravi, post("/applications"), "{\"jobId\":\"" + job.getId() + "\"}")).path("data").path("id").asText();
+        call(recruiter, put("/enterprise/applicants/" + other + "/stage"), "{\"stage\":\"screening\"}");
+        call(recruiter, put("/enterprise/applicants/" + other + "/stage"), "{\"stage\":\"interview\"}");
         call(recruiter, put("/enterprise/applicants/" + other + "/stage"), "{\"stage\":\"offer\"}");
         call(asha, post("/applications/" + other + "/offer/decline"), null).andExpect(status().isForbidden()); // not hers
         call(ravi, post("/applications/" + other + "/offer/decline"), null).andExpect(jsonPath("$.data.stage").value("withdrawn"));
+    }
+
+    // ARCHITECT-REVIEW-BE-1 blocker #4: any stage -> any stage let a recruiter revive a WITHDRAWN
+    // application or skip stages. Now only a forward move, or ->REJECTED from an open stage.
+    @Test
+    void companyCanOnlyMoveStagesForwardAndNeverReviveATerminalStage() throws Exception {
+        String app = apply("{\"jobId\":\"" + job.getId() + "\"}");
+        // Can't skip ahead.
+        call(recruiter, put("/enterprise/applicants/" + app + "/stage"), "{\"stage\":\"interview\"}").andExpect(status().isBadRequest());
+        call(recruiter, put("/enterprise/applicants/" + app + "/stage"), "{\"stage\":\"hired\"}").andExpect(status().isBadRequest());
+        call(recruiter, put("/enterprise/applicants/" + app + "/stage"), "{\"stage\":\"rejected\"}").andExpect(status().isOk());
+        // REJECTED is terminal for the company - can't move it anywhere else, including back to open stages.
+        call(recruiter, put("/enterprise/applicants/" + app + "/stage"), "{\"stage\":\"screening\"}").andExpect(status().isBadRequest());
+
+        JobPosting secondJob = postings.save(JobPosting.builder().enterprise(job.getEnterprise()).title("Second role").industry(Industry.DESIGN)
+                .location("Hyderabad").remote(false).employmentType(EmploymentType.FULL_TIME).salaryMin(1).salaryMax(2)
+                .description("Another role").build());
+        String withdrawnApp = apply("{\"jobId\":\"" + secondJob.getId() + "\"}");
+        call(asha, put("/applications/" + withdrawnApp + "/stage"), "{\"stage\":\"withdrawn\"}").andExpect(status().isOk());
+        // WITHDRAWN can't be revived by the company either.
+        call(recruiter, put("/enterprise/applicants/" + withdrawnApp + "/stage"), "{\"stage\":\"screening\"}").andExpect(status().isBadRequest());
     }
 
     @Test

@@ -4,7 +4,6 @@ import com.vikisol.arena.profile.dto.PatchProfileRequest;
 import com.vikisol.arena.profile.dto.ProfileBasicsResponse;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -32,7 +31,6 @@ import com.vikisol.arena.profile.entity.AutonomyLevel;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.entity.CandidateSkill;
 import com.vikisol.arena.profile.entity.ConsentSettings;
-import com.vikisol.arena.profile.entity.Industry;
 import com.vikisol.arena.profile.entity.LocationConsent;
 import com.vikisol.arena.profile.entity.OpenTo;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
@@ -51,6 +49,7 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CandidateProfileService {
 
+    private final com.vikisol.arena.profile.industry.IndustryCatalogue industryCatalogue;
     private final com.vikisol.arena.privacy.PersonalDataService personalDataService;
     private final CandidateProfileRepository candidateProfileRepository;
     private final CandidateProfileMapper mapper;
@@ -64,6 +63,8 @@ public class CandidateProfileService {
     private final JwtTokenProvider jwtTokenProvider;
     private final FollowService followService;
     private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
+    private final ProfileVisibilityGuard visibilityGuard;
+    private final com.vikisol.arena.auth.service.AccountTombstone accountTombstone;
 
     // FE-API-GAPS 1 and 5: the closed vocabularies the onboarding screens send.
     static final Set<String> INTENTS = Set.of("activities", "meet", "ask", "offer", "job", "hire", "projects", "explore");
@@ -97,7 +98,7 @@ public class CandidateProfileService {
         CandidateProfile profile = getEntityForUser(userId);
         profile.setName(name);
         profile.setTitle(title);
-        profile.setIndustry(Industry.fromWireValue(industry));
+        profile.setIndustry(industryCatalogue.resolveForWrite(industry, profile.getIndustry()));
         profile.setExperienceYears(experienceYears);
         profile.setRateFloor(rateFloor);
         // Hibernate's @ElementCollection needs a mutable backing list to manage - Stream.toList()
@@ -258,6 +259,9 @@ public class CandidateProfileService {
         // name is stored, not just the surface most screens happen to read from.
         user.setName("Deleted user");
         user.setDeletedAt(Instant.now());
+        // ARCHITECT-REVIEW-BE-1 blocker #6: the real email/phone/handle/password hash used to
+        // survive erasure untouched - the account's actual identity, not just its display name.
+        accountTombstone.tombstone(user);
         userRepository.save(user);
         refreshTokenService.revokeAllForUser(userId);
         // Without this, the access token making THIS request stays valid for up to its
@@ -293,7 +297,21 @@ public class CandidateProfileService {
         if (request.availability() != null) {
             profile.setAvailability(new ArrayList<>(vocabulary(request.availability(), AVAILABILITY, "availability")));
         }
+        if (request.interests() != null) setInterests(userId, request.interests());
+        if (request.photoUrl() != null) {
+            if (request.photoUrl().isBlank()) return deletePhoto(userId);
+            String current = profile.getPhotoUrl() == null ? null : fileSigningService.sign(profile.getPhotoUrl());
+            boolean same = profile.getPhotoUrl() != null && (request.photoUrl().equals(profile.getPhotoUrl())
+                    || stripQuery(request.photoUrl()).equals(stripQuery(current)));
+            if (!same) throw new BadRequestException("Upload a new photo with POST /profile/me/photo");
+        }
         return toBasics(candidateProfileRepository.save(profile));
+    }
+
+    private static String stripQuery(String url) {
+        if (url == null) return "";
+        int q = url.indexOf('?');
+        return q < 0 ? url : url.substring(0, q);
     }
 
     @Transactional
@@ -364,17 +382,24 @@ public class CandidateProfileService {
         return toBasics(candidateProfileRepository.save(profile));
     }
 
+    // API-ISSUES.md: this used to always store/return the lowercased form, so a value the FE sent
+    // in its own display casing (e.g. "Weekends", AVAILABILITY's Title Case) came back lowercased
+    // ("weekends") from GET /profile/me/basics - a value read from the server wouldn't
+    // exact-match the FE's own vocabulary constant and the right chip wouldn't highlight.
+    // Validated case-insensitively against `allowed` (still lowercase, the wire/DB form), but
+    // the caller's own casing and whitespace-trimmed spelling is what's stored and echoed back.
     private static List<String> vocabulary(List<String> values, Set<String> allowed, String label) {
-        LinkedHashSet<String> out = new LinkedHashSet<>();
+        LinkedHashMap<String, String> out = new LinkedHashMap<>(); // lowercase key -> first-seen casing
         for (String raw : values) {
-            String v = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT);
-            if (!allowed.contains(v)) {
+            String trimmed = raw == null ? "" : raw.trim();
+            String key = trimmed.toLowerCase(Locale.ROOT);
+            if (!allowed.contains(key)) {
                 throw new BadRequestException("'" + raw + "' is not a valid " + label + ". Use one of: "
                         + allowed.stream().sorted().collect(Collectors.joining(", ")));
             }
-            out.add(v);
+            out.putIfAbsent(key, trimmed);
         }
-        return List.copyOf(out);
+        return List.copyOf(out.values());
     }
 
     private ProfileBasicsResponse toBasics(CandidateProfile p) {
@@ -395,6 +420,7 @@ public class CandidateProfileService {
                 .orElseThrow(() -> new ResourceNotFoundException("Candidate not found"));
         User user = profile.getUser();
         UUID targetUserId = user.getId();
+        visibilityGuard.requireVisibleTo(viewingUserId, targetUserId);
         FollowCountsResponse counts = followService.getCounts(targetUserId, viewingUserId);
         String homeCity = profile.getLocationConsent() == LocationConsent.OFF ? null : profile.getHomeCity();
         return new PublicCandidateProfileResponse(
@@ -408,6 +434,21 @@ public class CandidateProfileService {
                 fileSigningService.sign(profile.getPhotoUrl()), List.copyOf(profile.getInterests()),
                 List.copyOf(profile.getAvailability()));
     }
+
+    // A person's user id from either their user id or their profile id (the ids GET /profile/{id} takes).
+    @Transactional(readOnly = true)
+    public UUID resolveUserId(UUID userOrProfileId) {
+        if (userRepository.existsById(userOrProfileId)) return userOrProfileId;
+        return candidateProfileRepository.findById(userOrProfileId).map(p -> p.getUser().getId())
+                .orElseThrow(() -> new ResourceNotFoundException("Person not found"));
+    }
+
+    // FE-API-GAPS row 54 (with row 18's setting): the owner always sees their profile. Anyone
+    // else gets the same 404 as for a missing profile when it is hidden, when it is "nearby" and
+    // they aren't signed in, when either of them blocked the other, or when the account was
+    // deleted or banned - so the answer never reveals that the person is on Arena. The actual
+    // check now lives in ProfileVisibilityGuard, shared with every other per-person endpoint
+    // (ARCHITECT-REVIEW-BE-1 blocker #2) - this used to be a private copy of it, here alone.
 
     @Transactional
     public CandidateProfileResponse updateAutonomy(UUID userId, AutonomyLevel autonomy) {
