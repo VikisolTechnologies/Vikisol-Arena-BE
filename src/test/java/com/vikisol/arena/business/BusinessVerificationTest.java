@@ -135,6 +135,17 @@ class BusinessVerificationTest extends EmbeddedPostgresAppTest {
                 .andExpect(status().isBadRequest());
     }
 
+    // MARATHON-BE-2 step 3: domainOf() now checks Guava's real public-suffix list instead of the
+    // small curated set the MARATHON-BE pass used as a stopgap (offline Maven couldn't resolve the
+    // dependency then) - "azurewebsites.net" was never in that curated set, so this only passes
+    // against the real library.
+    @Test
+    void aPublicSuffixNotInTheOldCuratedListIsStillRejected() throws Exception {
+        call(admin, post("/enterprise/verification"),
+                SUBMIT.replace("https://www.greenleaf.example", "https://azurewebsites.net").replace("greenleaf.example", "azurewebsites.net"))
+                .andExpect(status().isBadRequest());
+    }
+
     @Test
     void onlyTheCompanyAdminSubmitsAndWrongCodesRunOut() throws Exception {
         call(recruiter, post("/enterprise/verification"), SUBMIT).andExpect(status().isForbidden());
