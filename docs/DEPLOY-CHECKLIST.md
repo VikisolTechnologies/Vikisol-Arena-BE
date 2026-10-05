@@ -18,8 +18,12 @@ read before the founder merges and Railway deploys — it does not deploy anythi
   (optional), `JWT_REFRESH_EXPIRATION_MS` (optional)
 - `JWT_REQUIRE_REAL_SECRET=true` — **must be set in production**, or `JwtSecretGuard` can't catch
   a deploy that's still signing tokens with the checked-in dev secret.
-- `JWT_COOKIE_DOMAIN`, `JWT_COOKIE_SAME_SITE` (optional), `JWT_COOKIE_SECURE` (optional, should be
-  `true` in production)
+- `JWT_COOKIE_DOMAIN`, `JWT_COOKIE_SAME_SITE`, `JWT_COOKIE_SECURE` (all optional)
+  - Leave `JWT_COOKIE_DOMAIN` unset for normal production: the Vercel proxy makes API calls
+    same-origin, so `arena_session` and `arena_refresh` should be host-only on `arena.vikisol.in`.
+  - `JWT_COOKIE_SAME_SITE` defaults to `Lax`; keep it there for same-origin proxying.
+  - `JWT_COOKIE_SECURE` can be left unset: the app defaults it to `true` outside the `local`
+    profile and `false` only for local HTTP. If set explicitly in production, it must be `true`.
 - `SERVICE_TOKEN_SECRET_ARENA` — the Jenny round-trip service-token secret; must match JennySol's
   own copy of the same value exactly (see "JennySol gateway" below).
 

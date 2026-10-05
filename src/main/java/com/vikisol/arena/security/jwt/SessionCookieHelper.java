@@ -2,6 +2,8 @@ package com.vikisol.arena.security.jwt;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -15,10 +17,8 @@ import java.time.Duration;
  * token itself, so arena-web's own Next.js server can resolve who's signed in on the very
  * first request (no client-JS "load bundle -> read localStorage -> redirect -> fetch"
  * waterfall). Deliberately separate from {@link RefreshCookieHelper}, not a rename of it:
- * different scope (Domain=.vikisol.in + Path=/, readable by arena-web's middleware across
- * the arena.vikisol.in / api-arena.vikisol.in subdomain split — the refresh cookie stays
- * narrowly scoped to Path=/api/v1/auth on the API's own host, on purpose, since nothing but
- * /auth/refresh should ever see it) and different lifetime (this expires with the access
+ * different scope (Path=/, read by arena-web's same-origin middleware through the Vercel proxy;
+ * host-only by default, with no Domain attribute) and different lifetime (this expires with the access
  * token, ~15 min, not 7 days). Additive: the access token is still returned in the JSON body
  * too, so nothing about the existing Bearer-token flow breaks while pages migrate one at a
  * time to the server-resolved model. See DECISIONS.md for the full cross-domain rationale.
@@ -28,18 +28,23 @@ public class SessionCookieHelper {
 
     public static final String COOKIE_NAME = "arena_session";
 
+    private final Environment environment;
+
+    public SessionCookieHelper(Environment environment) {
+        this.environment = environment;
+    }
+
     @Value("${app.jwt.expiration-ms}")
     private long accessExpirationMs;
 
-    @Value("${app.jwt.cookie-secure:false}")
-    private boolean cookieSecure;
+    @Value("${app.jwt.cookie-secure:}")
+    private String cookieSecure;
 
     @Value("${app.jwt.cookie-same-site:Lax}")
     private String cookieSameSite;
 
-    // Blank in local dev (both apps on http://localhost at different ports - a host-only
-    // cookie already crosses ports fine there); ".vikisol.in" in staging/production so the
-    // cookie set by api-arena.vikisol.in is also sent to, and readable by, arena.vikisol.in.
+    // Blank by default: the Vercel proxy makes API calls same-origin on arena.vikisol.in, so the
+    // browser should store a host-only cookie. Kept configurable only for emergency migration.
     @Value("${app.jwt.cookie-domain:}")
     private String cookieDomain;
 
@@ -62,7 +67,7 @@ public class SessionCookieHelper {
     private ResponseCookie build(String value, Duration maxAge) {
         ResponseCookie.ResponseCookieBuilder builder = ResponseCookie.from(COOKIE_NAME, value)
                 .httpOnly(true)
-                .secure(cookieSecure)
+                .secure(secureCookie())
                 .sameSite(cookieSameSite)
                 .path("/")
                 .maxAge(maxAge);
@@ -70,5 +75,12 @@ public class SessionCookieHelper {
             builder.domain(cookieDomain);
         }
         return builder.build();
+    }
+
+    private boolean secureCookie() {
+        if (StringUtils.hasText(cookieSecure)) {
+            return Boolean.parseBoolean(cookieSecure.trim());
+        }
+        return !environment.acceptsProfiles(Profiles.of("local"));
     }
 }

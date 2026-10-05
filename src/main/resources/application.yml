@@ -93,13 +93,12 @@ app:
     refresh-expiration-ms: ${JWT_REFRESH_EXPIRATION_MS:7776000000} # 90 days
     issuer: ${JWT_ISSUER:vikisol-arena}
     audience: ${JWT_AUDIENCE:vikisol-arena-web}
-    # See RefreshCookieHelper's class comment - false/Lax for local http://localhost dev,
-    # true/None for staging/production over HTTPS on a different Railway subdomain.
-    cookie-secure: ${JWT_COOKIE_SECURE:false}
+    # Blank means "secure outside the local profile, non-secure on local HTTP"; override only for
+    # tests/emergency migration. Same-origin proxying means Lax is correct in production.
+    cookie-secure: ${JWT_COOKIE_SECURE:}
     cookie-same-site: ${JWT_COOKIE_SAME_SITE:Lax}
-    # ARENA-MASTER-ARCHITECTURE.md PART 11 - blank in local dev (host-only cookie is fine when
-    # both apps are on http://localhost); ".vikisol.in" in staging/prod so arena-web's own
-    # server can read the session cookie api-arena.vikisol.in sets. See SessionCookieHelper.
+    # B-PROXY: blank by default so cookies are host-only on arena.vikisol.in. Kept configurable
+    # only as a migration escape hatch; don't set it for normal production.
     cookie-domain: ${JWT_COOKIE_DOMAIN:}
 
   agent:
