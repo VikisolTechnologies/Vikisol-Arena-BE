@@ -189,18 +189,33 @@ class AdminAccountGapsTest extends EmbeddedPostgresAppTest {
         assertThat(audits("user.signed_out")).isEqualTo(1);
     }
 
-    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: a token minted in the exact same second as the force
-    // sign-out used to read as "not before" sessionsRevokedAt and stay valid. Deterministic
-    // same-second case (no sleeping and hoping): sessionsRevokedAt is set to literally the
-    // token's own iat, which must now be rejected (strictly after is required).
+    // MARATHON-BE-2 step 1b item 5: a flow that revokes sessions and mints a fresh token for the
+    // same account in the same request (password change, "sign out other devices") must still
+    // work, even when the new token's iat lands in the exact same second as sessionsRevokedAt -
+    // both are second-precision, so this is the realistic same-request case, not an edge case.
+    // UserPrincipal.acceptsTokenIssuedAt is at-or-after, not strictly-after, for exactly this
+    // reason (see its comment for the tradeoff).
     @Test
-    void forceSignOutRejectsATokenIssuedInTheExactSameSecond() throws Exception {
+    void forceSignOutAcceptsATokenIssuedInTheExactSameInstant() throws Exception {
         String sameSecond = token(asha);
         var claims = tokens.sessionClaims(sameSecond).orElseThrow();
         User fresh = users.findById(asha.getId()).orElseThrow();
         fresh.setSessionsRevokedAt(claims.getIssuedAt().toInstant());
         users.save(fresh);
-        call(sameSecond, get("/profile/me/basics"), null).andExpect(status().isUnauthorized());
+        call(sameSecond, get("/profile/me/basics"), null).andExpect(status().isOk());
+    }
+
+    // The genuine case this guards against: a token minted strictly before the revocation stays
+    // rejected (forceSignOutEndsOlderSessionsOnly, above, already proves this with real sleeps);
+    // this is the same guarantee made deterministic, without sleeping and hoping for a clock tick.
+    @Test
+    void forceSignOutRejectsATokenIssuedStrictlyBeforeTheRevocationInstant() throws Exception {
+        String before = token(asha);
+        var claims = tokens.sessionClaims(before).orElseThrow();
+        User fresh = users.findById(asha.getId()).orElseThrow();
+        fresh.setSessionsRevokedAt(claims.getIssuedAt().toInstant().plusSeconds(1));
+        users.save(fresh);
+        call(before, get("/profile/me/basics"), null).andExpect(status().isUnauthorized());
     }
 
     @Test

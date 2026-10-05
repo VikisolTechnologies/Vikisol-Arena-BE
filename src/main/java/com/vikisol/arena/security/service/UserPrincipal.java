@@ -34,16 +34,22 @@ public class UserPrincipal implements UserDetails {
     }
 
     /**
-     * False when the account is blocked, or the token was issued at or before a force sign-out.
+     * False when the account is blocked, or the token was issued strictly before a force sign-out.
      *
-     * <p>ARCHITECT-REVIEW-BE-1 SHOULD-FIX: {@code sessionsRevokedAt} is truncated to the second
-     * (see {@code AdminAccountService.forceSignOut}) and a JWT's {@code iat} is also
-     * second-precision, so a token minted in the very same second as the force sign-out used to
-     * read as "not before" it and slip through. Issued strictly after is now required.
+     * <p>MARATHON-BE-2 step 1b item 5: an earlier pass made this strictly-after sessionsRevokedAt,
+     * closing a same-second bypass where a token minted in the very same second as a force
+     * sign-out read as "not before" it and slipped through. But sessionsRevokedAt and a JWT's
+     * {@code iat} are both second-precision, and a flow that revokes sessions and mints a fresh
+     * token for the same account in the same request (password change, "sign out other devices")
+     * can legitimately produce a token whose iat equals sessionsRevokedAt to the second - strictly
+     * after would reject that token too, locking the user out of the session they were just
+     * handed. At-or-after is the right boundary: the only thing lost is a sub-second window where
+     * a token minted the instant before revocation, in the same second, stays valid - a much
+     * narrower and less practically exploitable gap than breaking same-request reissue outright.
      */
     public boolean acceptsTokenIssuedAt(java.util.Date issuedAt) {
         if (blocked) return false;
-        return sessionsRevokedAt == null || issuedAt == null || issuedAt.toInstant().isAfter(sessionsRevokedAt);
+        return sessionsRevokedAt == null || issuedAt == null || !issuedAt.toInstant().isBefore(sessionsRevokedAt);
     }
 
     @Override

@@ -90,11 +90,12 @@ public class AgentServiceTokenAuthenticationFilter extends OncePerRequestFilter 
                     // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: a force sign-out used to only revoke the
                     // user's own session tokens - a service token minted before the sign-out kept
                     // authenticating Jenny as that user until it expired on its own. Same
-                    // strictly-after rule as UserPrincipal.acceptsTokenIssuedAt.
+                    // at-or-after boundary as UserPrincipal.acceptsTokenIssuedAt - see its comment
+                    // for why strictly-after was relaxed back (MARATHON-BE-2 step 1b item 5).
                     var user = userRepository.findById(claims.userId())
                             .filter(u -> u.getDeletedAt() == null && !u.isBlocked(java.time.Instant.now())
                                     && (u.getSessionsRevokedAt() == null || claims.issuedAt() == null
-                                        || claims.issuedAt().isAfter(u.getSessionsRevokedAt())));
+                                        || !claims.issuedAt().isBefore(u.getSessionsRevokedAt())));
                     if (user.isPresent()) {
                         UserPrincipal principal = new UserPrincipal(user.get());
                         UsernamePasswordAuthenticationToken authentication =
