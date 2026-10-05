@@ -74,6 +74,15 @@ public class ApplicantService {
         if (!application.getJobPosting().getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your applicant");
         }
+        // MARATHON-BE-2 step 1b item 2: knowing the application exists and its stage is fine, but
+        // the detail URL used to still hand the company the candidate's full CV/profile/CTC after
+        // withdrawal - a stage-only stub closes that off while the "still reachable by id" test
+        // (ApplicationLifecycleTest) keeps working.
+        if (application.getStage() == com.vikisol.arena.applications.entity.ApplicationStage.WITHDRAWN) {
+            return new ApplicantResponse(application.getId().toString(), application.getJobPosting().getId().toString(),
+                    application.getCandidate().getId().toString(), application.getStage().wireValue(),
+                    application.getAppliedAt().toString(), null, null);
+        }
         return toResponse(application);
     }
 

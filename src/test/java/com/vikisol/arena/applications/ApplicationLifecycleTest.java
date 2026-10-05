@@ -82,7 +82,11 @@ class ApplicationLifecycleTest extends EmbeddedPostgresAppTest {
         }
         call(asha, put("/applications/" + app + "/stage"), "{\"stage\":\"withdrawn\"}")
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.stage").value("withdrawn"));
-        call(recruiter, get("/enterprise/applicants/" + app), null).andExpect(jsonPath("$.data.stage").value("withdrawn"));
+        // MARATHON-BE-2 step 1b item 2: a withdrawn application's detail URL is a stage-only stub -
+        // no CV, no profile fields, no CTC - not the intended behaviour, not a loosened assertion.
+        call(recruiter, get("/enterprise/applicants/" + app), null).andExpect(jsonPath("$.data.stage").value("withdrawn"))
+                .andExpect(jsonPath("$.data.candidate").doesNotExist())
+                .andExpect(jsonPath("$.data.career").doesNotExist());
         // Only the candidate withdraws.
         call(recruiter, put("/enterprise/applicants/" + app + "/stage"), "{\"stage\":\"withdrawn\"}").andExpect(status().isBadRequest());
         // Applying again reopens the same application.
@@ -103,8 +107,9 @@ class ApplicationLifecycleTest extends EmbeddedPostgresAppTest {
         call(asha, put("/applications/" + app + "/stage"), "{\"stage\":\"withdrawn\"}").andExpect(status().isOk());
         call(recruiter, get("/enterprise/postings/" + job.getId() + "/applicants"), null)
                 .andExpect(jsonPath("$.data.content").isEmpty());
-        // Still reachable directly by id, just not through the list.
-        call(recruiter, get("/enterprise/applicants/" + app), null).andExpect(jsonPath("$.data.stage").value("withdrawn"));
+        // Still reachable directly by id, just not through the list - as a stage-only stub.
+        call(recruiter, get("/enterprise/applicants/" + app), null).andExpect(jsonPath("$.data.stage").value("withdrawn"))
+                .andExpect(jsonPath("$.data.candidate").doesNotExist());
     }
 
     @Test
