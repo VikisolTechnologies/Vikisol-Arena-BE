@@ -13,6 +13,13 @@ read before the founder merges and Railway deploys — it does not deploy anythi
 **Redis**
 - `REDIS_URL`
 
+**Vercel proxy / Cloudflare tunnel**
+- `ARENA_PROXY_SECRET` — name only here; set the real value in server secrets and Vercel, never in
+  code, logs, docs or chat. Outside the `local` profile, every non-health request must arrive
+  through the Vercel proxy with this header or it is refused.
+- The Cloudflare tunnel hostname (`api.<new-domain>`) is an upstream-only address. It is used by
+  Vercel and external health checks, but is **never given to users** and never linked in product UI.
+
 **JWT / sessions**
 - `JWT_SECRET`, `JWT_ISSUER` (optional), `JWT_AUDIENCE` (optional), `JWT_EXPIRATION_MS`
   (optional), `JWT_REFRESH_EXPIRATION_MS` (optional)
@@ -65,9 +72,10 @@ read before the founder merges and Railway deploys — it does not deploy anythi
   JennySol conversation itself.
 
 **CORS**
-- `CORS_ORIGINS` — comma-separated. Must include `https://arena.vikisol.in` for production, and
-  whatever preview/staging origins (`preview-arena.vikisol.in` etc.) are still in active use.
-  Never include a `localhost` origin in the production value.
+- `CORS_ORIGINS` — comma-separated, optional. Leave it unset for normal production: browser API
+  calls are same-origin through `arena.vikisol.in/api/v1`, so no browser origin needs CORS there.
+  The `local` profile supplies `http://localhost:3000` and `http://localhost:3001` automatically
+  for frontend development. Never include a `localhost` origin in a non-local deployment value.
 
 **Seeding**
 - `SEED_ENABLED=false` — **must be explicitly set in production**, every single deploy, not just
