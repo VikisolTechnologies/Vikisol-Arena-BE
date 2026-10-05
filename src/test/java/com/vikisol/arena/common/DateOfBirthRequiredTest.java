@@ -111,6 +111,41 @@ class DateOfBirthRequiredTest extends EmbeddedPostgresAppTest {
         call(withDob, post("/applications"), "{\"jobId\":\"" + job.getId() + "\"}").andExpect(status().isOk());
     }
 
+    // MARATHON-BE-2 step 1b item 6: AuthService.signUp requires dateOfBirth for every email
+    // sign-up regardless of role (SignUpRequest.dateOfBirth is @NotBlank) - a company account
+    // created that way always has one, so the DOB gate must never block its ordinary write
+    // actions. This exercises the real signup endpoint, not a fixture that hand-sets dateOfBirth.
+    @Test
+    void anEmailSignedUpCompanyAccountCanConnectAndMessage() throws Exception {
+        CandidateProfile candidate = profile(withDob);
+
+        String recruiterEmail = UUID.randomUUID() + "@test.local";
+        mvc.perform(post("/auth/signup").contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"Acme Recruiter\",\"email\":\"" + recruiterEmail + "\","
+                        + "\"password\":\"correct-horse-battery\",\"role\":\"company_admin\",\"dateOfBirth\":\"1988-05-01\"}"))
+                .andExpect(status().isOk());
+        User recruiter = users.findByEmailIgnoreCase(recruiterEmail).orElseThrow();
+        enterprises.save(EnterpriseProfile.builder().user(recruiter).companyName("Acme Co").logoEmoji("A")
+                .industry(Industry.DESIGN).size(CompanySize.S_11_50).build());
+
+        call(recruiter, post("/enterprise/talent/" + candidate.getId() + "/connect"), "{\"note\":\"Hi\"}")
+                .andExpect(status().isOk());
+
+        String conversationId = conversationService.getOrCreate(recruiter.getId(), host.getId(), "test").id();
+        call(recruiter, post("/messages/conversations/" + conversationId + "/messages"), "{\"content\":\"hi\"}")
+                .andExpect(status().isOk());
+    }
+
+    // MARATHON-BE-2 step 1b item 6: the frontend needs a stable code to detect this specific
+    // condition (and route to the DOB step) rather than string-matching the human-readable message.
+    @Test
+    void theDobRequiredErrorCarriesAStableCode() throws Exception {
+        call(noDob, post("/posts"), "{\"intentType\":\"update\",\"body\":\"Hello\"}")
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value("Add your date of birth to continue"))
+                .andExpect(jsonPath("$.data.code").value("DOB_REQUIRED"));
+    }
+
     @Test
     void sendingAConnectRequestRequiresADateOfBirthOnTheSender() throws Exception {
         CandidateProfile candidate = profile(withDob);
