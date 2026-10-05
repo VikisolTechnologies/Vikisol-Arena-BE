@@ -155,8 +155,10 @@ app:
     platform-admin-2fa-required: ${ADMIN_2FA_REQUIRED:true}
 
   proxy:
-    # B-PROXY: set only on a real proxied deployment. When present outside the local profile,
-    # every non-health request must carry this exact secret from the Vercel same-origin proxy.
+    # B-PROXY: required outside local by default. Keep ARENA_PROXY_REQUIRED=false only as a
+    # temporary escape hatch for an existing non-proxied deployment; real proxied deployments must
+    # set ARENA_PROXY_SECRET so every non-health request carries the Vercel same-origin proxy secret.
+    required: ${ARENA_PROXY_REQUIRED:true}
     secret: ${ARENA_PROXY_SECRET:}
 
   # ARENA-WEB-AND-SEED.md Part 4 - the on-demand, labeled, removable demo-content overlay
