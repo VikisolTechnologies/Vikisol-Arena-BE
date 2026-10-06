@@ -12,6 +12,10 @@ import org.springframework.web.bind.annotation.RestController;
 // Hands a signed-in user a short-lived signature to upload post photos/videos straight to
 // Cloudinary (see CloudinaryService for why uploads don't pass through this server). One
 // signature covers every file in a single post - Cloudinary accepts it for an hour.
+//
+// MARATHON-BE-2 step 1b item 3: POST /media/local-upload (the local-disk fallback itself) now
+// lives in its own @Profile("local") controller (LocalUploadController) so it isn't even
+// registered as an endpoint outside local dev - not just refused at the service layer.
 @RestController
 @RequestMapping("/media")
 @RequiredArgsConstructor

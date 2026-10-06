@@ -63,6 +63,14 @@ public record FeedItemResponse(
         Integer budgetMax,
         Integer durationWeeks,
         Long bidCount,
-        boolean demoContent
+        boolean demoContent,
+        // Added (FE-API-GAPS rows 8, 10, 38). Post items only; absent otherwise.
+        Integer priceInr,
+        String authorVerificationLevel,
+        // Needs ("ask" items): how many people offered help, and up to three of them.
+        Long offerCount,
+        java.util.List<OfferAvatar> offerAvatars
 ) {
+    public record OfferAvatar(String name, String avatarEmoji, String photoUrl) {
+    }
 }

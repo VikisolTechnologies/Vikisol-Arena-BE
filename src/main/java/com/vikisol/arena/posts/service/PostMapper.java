@@ -31,6 +31,8 @@ public class PostMapper {
     private final PostReactionRepository postReactionRepository;
     private final PostJoinRequestRepository postJoinRequestRepository;
     private final PostRepository postRepository;
+    private final com.vikisol.arena.common.service.CloudinaryService cloudinaryService;
+    private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
 
     // Single-post convenience overload (a few extra queries) - list/feed call sites should use
     // the batched overload below instead, same split as ProjectMapper's toResponse(Bid) vs
@@ -40,7 +42,7 @@ public class PostMapper {
         long commentCount = postCommentRepository.countByPostId(post.getId());
         long reactionCount = postReactionRepository.countByPostId(post.getId());
         Boolean myReacted = viewingUserId == null ? null : postReactionRepository.existsByPostIdAndUserId(post.getId(), viewingUserId);
-        long authorJoinCount = postJoinRequestRepository.countApprovedByUserIdIn(List.of(post.getAuthorUser().getId())).stream()
+        long authorJoinCount = postJoinRequestRepository.countApprovedByUserIdIn(List.of(post.getAuthorUser().getId()), noShowFinalBefore()).stream()
                 .mapToLong(PostJoinRequestRepository.UserJoinCountProjection::getCnt).sum();
         long score = batchScores(List.of(post.getId())).getOrDefault(post.getId(), 0L);
         Integer myVote = batchMyVotes(List.of(post.getId()), viewingUserId).get(post.getId());
@@ -107,7 +109,7 @@ public class PostMapper {
     // a whole feed/nearby window, same shape as the comment/reaction batch counts above.
     public Map<UUID, Long> batchAuthorJoinCounts(List<UUID> authorUserIds) {
         if (authorUserIds.isEmpty()) return Map.of();
-        return postJoinRequestRepository.countApprovedByUserIdIn(authorUserIds.stream().distinct().toList()).stream()
+        return postJoinRequestRepository.countApprovedByUserIdIn(authorUserIds.stream().distinct().toList(), noShowFinalBefore()).stream()
                 .collect(Collectors.toMap(PostJoinRequestRepository.UserJoinCountProjection::getUserId,
                         PostJoinRequestRepository.UserJoinCountProjection::getCnt));
     }
@@ -186,7 +188,7 @@ public class PostMapper {
                 post.getCapacity(), post.getSpotsFilled(), post.getStatus().wireValue(),
                 post.getStartsAt() == null ? null : post.getStartsAt().toString(),
                 post.getEndsAt() == null ? null : post.getEndsAt().toString(),
-                tags, mediaUrls, post.isJoinable(),
+                tags, signLocalMedia(mediaUrls), post.isJoinable(),
                 mine ? Boolean.TRUE : null, myJoinStatus, roomId, post.getCreatedAt().toString(),
                 displayLat, displayLng,
                 canSeeExactMeetingPoint ? post.getExactMeetingPoint() : null,
@@ -199,26 +201,54 @@ public class PostMapper {
                 post.getCommunity() == null ? null : post.getCommunity().getSlug(),
                 post.getCommunity() == null ? null : post.getCommunity().getName(),
                 post.getCommunity() == null ? null : post.getCommunity().getEmoji(),
-                post.isAnonymous()
+                post.isAnonymous(),
+                post.getPriceInr(),
+                post.isAnonymous() && !mine ? null : post.getAuthorUser().getVerificationLevel().wireValue(),
+                post.getCancelReason(),
+                post.getEditedAt() == null ? null : post.getEditedAt().toString()
         );
     }
 
     public PostJoinRequestResponse toResponse(PostJoinRequest joinRequest) {
-        var profile = candidateProfileRepository.findByUserId(joinRequest.getUser().getId());
+        return toResponse(joinRequest, candidateProfileRepository.findByUserId(joinRequest.getUser().getId()).orElse(null));
+    }
+
+    private PostJoinRequestResponse toResponse(PostJoinRequest joinRequest, CandidateProfile profile) {
         String userName = joinRequest.getUser().getName();
         String userEmoji = "🧑🏽";
-        if (profile.isPresent()) {
-            userName = profile.get().getName();
-            userEmoji = profile.get().getAvatarEmoji();
+        if (profile != null) {
+            userName = profile.getName();
+            userEmoji = profile.getAvatarEmoji();
         }
         return new PostJoinRequestResponse(
                 joinRequest.getId().toString(), joinRequest.getPost().getId().toString(),
                 joinRequest.getUser().getId().toString(), userName, userEmoji,
                 joinRequest.getStatus().wireValue(), joinRequest.getCreatedAt().toString(),
-                joinRequest.getOutcome() == null ? null : joinRequest.getOutcome().wireValue());
+                joinRequest.getOutcome() == null ? null : joinRequest.getOutcome().wireValue(),
+                joinRequest.getNote(), joinRequest.getDecisionNote());
+    }
+
+    // Batched: one profile IN-query for the whole list instead of one findByUserId() per request.
+    private static Instant noShowFinalBefore() {
+        return Instant.now().minus(com.vikisol.arena.activities.ActivityRules.DISPUTE_WINDOW);
     }
 
     public List<PostJoinRequestResponse> toResponseList(List<PostJoinRequest> requests) {
-        return requests.stream().map(this::toResponse).toList();
+        Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
+                requests.stream().map(r -> r.getUser().getId()).toList());
+        return requests.stream().map(r -> toResponse(r, profiles.get(r.getUser().getId()))).toList();
+    }
+
+    // B12: a real Cloudinary media URL is permanent and needs no signing (same reasoning as
+    // profile/company logo URLs never being Cloudinary-signed either). A local-fallback media URL
+    // (CloudinaryService.isLocalFallbackActive, dev-only) is stored bare in the post and must be
+    // signed fresh on every read instead - the same pattern CandidateProfileMapper already uses
+    // for photo/CV URLs - so it never permanently expires the way signing it once at upload time
+    // would (GET /files/** rejects an expired signature outright, see FileController).
+    private List<String> signLocalMedia(List<String> mediaUrls) {
+        if (mediaUrls == null || mediaUrls.isEmpty()) return mediaUrls;
+        return mediaUrls.stream()
+                .map(url -> cloudinaryService.isLocalMediaUrl(url) ? fileSigningService.sign(url) : url)
+                .toList();
     }
 }

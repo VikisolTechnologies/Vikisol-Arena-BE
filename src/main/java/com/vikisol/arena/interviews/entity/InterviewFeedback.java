@@ -34,4 +34,8 @@ public class InterviewFeedback {
     private InterviewRecommendation recommendation;
 
     private Instant submittedAt;
+
+    // Row 33 (V34): [{ item, seen: strong|some|none, note }] - one entry per must-have.
+    @Column(name = "feedback_must_haves_json", columnDefinition = "TEXT")
+    private String mustHavesJson;
 }

@@ -15,6 +15,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -28,16 +29,41 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class CompanyService {
 
+    private final com.vikisol.arena.follows.repository.FollowRepository followRepository;
     private final EnterpriseProfileRepository enterpriseProfileRepository;
     private final JobPostingRepository jobPostingRepository;
     private final JobMapper jobMapper;
+    private final com.vikisol.arena.jobs.service.JobService jobService;
     private final FollowService followService;
 
     @Transactional(readOnly = true)
     public PagedResponse<CompanyResponse> listCompanies(String query, UUID viewingUserId, Pageable pageable) {
         String q = (query == null || query.isBlank()) ? "" : query.trim();
         var page = enterpriseProfileRepository.search(q, pageable);
-        return PagedResponse.of(page, c -> toResponse(c, viewingUserId));
+        Map<UUID, CompanyResponse> mapped = toResponses(page.getContent(), viewingUserId).stream()
+                .collect(java.util.stream.Collectors.toMap(r -> UUID.fromString(r.id()), r -> r));
+        return PagedResponse.of(page, c -> mapped.get(c.getId()));
+    }
+
+    // A list of company cards with every count fetched in one query each (PERFORMANCE.md: was
+    // three queries per company).
+    @Transactional(readOnly = true)
+    public java.util.List<CompanyResponse> toResponses(java.util.List<EnterpriseProfile> companies, UUID viewingUserId) {
+        if (companies.isEmpty()) return java.util.List.of();
+        java.util.List<UUID> ids = companies.stream().map(EnterpriseProfile::getId).toList();
+        Map<UUID, Long> jobs = counts(jobPostingRepository.countByEnterpriseIdsAndStatusIn(ids, java.util.List.of(PostingStatus.OPEN, PostingStatus.PAUSED)));
+        Map<UUID, Long> followers = counts(followRepository.countFollowersByCompanyIds(ids));
+        java.util.Set<UUID> mine = viewingUserId == null ? java.util.Set.of()
+                : new java.util.HashSet<>(followRepository.findFollowingCompanyIdsByFollowerUserId(viewingUserId));
+        return companies.stream().map(c -> new CompanyResponse(c.getId().toString(), c.getCompanyName(), c.getLogoEmoji(),
+                c.getIndustry().wireValue(), c.getSize().wireValue(), jobs.getOrDefault(c.getId(), 0L).intValue(),
+                followers.getOrDefault(c.getId(), 0L), viewingUserId == null ? null : mine.contains(c.getId()))).toList();
+    }
+
+    private static Map<UUID, Long> counts(java.util.List<Object[]> rows) {
+        Map<UUID, Long> out = new java.util.HashMap<>();
+        for (Object[] r : rows) out.put((UUID) r[0], (Long) r[1]);
+        return out;
     }
 
     @Transactional(readOnly = true)
@@ -48,12 +74,13 @@ public class CompanyService {
     @Transactional(readOnly = true)
     public PagedResponse<JobResponse> getCompanyJobs(UUID companyId, Pageable pageable) {
         EnterpriseProfile company = requireCompany(companyId);
-        var page = jobPostingRepository.findByEnterprise(company, pageable);
-        return PagedResponse.of(page, j -> jobMapper.toResponse(j, null));
+        var page = jobPostingRepository.findByEnterpriseAndStatusNot(company, PostingStatus.DRAFT, pageable);
+        JobMapper.Extras extras = jobService.extrasFor(page.getContent(), null);
+        return PagedResponse.of(page, j -> jobMapper.toResponse(j, null, extras));
     }
 
     private CompanyResponse toResponse(EnterpriseProfile company, UUID viewingUserId) {
-        int openJobCount = (int) jobPostingRepository.countByEnterpriseAndStatusNot(company, PostingStatus.CLOSED);
+        int openJobCount = (int) jobPostingRepository.countByEnterpriseAndStatusIn(company, java.util.List.of(PostingStatus.OPEN, PostingStatus.PAUSED));
         long followerCount = followService.getCompanyFollowerCount(company.getId());
         Boolean viewerFollows = viewingUserId == null ? null : followService.viewerFollowsCompany(viewingUserId, company.getId());
         return new CompanyResponse(company.getId().toString(), company.getCompanyName(), company.getLogoEmoji(),

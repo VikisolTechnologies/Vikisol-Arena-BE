@@ -64,6 +64,14 @@ public record PostResponse(
         String communityEmoji,
         // Phase 2 part C - true when the post is anonymous. For everyone but the author,
         // authorUserId is then blank and authorName/authorEmoji are the alias.
-        boolean anonymous
+        boolean anonymous,
+        // Row 8 (added): 0 = free, n = shared cost per person in INR, absent = not an activity or
+        // not set. Row 10 (added): the author's verification level, for a verified-host badge;
+        // absent on someone else's anonymous post.
+        Integer priceInr,
+        String authorVerificationLevel,
+        // Rows 14/39, flow A11 (added): the host's cancel reason, and when the owner last edited.
+        String cancelReason,
+        String editedAt
 ) {
 }

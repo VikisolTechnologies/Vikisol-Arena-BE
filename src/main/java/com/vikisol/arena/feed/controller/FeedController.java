@@ -1,6 +1,7 @@
 package com.vikisol.arena.feed.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.feed.dto.FeedItemResponse;
 import com.vikisol.arena.feed.service.FeedAggregationService;
 import com.vikisol.arena.security.service.UserPrincipal;
@@ -44,6 +45,6 @@ public class FeedController {
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
         UUID viewerId = principal == null ? null : principal.getId();
-        return ResponseEntity.ok(ApiResponse.ok(feedAggregationService.getFeed(viewerId, tab, page, size)));
+        return ResponseEntity.ok(ApiResponse.ok(feedAggregationService.getFeed(viewerId, tab, PageLimits.page(page), PageLimits.size(size))));
     }
 }

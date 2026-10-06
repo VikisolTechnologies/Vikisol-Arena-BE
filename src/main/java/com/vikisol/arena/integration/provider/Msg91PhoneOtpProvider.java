@@ -92,12 +92,13 @@ public class Msg91PhoneOtpProvider implements PhoneOtpProvider {
                     .build();
             HttpResponse<String> response = HTTP_CLIENT.send(request, HttpResponse.BodyHandlers.ofString());
             if (response.statusCode() >= 300) {
-                throw new RuntimeException("MSG91 API returned " + response.statusCode() + ": " + response.body());
+                throw ProviderException.failure(log, ProviderException.Kind.CODE, "MSG91", response.statusCode(), response.body());
             }
-            log.info("OTP sent via MSG91 to {}", phoneNumber);
+            log.info("OTP sent via MSG91");
+        } catch (ProviderException e) {
+            throw e;
         } catch (Exception e) {
-            log.error("MSG91 SMS send failed: {}", e.getMessage());
-            throw new RuntimeException("Could not send OTP via MSG91: " + e.getMessage(), e);
+            throw ProviderException.failure(log, ProviderException.Kind.CODE, "MSG91", e);
         }
     }
 }

@@ -11,6 +11,9 @@ public class JobPostingMapper {
         return new JobPostingResponse(
                 job.getId().toString(), job.getTitle(), job.getIndustry().wireValue(), job.getLocation(),
                 job.isRemote(), job.getEmploymentType().wireValue(), job.getSalaryMin(), job.getSalaryMax(),
-                job.getSkills(), job.getDescription(), job.getStatus().wireValue(), job.getCreatedAt().toString());
+                job.getSkills(), job.getDescription(), job.getStatus().wireValue(), job.getCreatedAt().toString(),
+                job.effectiveWorkMode().name().toLowerCase(),
+                job.getExperienceLevel() == null ? null : job.getExperienceLevel().name().toLowerCase(),
+                job.getDeadline() == null ? null : job.getDeadline().toString());
     }
 }

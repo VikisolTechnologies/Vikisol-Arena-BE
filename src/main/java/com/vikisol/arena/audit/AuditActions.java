@@ -7,6 +7,9 @@ public final class AuditActions {
 
     public static final String POSTING_CREATED = "posting.created";
     public static final String POSTING_CLOSED = "posting.closed";
+    public static final String POSTING_UPDATED = "posting.updated";
+    public static final String BUSINESS_DOMAIN_CONFIRMED = "business.domain_confirmed";
+    public static final String BUSINESS_REJECTED = "business.rejected";
     public static final String CANDIDATE_UNLOCKED = "candidate.unlocked";
     public static final String CREDIT_SPENT = "credit.spent";
     public static final String CREDIT_GRANTED = "credit.granted";
@@ -22,8 +25,22 @@ public final class AuditActions {
     public static final String TENANT_REACTIVATED = "tenant.reactivated";
     public static final String MODERATION_TAKEDOWN = "moderation.takedown";
     public static final String MODERATION_DISMISSED = "moderation.dismissed";
+    // FE-API-GAPS rows 44-51 (admin, B+): every admin action is audited, with the reason as
+    // metadata when one was given.
+    public static final String USER_WARNED = "user.warned";
+    public static final String USER_SUSPENDED = "user.suspended";
+    public static final String USER_BANNED = "user.banned";
+    public static final String USER_RESTORED = "user.restored";
+    public static final String USER_SIGNED_OUT = "user.signed_out";
+    public static final String CONTENT_TAKEDOWN = "content.takedown";
+    public static final String DISPUTE_RESOLVED = "dispute.resolved";
+    public static final String STAFF_AREAS_SET = "staff.areas_set";
+    public static final String DEMO_CONTENT_SEEDED = "demo.seeded";
+    public static final String DEMO_CONTENT_REMOVED = "demo.removed";
     public static final String SUBSCRIPTION_ADJUSTED = "subscription.adjusted";
     public static final String FLAG_TOGGLED = "flag.toggled";
+    public static final String INDUSTRY_ADDED = "industry.added";
+    public static final String INDUSTRY_UPDATED = "industry.updated";
     public static final String CONSENT_CHANGED = "consent.changed";
     public static final String DATA_EXPORTED = "data.exported";
     public static final String ACCOUNT_DELETED = "account.deleted";
@@ -39,4 +56,16 @@ public final class AuditActions {
     // this on a user's behalf," per ADR-003's own re-derive-authorization-independently principle.
     public static final String AGENT_ACTION_AUTHORIZED = "agent.action.authorized";
     public static final String AGENT_ACTION_DENIED = "agent.action.denied";
+
+    // G27: a company admin confirmed the domain code.
+    public static final String BUSINESS_VERIFIED = "business.verified";
+    // Verification grandfathering (V39): companies marked verified-legacy when the flag went on,
+    // and an admin ending one company's legacy status after review.
+    public static final String BUSINESS_GRANDFATHERED = "business.grandfathered";
+    public static final String BUSINESS_LEGACY_ENDED = "business.legacy_ended";
+
+    // ARCHITECT-REVIEW-BE-1 SHOULD-FIX: pulling the whole audit trail as a CSV is itself a
+    // sensitive action (it can carry other people's actor/target data) and was the one thing in
+    // this file that wasn't itself audited.
+    public static final String AUDIT_EXPORTED = "audit.exported";
 }

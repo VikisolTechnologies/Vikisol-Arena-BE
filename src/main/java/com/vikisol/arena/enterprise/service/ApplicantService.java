@@ -4,6 +4,9 @@ import com.vikisol.arena.applications.entity.Application;
 import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.applications.repository.ApplicationRepository;
 import com.vikisol.arena.applications.service.ApplicationService;
+import com.vikisol.arena.career.entity.CareerProfile;
+import com.vikisol.arena.career.repository.CareerProfileRepository;
+import com.vikisol.arena.career.service.CompensationPolicy;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import com.vikisol.arena.enterprise.dto.ApplicantResponse;
@@ -17,6 +20,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -33,6 +37,8 @@ public class ApplicantService {
     private final EnterpriseProfileService enterpriseProfileService;
     private final CandidateProfileMapper candidateProfileMapper;
     private final JobPostingRepository jobPostingRepository;
+    private final CareerProfileRepository careerProfileRepository;
+    private final com.vikisol.arena.career.service.CareerService careerService;
 
     // IDOR fix (found via the ARENA-SHIP-IT.md endpoint audit): this previously took no caller
     // identity at all - any recruiter/company_admin could list another tenant's full applicant
@@ -46,7 +52,10 @@ public class ApplicantService {
         if (!posting.getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your posting");
         }
-        return PagedResponse.of(applicationRepository.findByJobPostingId(postingId, pageable), this::toResponse);
+        var page = applicationRepository.findByJobPostingIdAndStageNot(postingId, ApplicationStage.WITHDRAWN, pageable);
+        Map<UUID, CareerProfile> careers = careerProfileRepository.mapByUserId(
+                page.getContent().stream().map(a -> a.getCandidate().getUser().getId()).toList());
+        return PagedResponse.of(page, a -> toResponse(a, careers.get(a.getCandidate().getUser().getId())));
     }
 
     // Fills a real gap: arena-web's enterprise/interviews/[applicationId] page needs to look up
@@ -55,24 +64,47 @@ public class ApplicantService {
     // enterprise caller - that page has been silently broken in real mode since it was built.
     @Transactional(readOnly = true)
     public ApplicantResponse getApplicant(UUID enterpriseUserId, UUID applicantId) {
+        // Unlike the applicant list (below), a direct-by-id lookup stays visible after withdrawal -
+        // the recruiter who already knows this application exists still needs to see that it was
+        // withdrawn (ApplicationLifecycleTest.aCandidateCanOnlyWithdrawNeverPromoteThemself), just
+        // not discover or re-surface it through a listing.
         Application application = applicationRepository.findById(applicantId)
                 .orElseThrow(() -> new ResourceNotFoundException("Applicant not found: " + applicantId));
         EnterpriseProfile actingTenant = enterpriseProfileService.getEntityForUser(enterpriseUserId);
         if (!application.getJobPosting().getEnterprise().getId().equals(actingTenant.getId())) {
             throw new AccessDeniedException("Not your applicant");
         }
+        // MARATHON-BE-2 step 1b item 2: knowing the application exists and its stage is fine, but
+        // the detail URL used to still hand the company the candidate's full CV/profile/CTC after
+        // withdrawal - a stage-only stub closes that off while the "still reachable by id" test
+        // (ApplicationLifecycleTest) keeps working.
+        if (application.getStage() == com.vikisol.arena.applications.entity.ApplicationStage.WITHDRAWN) {
+            return new ApplicantResponse(application.getId().toString(), application.getJobPosting().getId().toString(),
+                    application.getCandidate().getId().toString(), application.getStage().wireValue(),
+                    application.getAppliedAt().toString(), null, null);
+        }
         return toResponse(application);
     }
 
     @Transactional
-    public ApplicantResponse moveStage(UUID enterpriseUserId, UUID applicantId, ApplicationStage stage) {
-        Application application = applicationService.advanceStageAsEnterprise(enterpriseUserId, applicantId, stage);
+    public ApplicantResponse moveStage(UUID enterpriseUserId, UUID applicantId, ApplicationStage stage, String message) {
+        Application application = applicationService.advanceStageAsEnterprise(enterpriseUserId, applicantId, stage, message);
         return toResponse(application);
     }
 
     private ApplicantResponse toResponse(Application a) {
+        return toResponse(a, careerProfileRepository.findByUserId(a.getCandidate().getUser().getId()).orElse(null));
+    }
+
+    // They applied here, so the employer has full access (CV, job-seeker fields); pay only if the
+    // candidate included it on this application (G21, flow §6), and never the approximate home
+    // location.
+    private ApplicantResponse toResponse(Application a, CareerProfile career) {
+        boolean pay = CompensationPolicy.employerMaySee(a.isIncludeCtc() && a.getStage() != com.vikisol.arena.applications.entity.ApplicationStage.WITHDRAWN);
         return new ApplicantResponse(
                 a.getId().toString(), a.getJobPosting().getId().toString(), a.getCandidate().getId().toString(),
-                a.getStage().wireValue(), a.getAppliedAt().toString(), candidateProfileMapper.toResponse(a.getCandidate()));
+                a.getStage().wireValue(), a.getAppliedAt().toString(),
+                candidateProfileMapper.forEmployer(candidateProfileMapper.toResponse(a.getCandidate()), true, pay),
+                careerService.forApplicant(career, pay, a.getCandidate().getSkills().stream().map(k -> k.getName()).toList()));
     }
 }

@@ -16,6 +16,8 @@ import java.util.List;
 // (post it, it shows in the feed, comments/reactions apply generically to every post type).
 @Entity
 @Table(name = "arena_posts")
+// PERFORMANCE.md: any post write clears the feed/trending candidate cache after commit.
+@jakarta.persistence.EntityListeners(com.vikisol.arena.common.cache.FeedWindowCache.Listener.class)
 @Data
 @Builder
 @NoArgsConstructor
@@ -134,15 +136,31 @@ public class Post extends BaseEntity {
     @Column(length = 200)
     private String removedReason;
 
+    // Flow A11: the host's reason when they cancel, shown to everyone who had joined. V31.
+    @Column(length = 300)
+    private String cancelReason;
+
+    // Set when the owner edits the post (PATCH /posts/{id}). V31.
+    private Instant editedAt;
+
     // Phase 2 (Discuss) part C - shown under an alias instead of the author (see PostMapper).
     // Questions/updates only. See V16.
     @Column(nullable = false)
     @Builder.Default
     private boolean anonymous = false;
 
+    // V30, rows 8 and 23: mirrored from the activity's cost and reach (ActivitiesService is the
+    // only writer) so lists need no extra query. priceInr: 0 = free, n = shared cost per person.
+    private Integer priceInr;
+
+    @Column(nullable = false)
+    @Builder.Default
+    private boolean linkOnly = false;
+
     // An anonymous post can't be "joined": joining creates a Room hosted by the author, which
     // would reveal who they are.
     public boolean isJoinable() {
-        return !anonymous && (intentType == PostIntentType.ACTIVITY || intentType == PostIntentType.ASK);
+        return !anonymous && (intentType == PostIntentType.ACTIVITY || intentType == PostIntentType.ASK
+                || intentType == PostIntentType.COLLAB);
     }
 }

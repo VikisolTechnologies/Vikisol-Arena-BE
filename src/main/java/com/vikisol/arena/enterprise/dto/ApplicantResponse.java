@@ -11,6 +11,10 @@ public record ApplicantResponse(
         String candidateId,
         String stage,
         String appliedAt,
-        CandidateProfileResponse candidate
+        CandidateProfileResponse candidate,
+        // Row 32 (added): the applicant's career profile as this employer sees it - noticePeriod,
+        // and each extra field the person shares with employers they apply to; pay only when
+        // this application includes it. Absent when they have no career profile.
+        com.vikisol.arena.career.dto.CareerDtos.CareerPublicView career
 ) {
 }

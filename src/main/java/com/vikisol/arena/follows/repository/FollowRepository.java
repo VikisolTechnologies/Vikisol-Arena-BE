@@ -2,6 +2,8 @@ package com.vikisol.arena.follows.repository;
 
 import com.vikisol.arena.follows.entity.Follow;
 import org.springframework.data.jpa.repository.EntityGraph;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -23,11 +25,16 @@ public interface FollowRepository extends JpaRepository<Follow, UUID> {
     @Query("select f.followingUser.id from Follow f where f.followerUser.id = :followerUserId")
     List<UUID> findFollowingUserIdsByFollowerUserId(@Param("followerUserId") UUID followerUserId);
 
+    // Companies someone follows, in one query (PERFORMANCE.md: the feed checked each company).
+    @Query("select f.followingCompany.id from Follow f where f.followerUser.id = :followerUserId and f.followingCompany is not null")
+    List<UUID> findFollowingCompanyIdsByFollowerUserId(@Param("followerUserId") UUID followerUserId);
+
+    // Newest first; id breaks same-instant ties so page boundaries are stable.
     @EntityGraph(attributePaths = "followerUser")
-    List<Follow> findByFollowingUserIdOrderByCreatedAtDesc(UUID followingUserId);
+    Page<Follow> findByFollowingUserIdOrderByCreatedAtDescIdDesc(UUID followingUserId, Pageable pageable);
 
     @EntityGraph(attributePaths = "followingUser")
-    List<Follow> findByFollowerUserIdOrderByCreatedAtDesc(UUID followerUserId);
+    Page<Follow> findByFollowerUserIdOrderByCreatedAtDescIdDesc(UUID followerUserId, Pageable pageable);
 
     // Phase C company-follow (see Follow's own class comment for the additive-column shape).
     Optional<Follow> findByFollowerUserIdAndFollowingCompanyId(UUID followerUserId, UUID followingCompanyId);
@@ -35,6 +42,10 @@ public interface FollowRepository extends JpaRepository<Follow, UUID> {
     boolean existsByFollowerUserIdAndFollowingCompanyId(UUID followerUserId, UUID followingCompanyId);
 
     long countByFollowingCompanyId(UUID followingCompanyId);
+
+    // Follower counts for a page of companies in one query (PERFORMANCE.md).
+    @Query("select f.followingCompany.id, count(f) from Follow f where f.followingCompany.id in :ids group by f.followingCompany.id")
+    List<Object[]> countFollowersByCompanyIds(@Param("ids") java.util.Collection<UUID> ids);
 
     // DemoContentService.removeAll() - a demo candidate can be followed by, or follow, a real
     // account during the review window; both directions have to go before the demo User itself.

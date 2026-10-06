@@ -1,13 +1,13 @@
 package com.vikisol.arena.marketplace.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.marketplace.dto.*;
 import com.vikisol.arena.marketplace.service.ProjectService;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -31,7 +31,7 @@ public class ProjectController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         UUID viewerId = principal == null ? null : principal.getId();
         return ResponseEntity.ok(ApiResponse.ok(projectService.getOpenProjects(pageable, viewerId)));
     }
@@ -53,7 +53,7 @@ public class ProjectController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return ResponseEntity.ok(ApiResponse.ok(projectService.getMyProjects(principal.getId(), pageable)));
     }
 
@@ -62,7 +62,7 @@ public class ProjectController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size);
+        var pageable = PageLimits.of(page, size);
         return ResponseEntity.ok(ApiResponse.ok(projectService.getMyBids(principal.getId(), pageable)));
     }
 

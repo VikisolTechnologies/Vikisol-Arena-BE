@@ -6,11 +6,11 @@ import com.vikisol.arena.applications.dto.ApplyRequest;
 import com.vikisol.arena.applications.entity.ApplicationStage;
 import com.vikisol.arena.applications.service.ApplicationService;
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -32,7 +32,7 @@ public class ApplicationController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "appliedAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "appliedAt"));
         return ResponseEntity.ok(ApiResponse.ok(applicationService.getMyApplications(principal.getId(), pageable)));
     }
 
@@ -45,7 +45,8 @@ public class ApplicationController {
     public ResponseEntity<ApiResponse<ApplicationResponse>> apply(
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody ApplyRequest request) {
         return ResponseEntity.ok(ApiResponse.ok("Application submitted",
-                applicationService.applyToJob(principal.getId(), UUID.fromString(request.jobId()))));
+                applicationService.applyToJob(principal.getId(), UUID.fromString(request.jobId()),
+                        request.answers(), request.coverNote(), request.includeCtc())));
     }
 
     @DeleteMapping("/{id}")
@@ -54,6 +55,34 @@ public class ApplicationController {
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
+    // FE-API-GAPS row 21: answer an offer.
+    @PostMapping("/{id}/offer/accept")
+    public ResponseEntity<ApiResponse<ApplicationResponse>> acceptOffer(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(applicationService.decideOffer(principal.getId(), id, true)));
+    }
+
+    @PostMapping("/{id}/offer/decline")
+    public ResponseEntity<ApiResponse<ApplicationResponse>> declineOffer(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(applicationService.decideOffer(principal.getId(), id, false)));
+    }
+
+    // Flow §6: whether a hire shows on the profile.
+    @PutMapping("/{id}/outcome")
+    public ResponseEntity<ApiResponse<ApplicationResponse>> showOutcome(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @RequestBody ShowOutcomeRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(applicationService.setShowOutcome(principal.getId(), id, Boolean.TRUE.equals(request.showOnProfile()))));
+    }
+
+    public record ShowOutcomeRequest(Boolean showOnProfile) {
+    }
+
+    @GetMapping("/{id}/events")
+    public ResponseEntity<ApiResponse<java.util.List<com.vikisol.arena.applications.dto.ApplicationTimeline>>> events(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
+        return ResponseEntity.ok(ApiResponse.ok(applicationService.candidateTimeline(principal.getId(), id)));
+    }
+
+    // Architect item 2: the only stage a candidate may set is "withdrawn" (403 otherwise).
     @PutMapping("/{id}/stage")
     public ResponseEntity<ApiResponse<ApplicationResponse>> advanceStage(
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id, @Valid @RequestBody AdvanceStageRequest request) {

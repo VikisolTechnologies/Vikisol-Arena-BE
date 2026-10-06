@@ -1,5 +1,6 @@
 package com.vikisol.arena.agent;
 
+import com.vikisol.arena.common.dto.PageLimits;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.vikisol.arena.agent.client.*;
 import com.vikisol.arena.agent.service.AgentService;
@@ -35,7 +36,7 @@ class AgentApprovalFlowTest extends EmbeddedPostgresAppTest {
         var reply = service.sendMessage(user.getId(), conversation.id(), "Join the game");
         verify(gateway).sendMessage(any(), eq(List.of()), eq("Join the game"));
         verify(gateway, never()).decideAction(any(), anyString(), anyBoolean());
-        assertThat(service.getMessages(user.getId(), conversation.id()).getLast().actions()).hasSize(1);
+        assertThat(service.getMessages(user.getId(), conversation.id(), PageLimits.firstPage()).getContent().getLast().actions()).hasSize(1);
         var actionId = reply.actions().getFirst().id();
         assertThatThrownBy(() -> service.decideAction(other.getId(), actionId, true)).hasMessageContaining("Action not found");
         when(gateway.decideAction(any(), anyString(), eq(true))).thenReturn(new AgentDecision("done", json.readTree("{\"status\":\"approved\"}"), null));
@@ -49,6 +50,6 @@ class AgentApprovalFlowTest extends EmbeddedPostgresAppTest {
         when(gateway.isAvailable()).thenReturn(true);
         when(gateway.sendMessage(any(), anyList(), anyString())).thenThrow(new RealAgentServiceClient.AgentServiceException("offline"));
         assertThat(service.sendMessage(user.getId(), conversation.id(), "Hello").serviceUnavailable()).isTrue();
-        assertThat(service.getMessages(user.getId(), conversation.id())).hasSize(2);
+        assertThat(service.getMessages(user.getId(), conversation.id(), PageLimits.firstPage())).hasSize(2);
     }
 }

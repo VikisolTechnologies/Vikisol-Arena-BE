@@ -67,6 +67,11 @@ public class ModerationItem extends BaseEntity {
     @JoinColumn(name = "reporter_user_id")
     private User reporter;
 
+    // Row 61 (V43): the person a USER report is about.
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "reported_user_id")
+    private User reportedUser;
+
     @Column(nullable = false)
     private String reason;
 
@@ -80,4 +85,9 @@ public class ModerationItem extends BaseEntity {
     private User resolvedBy;
 
     private Instant resolvedAt;
+
+    // Row 15 (V37): evidence files the reporter attached (unsigned stored URLs, JSON list).
+    @Column(nullable = false, columnDefinition = "TEXT")
+    @Builder.Default
+    private String evidenceJson = "[]";
 }

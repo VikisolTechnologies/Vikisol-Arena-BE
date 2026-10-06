@@ -16,6 +16,8 @@ public record ConversationResponse(
         boolean anonymous,
         boolean meAnonymous,
         boolean closed,
-        String postId
+        String postId,
+        // Row 37 (added): the start of the latest message (≤140 characters); absent before the first.
+        String lastMessagePreview
 ) {
 }

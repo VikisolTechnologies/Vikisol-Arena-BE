@@ -24,6 +24,9 @@ import com.vikisol.arena.rooms.repository.RoomMessageRepository;
 import com.vikisol.arena.rooms.repository.RoomReportRepository;
 import com.vikisol.arena.rooms.repository.RoomRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -124,16 +127,35 @@ public class RoomService {
                         .ifPresent(roomMemberRepository::delete));
     }
 
+    // Room ids for a page of posts in one query (PERFORMANCE.md).
+    @Transactional(readOnly = true)
+    public java.util.Map<UUID, String> findRoomIdsForPosts(java.util.Collection<UUID> postIds) {
+        if (postIds.isEmpty()) return java.util.Map.of();
+        java.util.Map<UUID, String> out = new java.util.HashMap<>();
+        for (Room r : roomRepository.findByPostIdIn(postIds)) out.put(r.getPost().getId(), r.getId().toString());
+        return out;
+    }
+
     @Transactional(readOnly = true)
     public Optional<String> findRoomIdForPost(UUID postId) {
         return roomRepository.findByPostId(postId).map(r -> r.getId().toString());
     }
 
     @Transactional(readOnly = true)
-    public List<RoomResponse> getMyRooms(UUID userId) {
-        return roomMemberRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
-                .map(membership -> toResponse(membership.getRoom(), membership))
-                .toList();
+    public Page<RoomResponse> getMyRooms(UUID userId, Pageable pageable) {
+        Page<RoomMember> memberships = roomMemberRepository.findMyRoomsByLatestActivity(userId, pageable);
+        List<UUID> roomIds = memberships.stream().map(m -> m.getRoom().getId()).toList();
+        if (roomIds.isEmpty()) return new PageImpl<>(List.of(), pageable, memberships.getTotalElements());
+        // One COUNT ... GROUP BY and one latest-message query for every room, instead of both
+        // once per room.
+        Map<UUID, Long> memberCounts = roomMemberRepository.countByRoomIdIn(roomIds).stream()
+                .collect(Collectors.toMap(RoomMemberRepository.RoomCount::getRoomId, RoomMemberRepository.RoomCount::getCnt));
+        Map<UUID, RoomMessage> lastMessages = roomMessageRepository.findLatestByRoomIdIn(roomIds).stream()
+                .collect(Collectors.toMap(m -> m.getRoom().getId(), m -> m, (a, b) -> a));
+        return memberships
+                .map(membership -> toResponse(membership.getRoom(), membership,
+                        lastMessages.get(membership.getRoom().getId()),
+                        memberCounts.getOrDefault(membership.getRoom().getId(), 0L).intValue()));
     }
 
     @Transactional(readOnly = true)
@@ -195,6 +217,11 @@ public class RoomService {
 
     @Transactional
     public void report(UUID userId, UUID roomId, String reason) {
+        report(userId, roomId, reason, null);
+    }
+
+    @Transactional
+    public void report(UUID userId, UUID roomId, String reason, java.util.List<String> evidence) {
         Room room = requireRoom(roomId);
         assertRoomMember(userId, room);
         User reporter = requireUser(userId);
@@ -202,7 +229,7 @@ public class RoomService {
         // makes this actionable in the platform-admin queue - ARENA-V2-PRODUCT-ARCHITECTURE.md
         // §4's explicit "wired into the platform-admin moderation queue" requirement.
         roomReportRepository.save(RoomReport.builder().room(room).reporter(reporter).reason(reason).build());
-        moderationService.fileRoomReport(room, reporter, reason);
+        moderationService.fileRoomReport(room, reporter, reason, evidence);
     }
 
     @Transactional
@@ -251,16 +278,12 @@ public class RoomService {
         }
     }
 
-    private RoomResponse toResponse(Room room, RoomMember membership) {
-        // P3 audit fix: used to load the room's entire message history (findByRoomIdOrderBy...)
-        // just to read the last element, and every member row just to count them - both once per
-        // room in getMyRooms' loop. A single-row query and a COUNT query instead.
-        RoomMessage last = roomMessageRepository.findTopByRoomIdOrderByCreatedAtDesc(room.getId()).orElse(null);
+    // last and memberCount come batched from getMyRooms - see its comment.
+    private RoomResponse toResponse(Room room, RoomMember membership, RoomMessage last, int memberCount) {
         // Muted rooms never surface an unread badge, even with genuinely new messages - see
         // RoomMember.muted's own doc comment.
         boolean unread = !membership.isMuted() && last != null
                 && (membership.getLastReadAt() == null || membership.getLastReadAt().isBefore(last.getCreatedAt()));
-        int memberCount = (int) roomMemberRepository.countByRoomId(room.getId());
         Post post = room.getPost();
         return new RoomResponse(
                 room.getId().toString(), post.getId().toString(), post.getBody(), post.getIntentType().wireValue(),

@@ -15,6 +15,9 @@ import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,11 +57,14 @@ public class AgentService {
     }
 
     @Transactional(readOnly = true)
-    public List<AgentMessageResponse> getMessages(UUID userId, UUID conversationId) {
+    // Page 0 is always the most recent messages (selected newest first). Inside a page they read
+    // oldest-to-newest, like room and DM history, because the chat renders top to bottom.
+    public Page<AgentMessageResponse> getMessages(UUID userId, UUID conversationId, Pageable pageable) {
         AgentConversation conversation = requireOwnedConversation(userId, conversationId);
-        return messageRepository.findByConversationIdOrderByCreatedAtAsc(conversation.getId()).stream()
-                .map(this::toMessageResponse)
-                .toList();
+        Page<AgentMessage> newestFirst = messageRepository.findByConversationIdOrderByCreatedAtDescIdDesc(conversation.getId(), pageable);
+        List<AgentMessageResponse> chronological = new java.util.ArrayList<>(newestFirst.map(this::toMessageResponse).getContent());
+        java.util.Collections.reverse(chronological);
+        return new PageImpl<>(chronological, pageable, newestFirst.getTotalElements());
     }
 
     @Transactional

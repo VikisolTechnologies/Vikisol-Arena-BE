@@ -9,6 +9,6 @@ import jakarta.validation.constraints.Size;
 // a validation failure.
 public record ChangePasswordRequest(
         String currentPassword,
-        @NotBlank(message = "is required") @Size(min = 6, message = "must be at least 6 characters") String newPassword
+        @NotBlank(message = "is required") @Size(min = 8, message = "must be at least 8 characters") String newPassword
 ) {
 }

@@ -1,5 +1,6 @@
 package com.vikisol.arena.privacy;
 
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.auth.entity.Role;
 import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
@@ -43,7 +44,7 @@ class AnonymityTest extends EmbeddedPostgresAppTest {
 
     private User user(String name) {
         return users.save(User.builder().email(name.toLowerCase() + "-" + UUID.randomUUID() + "@test.local")
-                .passwordHash("x").name(name).role(Role.TALENT).build());
+                .passwordHash("x").name(name).role(Role.TALENT).dateOfBirth(java.time.LocalDate.of(1990, 1, 1)).build());
     }
 
     private static CreatePostRequest ask(String body, boolean anonymous) {
@@ -86,7 +87,7 @@ class AnonymityTest extends EmbeddedPostgresAppTest {
         assertThat(profileAsReader).extracting(PostResponse::body).containsExactly("Named question about hiking boots");
         assertThat(posts.getUserPosts(author.getId(), author.getId(), PageRequest.of(0, 20)).content()).hasSize(2);
 
-        var discussions = (java.util.function.Predicate<com.vikisol.arena.posts.entity.Post>) p -> p.getIntentType() == PostIntentType.ASK;
+        var discussions = List.of(PostIntentType.ASK);
         assertThat(posts.search(reader.getId(), SearchText.terms("kavya"), discussions, 20))
                 .extracting(PostResponse::body).containsExactly("Named question about hiking boots");
         assertThat(posts.search(reader.getId(), SearchText.terms("salary negotiation"), discussions, 20)).hasSize(1)
@@ -148,7 +149,7 @@ class AnonymityTest extends EmbeddedPostgresAppTest {
         assertThat(fromSender.participantName()).startsWith("Anonymous ").doesNotContain("Sana");
 
         conversations.sendMessage(sender.getId(), UUID.fromString(fromSender.id()), "Happened to me - happy to share what worked");
-        ConversationResponse asAuthor = conversations.getMyConversations(author.getId()).get(0);
+        ConversationResponse asAuthor = conversations.getMyConversations(author.getId(), PageLimits.firstPage()).getContent().get(0);
         assertThat(asAuthor.anonymous()).isFalse();
         assertThat(asAuthor.meAnonymous()).isTrue();
         assertThat(asAuthor.participantName()).isEqualTo("Vikram");
@@ -180,7 +181,7 @@ class AnonymityTest extends EmbeddedPostgresAppTest {
         assertThat(sent).isNotEmpty();
         assertThat(sent.get(0).getBody()).doesNotContain("Hidden Sender").contains("anonymous");
 
-        ConversationResponse asRecipient = conversations.getMyConversations(recipient.getId()).get(0);
+        ConversationResponse asRecipient = conversations.getMyConversations(recipient.getId(), PageLimits.firstPage()).getContent().get(0);
         assertThat(asRecipient.participantId()).isEmpty();
         assertThat(asRecipient.participantName()).doesNotContain("Hidden");
     }

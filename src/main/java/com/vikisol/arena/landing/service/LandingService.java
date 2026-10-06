@@ -18,7 +18,6 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -45,7 +44,7 @@ public class LandingService {
     @Transactional(readOnly = true)
     public LandingStatsResponse getStats() {
         long openToWork = candidateProfileRepository.countByConsent_SearchableByEnterprisesTrueAndDemoContentFalse();
-        List<IndustryStat> byIndustry = Arrays.stream(Industry.values())
+        List<IndustryStat> byIndustry = Industry.values().stream()
                 .map(i -> new IndustryStat(i.wireValue(),
                         candidateProfileRepository.countByIndustryAndConsent_SearchableByEnterprisesTrueAndDemoContentFalse(i)))
                 .filter(stat -> stat.count() > 0)

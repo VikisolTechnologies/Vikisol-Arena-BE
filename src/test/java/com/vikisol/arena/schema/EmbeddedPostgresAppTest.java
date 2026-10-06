@@ -40,6 +40,22 @@ public abstract class EmbeddedPostgresAppTest {
         registry.add("spring.datasource.password", () -> "");
         // No demo seeding, bootstrap seeding or Cloudinary in tests.
         registry.add("app.seed.enabled", () -> "false");
+        registry.add("app.cors.allowed-origins", () -> "http://localhost:3000,http://localhost:3001");
+        // Full-context tests run in the default profile without the Vercel proxy in front of
+        // MockMvc. Make that explicit so production's fail-closed proxy guard stays tested by
+        // TrustedProxyStartupGuardTest, not by every unrelated service test.
+        registry.add("app.proxy.required", () -> "false");
+        // Not the checked-in dev fallback - most tests here don't activate the 'local' profile,
+        // and FileSigningSecretGuard now fails startup outside 'local' if left on that fallback.
+        registry.add("app.storage.signing-secret", () -> "embedded-postgres-test-signing-secret-not-the-dev-fallback");
         registry.add("app.demo-content.enabled", () -> "false");
+        // Uploaded files (photos, covers) land under target/, never in the working tree.
+        registry.add("app.storage.root-dir", () -> "target/test-uploads");
+        // Lets a test count the SQL statements a call issues (QueryCountTest), to prove N+1 fixes.
+        registry.add("spring.jpa.properties.hibernate.generate_statistics", () -> "true");
+        // Test transactions roll back and never commit, so nothing would clear the feed's shared
+        // candidate cache between tests; every test reads the window fresh (TtlCacheTest covers it).
+        registry.add("app.feed.window-cache-seconds", () -> "0");
+        registry.add("logging.level.org.hibernate.engine.internal.StatisticalLoggingSessionEventListener", () -> "WARN");
     }
 }

@@ -30,7 +30,6 @@ public class CandidateProfile extends BaseEntity {
     @Column(nullable = false)
     private String title;
 
-    @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private Industry industry;
 
@@ -105,4 +104,35 @@ public class CandidateProfile extends BaseEntity {
     private Integer currentCtc;
     private Integer expectedCtc;
     private String preferredLocation;
+
+    // FE-API-GAPS 1-5 (onboarding, V22). Intents are only ever shown to the person themself;
+    // interests, availability and the photo appear on the public profile.
+    private String photoUrl;
+
+    @ElementCollection
+    @CollectionTable(name = "arena_candidate_intents", joinColumns = @JoinColumn(name = "candidate_id"))
+    @Column(name = "intent")
+    @Builder.Default
+    private List<String> intents = new ArrayList<>();
+
+    @ElementCollection
+    @CollectionTable(name = "arena_candidate_interests", joinColumns = @JoinColumn(name = "candidate_id"))
+    @Column(name = "interest")
+    @Builder.Default
+    private List<String> interests = new ArrayList<>();
+
+    @ElementCollection
+    @CollectionTable(name = "arena_candidate_availability", joinColumns = @JoinColumn(name = "candidate_id"))
+    @Column(name = "slot")
+    @Builder.Default
+    private List<String> availability = new ArrayList<>();
+
+    // Row 18 (V37): who can find this person in people search. EVERYONE: any signed-in search.
+    // NEARBY: only searches near their approximate location. HIDDEN: never listed.
+    public enum ProfileVisibility { NEARBY, EVERYONE, HIDDEN }
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 10)
+    @Builder.Default
+    private ProfileVisibility profileVisibility = ProfileVisibility.EVERYONE;
 }

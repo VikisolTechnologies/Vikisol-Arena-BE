@@ -7,6 +7,7 @@ import com.vikisol.arena.auth.entity.User;
 import com.vikisol.arena.auth.repository.UserRepository;
 import com.vikisol.arena.common.exception.BadRequestException;
 import com.vikisol.arena.common.exception.ResourceNotFoundException;
+import com.vikisol.arena.enterprise.entity.EnterpriseProfile;
 import com.vikisol.arena.enterprise.service.EnterpriseProfileService;
 import com.vikisol.arena.messaging.dto.ConversationResponse;
 import com.vikisol.arena.messaging.dto.ThreadMessageResponse;
@@ -16,8 +17,11 @@ import com.vikisol.arena.messaging.repository.ConversationRepository;
 import com.vikisol.arena.messaging.repository.ThreadMessageRepository;
 import com.vikisol.arena.notifications.entity.NotificationType;
 import com.vikisol.arena.notifications.service.NotificationService;
+import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,12 +29,14 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Instant;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 @Service
 @RequiredArgsConstructor
 public class ConversationService {
 
+    private final com.vikisol.arena.connect.MessagingPolicy messagingPolicy;
     private final ConversationRepository conversationRepository;
     private final ThreadMessageRepository threadMessageRepository;
     private final UserRepository userRepository;
@@ -45,8 +51,25 @@ public class ConversationService {
     static final int MAX_ANONYMOUS_CHATS_PER_DAY = 10;
 
     @Transactional(readOnly = true)
-    public List<ConversationResponse> getMyConversations(UUID userId) {
-        return conversationRepository.findAllForUser(userId).stream().map(c -> toResponse(c, userId)).toList();
+    public Page<ConversationResponse> getMyConversations(UUID userId, Pageable pageable) {
+        Page<Conversation> rows = conversationRepository.findAllForUser(userId, pageable);
+        List<User> others = rows.stream().map(c -> c.getUserA().getId().equals(userId) ? c.getUserB() : c.getUserA()).toList();
+        Map<UUID, CandidateProfile> profiles = candidateProfileRepository.mapByUserId(
+                others.stream().filter(u -> u.getRole() == Role.TALENT).map(User::getId).toList());
+        Map<UUID, EnterpriseProfile> tenants = enterpriseProfileService.mapByUserId(
+                others.stream().filter(u -> u.getRole() != Role.TALENT).map(User::getId).toList());
+        Map<UUID, String> previews = previews(rows.stream().map(Conversation::getId).toList());
+        return rows.map(c -> toResponse(c, userId, profiles, tenants, previews));
+    }
+
+    private Map<UUID, String> previews(List<UUID> conversationIds) {
+        if (conversationIds.isEmpty()) return Map.of();
+        Map<UUID, String> out = new java.util.HashMap<>();
+        for (ThreadMessage m : threadMessageRepository.findLatestIn(conversationIds)) {
+            String text = m.getContent() == null ? "" : m.getContent().strip();
+            out.put(m.getConversation().getId(), text.length() > 140 ? text.substring(0, 139) + "…" : text);
+        }
+        return out;
     }
 
     @Transactional(readOnly = true)
@@ -97,6 +120,10 @@ public class ConversationService {
         }
         boolean hideThem = post != null && post.isAnonymous();
         if (!hideMe && !hideThem) {
+            if (!userId.equals(recipientId) && conversationRepository.findBetween(userId, recipientId).isEmpty()
+                    && !messagingPolicy.mayStartChat(requireUser(userId), recipientId)) {
+                throw new BadRequestException("You can message this person once they apply to your company or accept your connect request.");
+            }
             return getOrCreate(userId, recipientId, request.context());
         }
 
@@ -150,10 +177,15 @@ public class ConversationService {
 
     @Transactional
     public void report(UUID userId, UUID conversationId, String reason) {
+        report(userId, conversationId, reason, null);
+    }
+
+    @Transactional
+    public void report(UUID userId, UUID conversationId, String reason, java.util.List<String> evidence) {
         Conversation conversation = requireConversation(conversationId);
         assertParticipant(userId, conversation);
         moderationService.fileConversationReport(requireUser(userId), conversation,
-                reason == null || reason.isBlank() ? "Reported from chat" : reason.trim());
+                reason == null || reason.isBlank() ? "Reported from chat" : reason.trim(), evidence);
     }
 
     private static boolean hiddenFlag(Conversation c, UUID userId) {
@@ -175,9 +207,12 @@ public class ConversationService {
         if (conversation.getClosedAt() != null) {
             throw new BadRequestException("This chat was closed.");
         }
+        User sender = requireUser(userId);
+        // B11 item 17: refuse a send from an account with no date of birth on file.
+        com.vikisol.arena.common.util.AgeUtil.requireDateOfBirth(sender);
 
         ThreadMessage message = threadMessageRepository.save(ThreadMessage.builder()
-                .conversation(conversation).sender(requireUser(userId)).content(content).build());
+                .conversation(conversation).sender(sender).content(content).build());
 
         conversation.setLastMessageAt(message.getCreatedAt());
         if (conversation.getUserA().getId().equals(userId)) {
@@ -190,8 +225,13 @@ public class ConversationService {
         User recipient = conversation.getUserA().getId().equals(userId) ? conversation.getUserB() : conversation.getUserA();
         // A hidden sender stays hidden in the notification too.
         boolean senderHidden = hiddenFlag(conversation, userId);
-        notificationService.notify(recipient, NotificationType.SYSTEM, "New message",
-                senderHidden ? "Someone sent you an anonymous message." : requireUser(userId).getName() + " sent you a message.");
+        // Don't link the notification row back to the real sender when they're hidden - setting
+        // actorUser would quietly undo the anonymity the body text is already protecting.
+        if (senderHidden) {
+            notificationService.notifyNewMessage(recipient, "Someone sent you an anonymous message.");
+        } else {
+            notificationService.notifyNewMessage(recipient, requireUser(userId).getName() + " sent you a message.", sender);
+        }
 
         // Same "only audit the enterprise side" scoping as InterviewService.propose() - a
         // conversation can be sent from either participant. findEntityForUser() (not
@@ -213,7 +253,19 @@ public class ConversationService {
         }
     }
 
+    // Single-conversation call sites (start/send/close) - two lookups at most, fine for one row.
     private ConversationResponse toResponse(Conversation c, UUID viewingUserId) {
+        User other = c.getUserA().getId().equals(viewingUserId) ? c.getUserB() : c.getUserA();
+        Map<UUID, CandidateProfile> profiles = other.getRole() == Role.TALENT
+                ? candidateProfileRepository.mapByUserId(List.of(other.getId())) : Map.of();
+        Map<UUID, EnterpriseProfile> tenants = other.getRole() == Role.TALENT
+                ? Map.of() : enterpriseProfileService.mapByUserId(List.of(other.getId()));
+        return toResponse(c, viewingUserId, profiles, tenants, c.getId() == null ? Map.of() : previews(List.of(c.getId())));
+    }
+
+    private ConversationResponse toResponse(Conversation c, UUID viewingUserId,
+                                            Map<UUID, CandidateProfile> profiles, Map<UUID, EnterpriseProfile> tenants,
+                                            Map<UUID, String> previews) {
         boolean viewerIsA = c.getUserA().getId().equals(viewingUserId);
         User other = viewerIsA ? c.getUserB() : c.getUserA();
         Instant lastReadAt = viewerIsA ? c.getLastReadAtA() : c.getLastReadAtB();
@@ -222,10 +274,10 @@ public class ConversationService {
         String displayName = other.getName();
         String displayEmoji = "🧑🏽";
         if (other.getRole() == Role.TALENT) {
-            var profile = candidateProfileRepository.findByUserId(other.getId());
-            if (profile.isPresent()) {
-                displayName = profile.get().getName();
-                displayEmoji = profile.get().getAvatarEmoji();
+            CandidateProfile profile = profiles.get(other.getId());
+            if (profile != null) {
+                displayName = profile.getName();
+                displayEmoji = profile.getAvatarEmoji();
             }
         } else {
             // Always the tenant's identity (company name/logo), not the individual recruiter's -
@@ -234,10 +286,10 @@ public class ConversationService {
             // comment) - the "hiring_manager not yet linked" case below is real and used to
             // silently doom this read transaction via the same exception-crosses-a-
             // @Transactional-boundary mechanism as sendMessage()'s audit call.
-            var tenant = enterpriseProfileService.findEntityForUser(other.getId());
-            if (tenant.isPresent()) {
-                displayName = tenant.get().getCompanyName();
-                displayEmoji = tenant.get().getLogoEmoji();
+            EnterpriseProfile tenant = tenants.get(other.getId());
+            if (tenant != null) {
+                displayName = tenant.getCompanyName();
+                displayEmoji = tenant.getLogoEmoji();
             }
             // else: no resolvable tenant (e.g. a hiring_manager not yet linked) - falls back to
             // the user's own name, set above.
@@ -253,7 +305,8 @@ public class ConversationService {
         }
         return new ConversationResponse(c.getId().toString(), participantId, displayName, displayEmoji,
                 c.getContext(), c.getLastMessageAt().toString(), unread,
-                otherHidden, meHidden, c.getClosedAt() != null, c.getPost() == null ? null : c.getPost().getId().toString());
+                otherHidden, meHidden, c.getClosedAt() != null, c.getPost() == null ? null : c.getPost().getId().toString(),
+                previews.get(c.getId()));
     }
 
     private ThreadMessageResponse toResponse(ThreadMessage m, UUID viewingUserId) {

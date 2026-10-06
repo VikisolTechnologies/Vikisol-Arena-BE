@@ -46,6 +46,14 @@
             <scope>runtime</scope>
         </dependency>
 
+        <!-- MARATHON-BE-2 step 3: BusinessVerificationService's public-suffix rejection (B11 item
+             15) used a curated list in place of this, offline Maven couldn't resolve it then. -->
+        <dependency>
+            <groupId>com.google.guava</groupId>
+            <artifactId>guava</artifactId>
+            <version>33.3.1-jre</version>
+        </dependency>
+
         <dependency>
             <groupId>io.jsonwebtoken</groupId>
             <artifactId>jjwt-api</artifactId>

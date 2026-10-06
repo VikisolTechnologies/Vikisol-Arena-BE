@@ -7,6 +7,8 @@ public record NotificationResponse(
         String title,
         String body,
         String timestamp,
-        boolean read
+        boolean read,
+        // Row 16 (added): activity | need | job | message | safety; absent when it fits none.
+        String category
 ) {
 }

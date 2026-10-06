@@ -1,17 +1,25 @@
 package com.vikisol.arena.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.security.jwt.AgentServiceTokenAuthenticationFilter;
 import com.vikisol.arena.security.jwt.JwtAuthenticationEntryPoint;
 import com.vikisol.arena.security.jwt.JwtAuthenticationFilter;
 import com.vikisol.arena.security.mfa.PlatformAdminMfaFilter;
+import com.vikisol.arena.security.proxy.TrustedProxyFilter;
 import com.vikisol.arena.security.ratelimit.RateLimitFilter;
 import com.vikisol.arena.security.service.CustomUserDetailsService;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.web.servlet.FilterRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
@@ -24,7 +32,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
-import java.util.Arrays;
+import java.util.List;
 
 @Configuration
 @EnableWebSecurity
@@ -36,11 +44,19 @@ public class SecurityConfig {
     private final JwtAuthenticationFilter jwtAuthenticationFilter;
     private final AgentServiceTokenAuthenticationFilter agentServiceTokenAuthenticationFilter;
     private final RateLimitFilter rateLimitFilter;
+    private final TrustedProxyFilter trustedProxyFilter;
     private final PlatformAdminMfaFilter platformAdminMfaFilter;
     private final CustomUserDetailsService userDetailsService;
+    private final ObjectMapper objectMapper;
+    private final Environment environment;
 
-    @Value("${app.cors.allowed-origins:http://localhost:3000}")
+    @Value("${app.cors.allowed-origins:}")
     private String allowedOrigins;
+
+    // Browsers cache a preflight answer this long, so a signed-in page doesn't send an OPTIONS
+    // before every API call. Chrome caps it at 2 hours, Firefox at 24.
+    @Value("${app.cors.max-age-seconds:3600}")
+    private long corsMaxAgeSeconds;
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
@@ -48,9 +64,12 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(request -> {
                     var config = new org.springframework.web.cors.CorsConfiguration();
                     config.setAllowCredentials(true);
-                    config.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
+                    config.setAllowedOrigins(CorsOriginPolicy.allowedOrigins(allowedOrigins, environment));
                     config.addAllowedHeader("*");
                     config.addAllowedMethod("*");
+                    // PageLimits' paging headers on the bare-array list endpoints.
+                    config.setExposedHeaders(List.of(PageLimits.TOTAL_COUNT_HEADER, PageLimits.HAS_MORE_HEADER));
+                    config.setMaxAge(corsMaxAgeSeconds);
                     return config;
                 }))
                 .csrf(csrf -> csrf.disable())
@@ -67,9 +86,21 @@ public class SecurityConfig {
                                 "default-src 'none'; frame-ancestors 'none'; base-uri 'none'"))
                         .httpStrictTransportSecurity(hsts -> hsts.includeSubDomains(true).maxAgeInSeconds(31536000))
                 )
-                .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint))
+                // 403s decided by the filter chain use the same ApiResponse body as every other
+                // error (the default handler sent an empty body through /error).
+                .exceptionHandling(ex -> ex.authenticationEntryPoint(authenticationEntryPoint)
+                        .accessDeniedHandler((request, response, denied) -> {
+                            response.setStatus(HttpServletResponse.SC_FORBIDDEN);
+                            response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+                            response.getWriter().write(objectMapper.writeValueAsString(
+                                    new ApiResponse<>(false, "Access denied", null)));
+                        }))
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
+                        // The /error dispatch only renders the status of a request that already
+                        // failed (ApiErrorController). Guarding it again turned a guest's 500 into
+                        // a misleading 401.
+                        .dispatcherTypeMatchers(DispatcherType.ERROR).permitAll()
                         // Was a blanket "/auth/**".permitAll() - found live-testing the
                         // signout/denylist flow that this silently let an unauthenticated (or
                         // just-revoked) caller reach /auth/me with a null Authentication,
@@ -110,7 +141,7 @@ public class SecurityConfig {
                         // PostService/FeedAggregationService/ProjectService/CompanyService) -
                         // that null-tolerance was already there for shared-link support (FIX 1 /
                         // G9 below); this just opens the same door to the main browse surfaces.
-                        .requestMatchers(HttpMethod.GET, "/companies", "/companies/*", "/companies/*/jobs").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/companies", "/companies/*", "/companies/*/jobs", "/companies/*/verification").permitAll()
                         .requestMatchers(HttpMethod.GET, "/jobs").permitAll()
                         .requestMatchers(HttpMethod.GET, "/search").permitAll()
                         // Phase 2 (Discuss) - browsing communities and threads is open to guests;
@@ -133,6 +164,15 @@ public class SecurityConfig {
                         // every other permitAll GET on this list.
                         .requestMatchers(HttpMethod.GET, "/posts/mine", "/posts/saved", "/posts/joined").authenticated()
                         .requestMatchers(HttpMethod.GET, "/posts/*", "/posts/*/comments").permitAll()
+                        // An activity's page (details, questions, spots, waitlist size) is as
+                        // public as the post itself; "/activities/kinds" is the form catalogue.
+                        .requestMatchers(HttpMethod.GET, "/activities/*").permitAll()
+                        // A need/offer page and someone's confirmed outcomes are public; the
+                        // responses list and "my offers" stay signed-in (anyRequest below).
+                        .requestMatchers(HttpMethod.GET, "/needs/*", "/needs/outcomes/*").permitAll()
+                        // A community project's page, someone's projects and their profile stat
+                        // row are public like the profile itself.
+                        .requestMatchers(HttpMethod.GET, "/projects/*", "/projects/of/*", "/profile/*/stats").permitAll()
                         .anyRequest().authenticated()
                 )
                 .authenticationProvider(authenticationProvider())
@@ -140,6 +180,7 @@ public class SecurityConfig {
                 // fails verification here (different secret, see the filter's own class doc) and
                 // falls through untouched, so ordering relative to JwtAuthenticationFilter has no
                 // effect on normal requests.
+                .addFilterBefore(trustedProxyFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(agentServiceTokenAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class)
                 // After JWT auth so an authenticated bucket can key by user id, not just IP -
@@ -171,6 +212,13 @@ public class SecurityConfig {
     @Bean
     public FilterRegistrationBean<PlatformAdminMfaFilter> platformAdminMfaFilterRegistration(PlatformAdminMfaFilter filter) {
         FilterRegistrationBean<PlatformAdminMfaFilter> registration = new FilterRegistrationBean<>(filter);
+        registration.setEnabled(false);
+        return registration;
+    }
+
+    @Bean
+    public FilterRegistrationBean<TrustedProxyFilter> trustedProxyFilterRegistration(TrustedProxyFilter filter) {
+        FilterRegistrationBean<TrustedProxyFilter> registration = new FilterRegistrationBean<>(filter);
         registration.setEnabled(false);
         return registration;
     }

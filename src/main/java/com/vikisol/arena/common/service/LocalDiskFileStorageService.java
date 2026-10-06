@@ -72,6 +72,13 @@ public class LocalDiskFileStorageService implements FileStorageService {
     }
 
     @Override
+    public boolean isStoredUnder(String url, String module, String entityId) {
+        if (url == null) return false;
+        String bare = url.contains("?") ? url.substring(0, url.indexOf('?')) : url;
+        return bare.startsWith(publicBaseUrl + "/" + sanitize(module) + "/" + sanitize(entityId) + "/") && !bare.contains("..");
+    }
+
+    @Override
     public void delete(String url) {
         if (url == null || !url.startsWith(publicBaseUrl)) return;
         try {

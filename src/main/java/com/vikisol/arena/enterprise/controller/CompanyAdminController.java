@@ -3,6 +3,7 @@ package com.vikisol.arena.enterprise.controller;
 import com.vikisol.arena.audit.AuditEventResponse;
 import com.vikisol.arena.audit.AuditService;
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.enterprise.dto.admin.*;
 import com.vikisol.arena.enterprise.service.AdminDashboardService;
@@ -13,7 +14,6 @@ import com.vikisol.arena.enterprise.service.TeamService;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -104,7 +104,7 @@ public class CompanyAdminController {
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
         Instant since = sinceDays == null ? null : Instant.now().minus(sinceDays, ChronoUnit.DAYS);
         return ResponseEntity.ok(ApiResponse.ok(
-                auditService.search(tenantIdFor(principal), actorId, action, since, PageRequest.of(page, size))));
+                auditService.search(tenantIdFor(principal), actorId, action, since, PageLimits.of(page, size))));
     }
 
     @GetMapping(value = "/audit/export", produces = "text/csv")
@@ -114,18 +114,12 @@ public class CompanyAdminController {
             @RequestParam(required = false) Integer sinceDays) {
         Instant since = sinceDays == null ? null : Instant.now().minus(sinceDays, ChronoUnit.DAYS);
         List<AuditEventResponse> rows = auditService.exportAll(tenantIdFor(principal), actorId, action, since);
-        StringBuilder csv = new StringBuilder("Time,Actor,Action,Target,Metadata\n");
-        for (AuditEventResponse r : rows) {
-            csv.append(csvEscape(r.createdAt())).append(',')
-                    .append(csvEscape(r.actorName())).append(',')
-                    .append(csvEscape(r.action())).append(',')
-                    .append(csvEscape(r.target())).append(',')
-                    .append(csvEscape(r.metadata())).append('\n');
-        }
+        auditService.record(tenantIdFor(principal), principal.getId(), com.vikisol.arena.audit.AuditActions.AUDIT_EXPORTED,
+                "audit log", rows.size() + " rows");
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"audit-log.csv\"")
                 .contentType(MediaType.parseMediaType("text/csv"))
-                .body(csv.toString());
+                .body(com.vikisol.arena.audit.AuditCsv.write(rows));
     }
 
     @GetMapping("/billing")
@@ -146,11 +140,5 @@ public class CompanyAdminController {
 
     private UUID tenantIdFor(UserPrincipal principal) {
         return enterpriseProfileService.getEntityForUser(principal.getId()).getId();
-    }
-
-    private String csvEscape(String value) {
-        if (value == null) return "";
-        String escaped = value.replace("\"", "\"\"");
-        return "\"" + escaped + "\"";
     }
 }

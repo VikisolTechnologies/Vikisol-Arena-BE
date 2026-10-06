@@ -51,7 +51,7 @@ public class AgentServiceTokenVerifier {
         return secret != null && !secret.isBlank();
     }
 
-    public record VerifiedClaims(UUID userId, String role, List<String> scope) {}
+    public record VerifiedClaims(UUID userId, String role, List<String> scope, java.time.Instant issuedAt) {}
 
     /**
      * @throws AgentServiceTokenInvalidException if the token is missing, malformed, expired, has
@@ -83,7 +83,8 @@ public class AgentServiceTokenVerifier {
             String role = claims.get("role", String.class);
             @SuppressWarnings("unchecked")
             List<String> scope = claims.get("scope", List.class);
-            return new VerifiedClaims(userId, role, scope != null ? scope : List.of());
+            java.time.Instant issuedAt = claims.getIssuedAt() == null ? null : claims.getIssuedAt().toInstant();
+            return new VerifiedClaims(userId, role, scope != null ? scope : List.of(), issuedAt);
         } catch (JwtException | IllegalArgumentException e) {
             throw new AgentServiceTokenInvalidException("Invalid agent service token: " + e.getMessage(), e);
         }

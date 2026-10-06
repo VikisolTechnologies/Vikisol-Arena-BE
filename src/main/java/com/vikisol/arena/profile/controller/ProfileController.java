@@ -6,6 +6,9 @@ import com.vikisol.arena.profile.dto.CandidateDataExport;
 import com.vikisol.arena.profile.dto.CandidateProfileResponse;
 import com.vikisol.arena.profile.dto.ConsentDto;
 import com.vikisol.arena.profile.dto.LocationConsentRequest;
+import com.vikisol.arena.profile.dto.PatchProfileRequest;
+import com.vikisol.arena.profile.dto.ProfileBasicsResponse;
+import com.vikisol.arena.profile.dto.ProfileListRequest;
 import com.vikisol.arena.profile.dto.PublicCandidateProfileResponse;
 import com.vikisol.arena.profile.dto.UpdateAutonomyRequest;
 import com.vikisol.arena.profile.dto.UpdateProfileDetailsRequest;
@@ -33,6 +36,8 @@ import java.util.UUID;
 public class ProfileController {
 
     private final CandidateProfileService profileService;
+    private final com.vikisol.arena.platform.service.ModerationService moderationService;
+    private final com.vikisol.arena.profile.service.ProfileVisibilityGuard visibilityGuard;
 
     @GetMapping("/me")
     public ResponseEntity<ApiResponse<CandidateProfileResponse>> getMyProfile(@AuthenticationPrincipal UserPrincipal principal) {
@@ -40,7 +45,8 @@ public class ProfileController {
     }
 
     // Phase C profile revamp - the public/other-user view. {id} is a user id (matches how
-    // Follow/Post already key on user ids everywhere else in this API), not a profile id.
+    // Follow/Post already key on user ids everywhere else in this API); a CandidateProfile id
+    // (what Talent Universe search returns) is also accepted and resolves to the same profile.
     // ARENA-INVENTORY-FIXES.md FIX 1 - overrides the class-level hasRole('TALENT') so a
     // logged-out visitor (or a non-talent role, e.g. a recruiter) can view it; principal is
     // therefore nullable here and profileService.getPublicProfile already treats a null
@@ -51,6 +57,69 @@ public class ProfileController {
             @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
         UUID viewerId = principal == null ? null : principal.getId();
         return ResponseEntity.ok(ApiResponse.ok(profileService.getPublicProfile(id, viewerId)));
+    }
+
+    // FE-API-GAPS row 61: report a person. `id` is their user id or profile id, as for GET above.
+    // Evidence files work as for post reports (POST /reports/evidence first).
+    // ARCHITECT-REVIEW-BE-1 blocker #2: used to skip visibility entirely, so this endpoint's
+    // 200-vs-404 could be used to probe whether a hidden/blocked person exists at all.
+    @PostMapping("/{id}/report")
+    public ResponseEntity<ApiResponse<Void>> reportPerson(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+                                                          @Valid @RequestBody com.vikisol.arena.posts.dto.ReportPostRequest request) {
+        UUID targetUserId = profileService.resolveUserId(id);
+        visibilityGuard.requireVisibleTo(principal.getId(), targetUserId);
+        moderationService.fileUserReport(principal.getId(), targetUserId, request.reason(), request.evidenceUrls());
+        return ResponseEntity.ok(ApiResponse.ok("Report submitted", null));
+    }
+
+    // --- FE-API-GAPS 1-5: onboarding basics (see API-CHANGES.md) ---
+
+    @GetMapping("/me/basics")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> getBasics(@AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.getBasics(principal.getId())));
+    }
+
+    @PatchMapping("/me")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> patch(
+            @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody PatchProfileRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.patch(principal.getId(), request)));
+    }
+
+    @PutMapping("/me/intents")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> setIntents(
+            @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody ProfileListRequest.Intents request) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.setIntents(principal.getId(), request.intents())));
+    }
+
+    // Row 18: who can find you in people search - nearby | everyone | hidden.
+    @GetMapping("/me/visibility")
+    public ResponseEntity<ApiResponse<VisibilityBody>> visibility(@AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.ok(new VisibilityBody(profileService.visibility(principal.getId()))));
+    }
+
+    @PutMapping("/me/visibility")
+    public ResponseEntity<ApiResponse<VisibilityBody>> setVisibility(@AuthenticationPrincipal UserPrincipal principal, @RequestBody VisibilityBody request) {
+        return ResponseEntity.ok(ApiResponse.ok(new VisibilityBody(profileService.setVisibility(principal.getId(), request.profile()))));
+    }
+
+    public record VisibilityBody(String profile) {
+    }
+
+    @PutMapping("/me/interests")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> setInterests(
+            @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody ProfileListRequest.Interests request) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.setInterests(principal.getId(), request.interests())));
+    }
+
+    @PostMapping(value = "/me/photo", consumes = "multipart/form-data")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> uploadPhoto(
+            @AuthenticationPrincipal UserPrincipal principal, @RequestParam("file") MultipartFile file) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.uploadPhoto(principal.getId(), file)));
+    }
+
+    @DeleteMapping("/me/photo")
+    public ResponseEntity<ApiResponse<ProfileBasicsResponse>> deletePhoto(@AuthenticationPrincipal UserPrincipal principal) {
+        return ResponseEntity.ok(ApiResponse.ok(profileService.deletePhoto(principal.getId())));
     }
 
     @PutMapping("/me/details")

@@ -27,8 +27,15 @@ public class SearchController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "") String q,
             @RequestParam(defaultValue = "all") String type,
-            @RequestParam(defaultValue = "20") int limit) {
+            @RequestParam(defaultValue = "20") int limit,
+            // Row 17: people search near the viewer's own stored location, within radiusKm
+            // (default 5, floor 2, max 50). `near` is a flag ("true"), not a point - the caller
+            // cannot search near an arbitrary coordinate (ARCHITECT-REVIEW-BE-1 blocker #1), only
+            // near themselves.
+            @RequestParam(required = false) String near,
+            @RequestParam(required = false) Double radiusKm) {
         int bounded = Math.max(1, Math.min(limit, 50));
-        return ResponseEntity.ok(ApiResponse.ok(searchService.search(q, type, bounded, principal == null ? null : principal.getId())));
+        boolean nearMe = near != null && !near.isBlank() && !near.equalsIgnoreCase("false");
+        return ResponseEntity.ok(ApiResponse.ok(searchService.search(q, type, bounded, principal == null ? null : principal.getId(), nearMe, radiusKm)));
     }
 }

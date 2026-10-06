@@ -1,6 +1,7 @@
 package com.vikisol.arena.platform.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.platform.dto.*;
 import com.vikisol.arena.platform.service.FeatureFlagService;
@@ -12,7 +13,6 @@ import com.vikisol.arena.platform.service.PlatformUserService;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -50,7 +50,7 @@ public class PlatformAdminController {
     public ResponseEntity<ApiResponse<PagedResponse<TenantSummaryResponse>>> tenants(
             @RequestParam(required = false) String query,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(tenantService.listTenants(query, PageRequest.of(page, size))));
+        return ResponseEntity.ok(ApiResponse.ok(tenantService.listTenants(query, PageLimits.of(page, size))));
     }
 
     @PutMapping("/tenants/{id}/suspend")
@@ -76,7 +76,7 @@ public class PlatformAdminController {
     public ResponseEntity<ApiResponse<PagedResponse<PlatformUserResponse>>> users(
             @RequestParam(required = false) String query, @RequestParam(required = false) String role,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(userService.search(query, role, PageRequest.of(page, size))));
+        return ResponseEntity.ok(ApiResponse.ok(userService.search(query, role, PageLimits.of(page, size))));
     }
 
     // See PlatformUserService.eraseAccount's own comment for why this reuses the existing
@@ -91,19 +91,25 @@ public class PlatformAdminController {
     public ResponseEntity<ApiResponse<PagedResponse<ModerationItemResponse>>> moderationQueue(
             @RequestParam(required = false) String status,
             @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size) {
-        return ResponseEntity.ok(ApiResponse.ok(moderationService.listQueue(status, PageRequest.of(page, size))));
+        return ResponseEntity.ok(ApiResponse.ok(moderationService.listQueue(status, PageLimits.of(page, size))));
     }
 
+    // An optional { reason } goes into the audit entry (FE-API-GAPS row 48).
     @PutMapping("/moderation/{id}/dismiss")
-    public ResponseEntity<ApiResponse<Void>> dismissModeration(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        moderationService.dismiss(principal.getId(), id);
+    public ResponseEntity<ApiResponse<Void>> dismissModeration(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+                                                               @Valid @RequestBody(required = false) ModerationReason request) {
+        moderationService.dismiss(principal.getId(), id, request == null ? null : request.reason());
         return ResponseEntity.ok(ApiResponse.ok(null));
     }
 
     @PutMapping("/moderation/{id}/takedown")
-    public ResponseEntity<ApiResponse<Void>> takedownModeration(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id) {
-        moderationService.takedown(principal.getId(), id);
+    public ResponseEntity<ApiResponse<Void>> takedownModeration(@AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+                                                                @Valid @RequestBody(required = false) ModerationReason request) {
+        moderationService.takedown(principal.getId(), id, request == null ? null : request.reason());
         return ResponseEntity.ok(ApiResponse.ok(null));
+    }
+
+    public record ModerationReason(@jakarta.validation.constraints.Size(max = 500, message = "must be at most 500 characters") String reason) {
     }
 
     @GetMapping("/analytics")

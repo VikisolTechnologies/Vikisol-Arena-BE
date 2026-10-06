@@ -80,6 +80,7 @@ import com.vikisol.arena.rooms.repository.RoomMemberRepository;
 import com.vikisol.arena.rooms.repository.RoomMessageRepository;
 import com.vikisol.arena.rooms.repository.RoomRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Pageable;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -218,7 +219,7 @@ public class DemoContentService {
         for (int i = 1; i <= 40; i++) {
             String name = IndianData.fullName();
             String email = String.format("user%02d@%s", i, EMAIL_DOMAIN);
-            authService.signUp(new SignUpRequest(name, email, demoPassword.required(), "talent"), false);
+            authService.signUp(new SignUpRequest(name, email, demoPassword.required(), "talent", "1995-06-15"), false);
             User user = withDemoFlag(userRepository.findByEmailIgnoreCase(email).orElseThrow());
             userRepository.save(user);
 
@@ -255,7 +256,7 @@ public class DemoContentService {
                 profile.setRateFloor(IndianData.intBetween(6, 35));
                 profile.setOpenTo(IndianData.pickN(List.of(OpenTo.FULL_TIME, OpenTo.CONTRACT, OpenTo.PROJECTS), IndianData.intBetween(1, 2)));
                 profile.setConsent(new ConsentSettings(IndianData.RANDOM.nextDouble() < 0.6, true));
-                profile.setAutonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED, AutonomyLevel.AUTOPILOT)));
+                profile.setAutonomy(IndianData.pick(List.of(AutonomyLevel.MANUAL, AutonomyLevel.SUPERVISED)));
                 profile.setBio(experienceYears + "+ years in " + industry.wireValue().toLowerCase() + ", " + home.name() + ".");
                 // Real, live gap found and fixed here (2026-09-15): PostService.requireAdult()
                 // 400s "Add your date of birth in Settings" on every create/join of an Activity
@@ -297,7 +298,7 @@ public class DemoContentService {
             CompanySeed seed = realSeeds.get(i);
             String email = String.format("user%02d@%s", 41 + i, EMAIL_DOMAIN);
             String adminName = seed.name() + " Talent Team";
-            authService.signUp(new SignUpRequest(adminName, email, demoPassword.required(), "company_admin"), false);
+            authService.signUp(new SignUpRequest(adminName, email, demoPassword.required(), "company_admin", "1985-03-20"), false);
             User admin = userRepository.findByEmailIgnoreCase(email).orElseThrow();
             admin.setDemoContent(true);
             userRepository.save(admin);
@@ -920,7 +921,7 @@ public class DemoContentService {
         // shared between two demo users via the Set, same pattern as the Room cleanup above.
         Set<Conversation> conversations = new java.util.LinkedHashSet<>();
         for (User user : users) {
-            conversations.addAll(conversationRepository.findAllForUser(user.getId()));
+            conversations.addAll(conversationRepository.findAllForUser(user.getId(), Pageable.unpaged()).getContent());
         }
         for (Conversation conversation : conversations) {
             threadMessageRepository.deleteByConversationId(conversation.getId());

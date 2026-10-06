@@ -1,18 +1,22 @@
 package com.vikisol.arena.posts.service;
 
+import com.vikisol.arena.common.cache.FeedWindowCache;
+import com.vikisol.arena.common.cache.TtlCache;
 import com.vikisol.arena.common.embedding.EmbeddingProvider;
 import com.vikisol.arena.common.embedding.EmbeddingUtil;
 import com.vikisol.arena.follows.repository.FollowRepository;
 import com.vikisol.arena.platform.entity.ModerationContentType;
 import com.vikisol.arena.platform.repository.ModerationItemRepository;
 import com.vikisol.arena.posts.entity.Post;
+import com.vikisol.arena.posts.entity.PostIntentType;
 import com.vikisol.arena.posts.entity.PostStatus;
 import com.vikisol.arena.posts.repository.PostCommentRepository;
 import com.vikisol.arena.posts.repository.PostReactionRepository;
 import com.vikisol.arena.posts.repository.PostRepository;
+import com.vikisol.arena.posts.repository.PostWindowRow;
 import com.vikisol.arena.profile.entity.CandidateProfile;
 import com.vikisol.arena.profile.repository.CandidateProfileRepository;
-import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -49,7 +53,7 @@ import java.util.stream.Collectors;
  * "fetch then compute" shape as match-percentage/career-health, not a new pattern.
  */
 @Service
-@RequiredArgsConstructor
+@Slf4j
 public class FeedRankingService {
 
     // Bounded window, not the whole table - keeps this a fixed-cost read regardless of how many
@@ -71,33 +75,83 @@ public class FeedRankingService {
     private final ModerationItemRepository moderationItemRepository;
     private final PostCommentRepository postCommentRepository;
     private final PostReactionRepository postReactionRepository;
+    private final TtlCache<List<Candidate>> windowCache;
 
-    // A Post paired with its computed feed score - exposed (not just used internally) so
+    public FeedRankingService(PostRepository postRepository, FollowRepository followRepository,
+                              CandidateProfileRepository candidateProfileRepository, EmbeddingProvider embeddingProvider,
+                              ModerationItemRepository moderationItemRepository, PostCommentRepository postCommentRepository,
+                              PostReactionRepository postReactionRepository, FeedWindowCache feedWindowCache) {
+        this.postRepository = postRepository;
+        this.followRepository = followRepository;
+        this.candidateProfileRepository = candidateProfileRepository;
+        this.embeddingProvider = embeddingProvider;
+        this.moderationItemRepository = moderationItemRepository;
+        this.postCommentRepository = postCommentRepository;
+        this.postReactionRepository = postReactionRepository;
+        this.windowCache = feedWindowCache.newWindow();
+    }
+
+    // PERFORMANCE.md: what ranking needs from one candidate post, read once into a light row and
+    // shared by every request for a few seconds (FeedWindowCache) - the embedding already decoded,
+    // and the report/comment/reaction counts already counted.
+    public record Candidate(UUID id, Instant createdAt, UUID authorId, UUID companyId, PostIntentType intentType,
+                            boolean anonymous, boolean linkOnly, float[] embedding, Instant startsAt,
+                            Integer capacity, int spotsFilled, long reports, long comments, long reactions) {
+    }
+
+    // A candidate paired with its computed feed score - exposed (not just used internally) so
     // FeedAggregationService (PART 6/7.5's unified /feed) can merge posts with JobPosting/
     // Project on one ranked stream instead of blending two different sorted-and-paged lists.
-    public record ScoredPost(Post post, double score) {
+    public record ScoredPost(Candidate post, double score) {
+    }
+
+    // The newest FEED_WINDOW_SIZE open posts, shared by feed and trending.
+    @Transactional(readOnly = true)
+    public List<Candidate> window() {
+        return windowCache.get(this::loadWindow);
+    }
+
+    private List<Candidate> loadWindow() {
+        List<PostWindowRow> rows = postRepository.findWindowRows(PostStatus.OPEN, PageRequest.of(0, FEED_WINDOW_SIZE));
+        List<UUID> postIds = rows.stream().map(PostWindowRow::id).toList();
+        Map<UUID, Long> reportCounts = batchReportCounts(postIds);
+        Map<UUID, Long> commentCounts = postIds.isEmpty() ? Map.of() : countMap(postCommentRepository.countByPostIdIn(postIds));
+        Map<UUID, Long> reactionCounts = postIds.isEmpty() ? Map.of() : countMap(postReactionRepository.countByPostIdIn(postIds));
+        return rows.stream().map(r -> new Candidate(r.id(), r.createdAt(), r.authorId(), r.companyId(), r.intentType(),
+                r.anonymous(), r.linkOnly(), EmbeddingUtil.decode(r.embedding()), r.startsAt(), r.capacity(), r.spotsFilled(),
+                reportCounts.getOrDefault(r.id(), 0L), commentCounts.getOrDefault(r.id(), 0L),
+                reactionCounts.getOrDefault(r.id(), 0L))).toList();
     }
 
     @Transactional(readOnly = true)
     public List<ScoredPost> scoredWindow(UUID viewingUserId) {
-        Pageable window = PageRequest.of(0, FEED_WINDOW_SIZE, Sort.by(Sort.Direction.DESC, "createdAt"));
-        List<Post> candidates = postRepository.findByStatusOrderByCreatedAtDesc(PostStatus.OPEN, window).getContent();
-
+        List<Candidate> candidates = window();
         Set<UUID> following = viewingUserId == null ? Set.of()
                 : Set.copyOf(followRepository.findFollowingUserIdsByFollowerUserId(viewingUserId));
         float[] interestVector = interestVectorFor(viewingUserId);
-        Map<UUID, Long> reportCounts = batchReportCounts(candidates);
 
         return candidates.stream()
-                .map(p -> new ScoredPost(p, score(p, following, interestVector, reportCounts)))
+                .map(p -> new ScoredPost(p, score(p, following, interestVector)))
                 .sorted(Comparator.comparingDouble(ScoredPost::score).reversed())
                 .toList();
     }
 
     @Transactional(readOnly = true)
     public List<Post> getFeedWindow(UUID viewingUserId, int page, int size) {
-        List<Post> scored = scoredWindow(viewingUserId).stream().map(ScoredPost::post).toList();
-        return page(scored, page, size);
+        List<Candidate> scored = scoredWindow(viewingUserId).stream().map(ScoredPost::post).toList();
+        return openPosts(page(scored, page, size));
+    }
+
+    // The page's posts, read fresh and in rank order. A post closed since the window was read
+    // is left out rather than shown open (FeedWindowCache clears the window on every post write,
+    // so this only matters for the moment between a write and its commit).
+    @Transactional(readOnly = true)
+    public List<Post> openPosts(List<Candidate> candidates) {
+        if (candidates.isEmpty()) return List.of();
+        Map<UUID, Post> byId = postRepository.findByIdIn(candidates.stream().map(Candidate::id).toList()).stream()
+                .collect(Collectors.toMap(Post::getId, p -> p));
+        return candidates.stream().map(c -> byId.get(c.id()))
+                .filter(p -> p != null && p.getStatus() == PostStatus.OPEN).toList();
     }
 
     // §"trends" (Phase C) - same bounded-window-then-score approach, but ranked by recent
@@ -109,48 +163,38 @@ public class FeedRankingService {
     @Transactional(readOnly = true)
     public List<Post> getTrendingWindow(UUID viewingUserId, int page, int size) {
         Instant since = Instant.now().minus(Duration.ofDays(7));
-        Pageable window = PageRequest.of(0, FEED_WINDOW_SIZE, Sort.by(Sort.Direction.DESC, "createdAt"));
-        List<Post> candidates = postRepository.findByStatusOrderByCreatedAtDesc(PostStatus.OPEN, window).getContent()
-                .stream().filter(p -> p.getCreatedAt().isAfter(since)).toList();
-
-        List<UUID> postIds = candidates.stream().map(Post::getId).toList();
-        Map<UUID, Long> commentCounts = countMap(postCommentRepository.countByPostIdIn(postIds));
-        Map<UUID, Long> reactionCounts = countMap(postReactionRepository.countByPostIdIn(postIds));
-
-        List<Post> scored = candidates.stream()
-                .sorted(Comparator.comparingDouble((Post p) -> trendingScore(p, commentCounts, reactionCounts)).reversed())
+        List<Candidate> scored = window().stream()
+                .filter(p -> p.createdAt().isAfter(since))
+                .sorted(Comparator.comparingDouble(this::trendingScore).reversed())
                 .toList();
-        return page(scored, page, size);
+        return openPosts(page(scored, page, size));
     }
 
-    private double trendingScore(Post post, Map<UUID, Long> commentCounts, Map<UUID, Long> reactionCounts) {
-        long joins = post.getSpotsFilled();
-        long comments = commentCounts.getOrDefault(post.getId(), 0L);
-        long reactions = reactionCounts.getOrDefault(post.getId(), 0L);
-        double engagement = joins * 3.0 + comments * 2.0 + reactions * 1.0;
-        double hoursOld = Duration.between(post.getCreatedAt(), Instant.now()).toMinutes() / 60.0;
+    private double trendingScore(Candidate post) {
+        double engagement = post.spotsFilled() * 3.0 + post.comments() * 2.0 + post.reactions() * 1.0;
+        double hoursOld = Duration.between(post.createdAt(), Instant.now()).toMinutes() / 60.0;
         double recencyDecay = Math.pow(0.5, hoursOld / TRENDING_WINDOW_HOURS);
         return engagement * recencyDecay;
     }
 
-    private List<Post> page(List<Post> scored, int page, int size) {
+    private static <T> List<T> page(List<T> scored, int page, int size) {
         int from = Math.min(page * size, scored.size());
         int to = Math.min(from + size, scored.size());
         return scored.subList(from, to);
     }
 
-    private double score(Post post, Set<UUID> following, float[] interestVector, Map<UUID, Long> reportCounts) {
-        double hoursOld = Duration.between(post.getCreatedAt(), Instant.now()).toMinutes() / 60.0;
+    private double score(Candidate post, Set<UUID> following, float[] interestVector) {
+        double hoursOld = Duration.between(post.createdAt(), Instant.now()).toMinutes() / 60.0;
         double recencyScore = 100.0 * Math.pow(0.5, hoursOld / RECENCY_HALF_LIFE_HOURS);
         // No follow boost for an anonymous post - its ranking for a follower mustn't hint who wrote it.
-        double followBonus = !post.isAnonymous() && following.contains(post.getAuthorUser().getId()) ? FOLLOW_BONUS : 0.0;
+        double followBonus = !post.anonymous() && following.contains(post.authorId()) ? FOLLOW_BONUS : 0.0;
         // Proximity term: intentionally still 0 here - proximity is served by PostService's own
         // dedicated nearby/radius search (Map screen), not blended into this general feed score.
         double proximityScore = 0.0;
         double relevanceScore = interestVector == null ? 0.0
-                : RELEVANCE_WEIGHT * EmbeddingUtil.cosineSimilarity(interestVector, EmbeddingUtil.decode(post.getEmbedding()));
+                : RELEVANCE_WEIGHT * EmbeddingUtil.cosineSimilarity(interestVector, post.embedding());
         double urgencyScore = URGENCY_WEIGHT * urgency(post);
-        double qualityPenalty = reportCounts.getOrDefault(post.getId(), 0L) * QUALITY_PENALTY_PER_REPORT;
+        double qualityPenalty = post.reports() * QUALITY_PENALTY_PER_REPORT;
         return recencyScore + followBonus + proximityScore + relevanceScore + urgencyScore - qualityPenalty;
     }
 
@@ -160,17 +204,17 @@ public class FeedRankingService {
     // already started/has no startsAt at all), and how close to full a capacity-limited post is
     // (spotsFilled/capacity - "almost full, join now" is its own kind of urgency even with no
     // start time set).
-    private double urgency(Post post) {
+    private double urgency(Candidate post) {
         double timeUrgency = 0.0;
-        if (post.getStartsAt() != null) {
-            double hoursUntilStart = Duration.between(Instant.now(), post.getStartsAt()).toMinutes() / 60.0;
+        if (post.startsAt() != null) {
+            double hoursUntilStart = Duration.between(Instant.now(), post.startsAt()).toMinutes() / 60.0;
             if (hoursUntilStart > 0 && hoursUntilStart <= URGENCY_TIME_HORIZON_HOURS) {
                 timeUrgency = 1.0 - (hoursUntilStart / URGENCY_TIME_HORIZON_HOURS);
             }
         }
         double capacityUrgency = 0.0;
-        if (post.getCapacity() != null && post.getCapacity() > 0) {
-            capacityUrgency = Math.min(1.0, (double) post.getSpotsFilled() / post.getCapacity());
+        if (post.capacity() != null && post.capacity() > 0) {
+            capacityUrgency = Math.min(1.0, (double) post.spotsFilled() / post.capacity());
         }
         return Math.max(timeUrgency, capacityUrgency);
     }
@@ -190,14 +234,20 @@ public class FeedRankingService {
         Pageable recentFew = PageRequest.of(0, 5, Sort.by(Sort.Direction.DESC, "createdAt"));
         postRepository.findByAuthorUserIdOrderByCreatedAtDesc(viewingUserId, recentFew)
                 .forEach(p -> text.append(p.getBody()).append(' '));
-        return embeddingProvider.embed(text.toString());
+        // Best-effort like PostService.embedOrNull: an OpenAI outage must not fail the feed, and
+        // its error text must not reach the caller. A null vector means no interest boost.
+        try {
+            return embeddingProvider.embed(text.toString());
+        } catch (Exception e) {
+            log.warn("Interest embedding failed, feed ranks without it ({})", e.getClass().getSimpleName());
+            return null;
+        }
     }
 
     // Merges both report paths a post can accumulate - a direct report (ModerationContentType.
     // POST, filed even before any Room exists) and a report on its Room (ACTIVITY/ASK posts
     // that already have an approved joiner) - so quality reflects either kind, not just one.
-    private Map<UUID, Long> batchReportCounts(List<Post> posts) {
-        List<UUID> postIds = posts.stream().map(Post::getId).toList();
+    private Map<UUID, Long> batchReportCounts(List<UUID> postIds) {
         if (postIds.isEmpty()) return Map.of();
         Map<UUID, Long> counts = new java.util.HashMap<>();
         moderationItemRepository.countByRoomPostIdInAndContentType(postIds, ModerationContentType.ROOM)

@@ -3,30 +3,37 @@ package com.vikisol.arena.security.jwt;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.env.Environment;
+import org.springframework.core.env.Profiles;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
 import org.springframework.stereotype.Component;
+import org.springframework.util.StringUtils;
 
 import java.time.Duration;
 
 /**
  * HttpOnly refresh-token cookie read/write. Secure/SameSite are environment-configurable (see
- * application.yml + DECISIONS.md): local dev runs both apps on http://localhost at different
- * ports, which browsers treat as same-site but NOT secure-context, so `Secure=true` would
- * silently drop the cookie; staging/production run over HTTPS on different Railway subdomains
- * (cross-site), which needs `SameSite=None; Secure=true` to be sent at all. Never hardcode either
- * value - see JWT_COOKIE_SECURE / JWT_COOKIE_SAME_SITE in BLOCKED.md/railway env vars.
+ * application.yml + DECISIONS.md). The Vercel proxy makes app traffic same-origin, so production
+ * defaults to `SameSite=Lax; Secure` and no Domain attribute. Local HTTP keeps working because the
+ * secure default is profile-aware, and both values remain overrideable for tests/emergencies.
  */
 @Component
 public class RefreshCookieHelper {
 
     public static final String COOKIE_NAME = "arena_refresh";
 
+    private final Environment environment;
+
+    public RefreshCookieHelper(Environment environment) {
+        this.environment = environment;
+    }
+
     @Value("${app.jwt.refresh-expiration-ms}")
     private long refreshExpirationMs;
 
-    @Value("${app.jwt.cookie-secure:false}")
-    private boolean cookieSecure;
+    @Value("${app.jwt.cookie-secure:}")
+    private String cookieSecure;
 
     @Value("${app.jwt.cookie-same-site:Lax}")
     private String cookieSameSite;
@@ -55,10 +62,17 @@ public class RefreshCookieHelper {
         // endpoints that read it.
         return ResponseCookie.from(COOKIE_NAME, value)
                 .httpOnly(true)
-                .secure(cookieSecure)
+                .secure(secureCookie())
                 .sameSite(cookieSameSite)
                 .path("/api/v1/auth")
                 .maxAge(maxAge)
                 .build();
+    }
+
+    private boolean secureCookie() {
+        if (StringUtils.hasText(cookieSecure)) {
+            return Boolean.parseBoolean(cookieSecure.trim());
+        }
+        return !environment.acceptsProfiles(Profiles.of("local"));
     }
 }

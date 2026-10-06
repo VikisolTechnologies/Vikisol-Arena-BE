@@ -9,8 +9,11 @@ import com.vikisol.arena.marketplace.entity.Project;
 import com.vikisol.arena.marketplace.entity.ProjectStatus;
 import com.vikisol.arena.marketplace.repository.BidRepository;
 import com.vikisol.arena.marketplace.repository.ProjectRepository;
+import com.vikisol.arena.posts.dto.PostResponse;
+import com.vikisol.arena.posts.entity.Post;
 import com.vikisol.arena.posts.service.PostService;
-import lombok.RequiredArgsConstructor;
+import com.vikisol.arena.common.cache.FeedWindowCache;
+import com.vikisol.arena.common.cache.TtlCache;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -45,7 +48,6 @@ import java.util.stream.Collectors;
  * DECISIONS.md).
  */
 @Service
-@RequiredArgsConstructor
 public class FeedAggregationService {
 
     private static final int JOB_PROJECT_WINDOW = 200;
@@ -59,107 +61,180 @@ public class FeedAggregationService {
     private final ProjectRepository projectRepository;
     private final BidRepository bidRepository;
     private final FollowRepository followRepository;
+    private final com.vikisol.arena.needs.repository.NeedResponseRepository needResponseRepository;
+    private final com.vikisol.arena.profile.repository.CandidateProfileRepository candidateProfileRepository;
+    // PERFORMANCE.md: the open jobs and projects as ready-made items, shared by every request for a
+    // few seconds (FeedWindowCache, cleared after any job or project write). Only the viewer's
+    // follow bonus and the time-based terms are computed per request.
+    private final TtlCache<List<JobBase>> jobWindow;
+    private final TtlCache<List<ProjectBase>> projectWindow;
+
+    private record JobBase(FeedItemResponse item, Instant createdAt, UUID companyId) {
+    }
+
+    private record ProjectBase(FeedItemResponse item, Instant createdAt, UUID authorId, Instant endsAt) {
+    }
+
+    public FeedAggregationService(PostService postService, JobPostingRepository jobPostingRepository,
+                                  ProjectRepository projectRepository, BidRepository bidRepository,
+                                  FollowRepository followRepository,
+                                  com.vikisol.arena.needs.repository.NeedResponseRepository needResponseRepository,
+                                  com.vikisol.arena.profile.repository.CandidateProfileRepository candidateProfileRepository,
+                                  FeedWindowCache feedWindowCache) {
+        this.postService = postService;
+        this.jobPostingRepository = jobPostingRepository;
+        this.projectRepository = projectRepository;
+        this.bidRepository = bidRepository;
+        this.followRepository = followRepository;
+        this.needResponseRepository = needResponseRepository;
+        this.candidateProfileRepository = candidateProfileRepository;
+        this.jobWindow = feedWindowCache.newWindow();
+        this.projectWindow = feedWindowCache.newWindow();
+    }
 
     public record ScoredFeedItem(FeedItemResponse item, double score, UUID authorUserId, UUID authorCompanyId) {
     }
 
+    // One ranked entry before mapping: a post (mapped only if it lands on the page) or an
+    // already-built job/project item.
+    private record Candidate(double score, UUID authorUserId, UUID authorCompanyId,
+                             com.vikisol.arena.posts.service.FeedRankingService.Candidate post, FeedItemResponse item) {
+    }
+
+    // PERFORMANCE.md: rank everything cheaply, page, then map only the page's posts (in batches).
+    // The ranking and the result are the same as before; the work per request is not.
     @Transactional(readOnly = true)
     public List<FeedItemResponse> getFeed(UUID viewingUserId, String tab, int page, int size) {
-        List<ScoredFeedItem> items = new ArrayList<>();
-        items.addAll(scoredPosts(viewingUserId));
-        items.addAll(scoredJobs(viewingUserId));
-        items.addAll(scoredProjects(viewingUserId));
-
-        if ("following".equals(tab)) {
-            Set<UUID> followingUsers = viewingUserId == null ? Set.of()
-                    : Set.copyOf(followRepository.findFollowingUserIdsByFollowerUserId(viewingUserId));
-            items = items.stream()
-                    .filter(i -> (i.authorUserId() != null && followingUsers.contains(i.authorUserId()))
-                            || (i.authorCompanyId() != null && viewingUserId != null
-                            && followRepository.existsByFollowerUserIdAndFollowingCompanyId(viewingUserId, i.authorCompanyId())))
-                    .toList();
+        Set<UUID> followedCompanies = viewingUserId == null ? Set.of()
+                : Set.copyOf(followRepository.findFollowingCompanyIdsByFollowerUserId(viewingUserId));
+        Set<UUID> followingUsers = viewingUserId == null ? Set.of()
+                : Set.copyOf(followRepository.findFollowingUserIdsByFollowerUserId(viewingUserId));
+        List<Candidate> items = new ArrayList<>();
+        for (var sp : postService.getScoredFeedCandidates(viewingUserId)) {
+            var p = sp.post();
+            // An anonymous post never carries its author into the "following" filter.
+            UUID author = p.anonymous() ? null : p.authorId();
+            items.add(new Candidate(sp.score(), author, p.companyId(), p, null));
         }
+        scoredJobs(followedCompanies).forEach(i -> items.add(new Candidate(i.score(), i.authorUserId(), i.authorCompanyId(), null, i.item())));
+        scoredProjects(followingUsers).forEach(i -> items.add(new Candidate(i.score(), i.authorUserId(), i.authorCompanyId(), null, i.item())));
 
-        List<FeedItemResponse> sorted = items.stream()
-                .sorted(Comparator.comparingDouble(ScoredFeedItem::score).reversed())
-                .map(ScoredFeedItem::item)
+        List<Candidate> ranked = items.stream()
+                .filter(i -> !"following".equals(tab)
+                        || (i.authorUserId() != null && followingUsers.contains(i.authorUserId()))
+                        || (i.authorCompanyId() != null && followedCompanies.contains(i.authorCompanyId())))
+                .sorted(Comparator.comparingDouble(Candidate::score).reversed())
                 .toList();
-        return page(sorted, page, size);
-    }
+        List<Candidate> pageItems = page(ranked, page, size);
 
-    private List<ScoredFeedItem> scoredPosts(UUID viewingUserId) {
-        return postService.getScoredFeed(viewingUserId).stream()
-                .map(sp -> {
-                    var r = sp.response();
-                    UUID authorUserId = UUID.fromString(r.authorUserId());
-                    UUID authorCompanyId = r.authorCompanyId() == null ? null : UUID.fromString(r.authorCompanyId());
-                    // PostMapper already swaps authorName/authorEmoji to the company's when the
-                    // post is company-authored (see its own comment) - just mirror those here.
-                    String authorCompanyName = authorCompanyId != null ? r.authorName() : null;
-                    String authorCompanyEmoji = authorCompanyId != null ? r.authorEmoji() : null;
-                    FeedItemResponse item = new FeedItemResponse(
-                            r.id(), r.intentType(), r.authorUserId(), r.authorName(), r.authorEmoji(),
-                            r.authorCompanyId(), authorCompanyName, authorCompanyEmoji,
-                            r.title(), r.body(), r.locationText(), r.tags(), r.mediaUrls(), r.status(), r.createdAt(),
-                            r.visibility(), r.capacity(), r.spotsFilled(), r.startsAt(), r.endsAt(), r.joinable(),
-                            r.mine(), r.myJoinStatus(), r.roomId(), r.approxLat(), r.approxLng(),
-                            r.commentCount(), r.reactionCount(), r.myReacted(),
-                            r.authorJoinCount(), r.authorAccountAgeDays(),
-                            null, null, null, null,
-                            null, null, null, null,
-                            r.demoContent()
-                    );
-                    return new ScoredFeedItem(item, sp.score(), authorUserId, authorCompanyId);
-                })
+        var pagePosts = pageItems.stream().map(Candidate::post).filter(java.util.Objects::nonNull).toList();
+        Map<UUID, PostResponse> mapped = postService.toResponses(pagePosts, viewingUserId).stream()
+                .collect(Collectors.toMap(r -> UUID.fromString(r.id()), r -> r));
+        Map<UUID, List<FeedItemResponse.OfferAvatar>> offers = offersOnNeeds(pagePosts.stream()
+                .filter(p -> p.intentType() == com.vikisol.arena.posts.entity.PostIntentType.ASK)
+                .map(com.vikisol.arena.posts.service.FeedRankingService.Candidate::id).toList());
+        return pageItems.stream()
+                .map(c -> c.post() == null ? c.item() : postItem(mapped.get(c.post().id()), offers))
+                .filter(java.util.Objects::nonNull)
                 .toList();
     }
 
-    private List<ScoredFeedItem> scoredJobs(UUID viewingUserId) {
+    private FeedItemResponse postItem(PostResponse r, Map<UUID, List<FeedItemResponse.OfferAvatar>> offers) {
+        if (r == null) return null;
+        String authorCompanyId = r.authorCompanyId();
+        // PostMapper already swaps authorName/authorEmoji to the company's when the post is
+        // company-authored (see its own comment) - just mirror those here.
+        String authorCompanyName = authorCompanyId != null ? r.authorName() : null;
+        String authorCompanyEmoji = authorCompanyId != null ? r.authorEmoji() : null;
+        boolean ask = "ask".equals(r.intentType());
+        List<FeedItemResponse.OfferAvatar> faces = ask ? offers.getOrDefault(UUID.fromString(r.id()), List.of()) : null;
+        return new FeedItemResponse(
+                r.id(), r.intentType(), r.authorUserId(), r.authorName(), r.authorEmoji(),
+                authorCompanyId, authorCompanyName, authorCompanyEmoji,
+                r.title(), r.body(), r.locationText(), r.tags(), r.mediaUrls(), r.status(), r.createdAt(),
+                r.visibility(), r.capacity(), r.spotsFilled(), r.startsAt(), r.endsAt(), r.joinable(),
+                r.mine(), r.myJoinStatus(), r.roomId(), r.approxLat(), r.approxLng(),
+                r.commentCount(), r.reactionCount(), r.myReacted(),
+                r.authorJoinCount(), r.authorAccountAgeDays(),
+                null, null, null, null,
+                null, null, null, null,
+                r.demoContent(),
+                r.priceInr(), r.authorVerificationLevel(),
+                ask ? (long) faces.size() : null,
+                ask ? faces.stream().limit(3).toList() : null
+        );
+    }
+
+    // Row 38: live offers of help (pending or accepted) on the window's needs, oldest first. One
+    // query for the responses and one for the profiles, whatever the window size.
+    private Map<UUID, List<FeedItemResponse.OfferAvatar>> offersOnNeeds(List<UUID> needIds) {
+        if (needIds.isEmpty()) return Map.of();
+        var responses = needResponseRepository.findByPostIdInAndStatusInOrderByCreatedAtAscIdAsc(needIds,
+                List.of(com.vikisol.arena.needs.entity.ResponseStatus.PENDING, com.vikisol.arena.needs.entity.ResponseStatus.ACCEPTED));
+        var profiles = candidateProfileRepository.mapByUserId(responses.stream().map(r -> r.getUser().getId()).toList());
+        Map<UUID, List<FeedItemResponse.OfferAvatar>> out = new java.util.HashMap<>();
+        for (var r : responses) {
+            var profile = profiles.get(r.getUser().getId());
+            out.computeIfAbsent(r.getPost().getId(), k -> new ArrayList<>()).add(new FeedItemResponse.OfferAvatar(
+                    profile != null ? profile.getName() : r.getUser().getName(),
+                    profile != null ? profile.getAvatarEmoji() : "🧑🏽",
+                    profile != null ? profile.getPhotoUrl() : null));
+        }
+        return out;
+    }
+
+    private List<ScoredFeedItem> scoredJobs(Set<UUID> followedCompanies) {
+        return jobWindow.get(this::loadJobs).stream().map(j -> new ScoredFeedItem(j.item(),
+                recencyScore(j.createdAt()) + (followedCompanies.contains(j.companyId()) ? FOLLOW_BONUS : 0.0),
+                null, j.companyId())).toList();
+    }
+
+    private List<JobBase> loadJobs() {
         Pageable window = PageRequest.of(0, JOB_PROJECT_WINDOW, Sort.by(Sort.Direction.DESC, "createdAt"));
         List<JobPosting> jobs = jobPostingRepository.findByStatus(PostingStatus.OPEN, window).getContent();
-        Set<UUID> followedCompanies = viewingUserId == null ? Set.of() : jobs.stream()
-                .map(j -> j.getEnterprise().getId()).distinct()
-                .filter(id -> followRepository.existsByFollowerUserIdAndFollowingCompanyId(viewingUserId, id))
-                .collect(Collectors.toSet());
+        // Cached items outlive this session: skills are loaded in one batch and copied out.
+        if (!jobs.isEmpty()) jobPostingRepository.findByIdInFetchingSkills(jobs.stream().map(JobPosting::getId).toList());
 
         return jobs.stream().map(job -> {
-            double recency = recencyScore(job.getCreatedAt());
-            double followBonus = followedCompanies.contains(job.getEnterprise().getId()) ? FOLLOW_BONUS : 0.0;
             var company = job.getEnterprise();
             FeedItemResponse item = new FeedItemResponse(
                     job.getId().toString(), "job", null, null, null,
                     company.getId().toString(), company.getCompanyName(), company.getLogoEmoji(),
-                    job.getTitle(), job.getDescription(), job.getLocation(), job.getSkills(), List.of(),
+                    job.getTitle(), job.getDescription(), job.getLocation(), java.util.Collections.unmodifiableList(new ArrayList<>(job.getSkills())), List.of(),
                     job.getStatus().name().toLowerCase(), job.getCreatedAt().toString(),
                     null, null, null, null, null, null, null, null, null, null, null,
                     null, null, null,
                     null, null,
                     job.getEmploymentType().name().toLowerCase(), job.isRemote(), job.getSalaryMin(), job.getSalaryMax(),
                     null, null, null, null,
-                    job.isDemoContent() || company.isDemoContent()
+                    job.isDemoContent() || company.isDemoContent(),
+                    null, null, null, null
             );
-            return new ScoredFeedItem(item, recency + followBonus, null, company.getId());
+            return new JobBase(item, job.getCreatedAt(), company.getId());
         }).toList();
     }
 
-    private List<ScoredFeedItem> scoredProjects(UUID viewingUserId) {
+    private List<ScoredFeedItem> scoredProjects(Set<UUID> followedAuthors) {
+        return projectWindow.get(this::loadProjects).stream().map(p -> new ScoredFeedItem(p.item(),
+                recencyScore(p.createdAt()) + (followedAuthors.contains(p.authorId()) ? FOLLOW_BONUS : 0.0)
+                        + DEADLINE_URGENCY_WEIGHT * deadlineUrgency(p.endsAt()),
+                p.authorId(), null)).toList();
+    }
+
+    private List<ProjectBase> loadProjects() {
         Pageable window = PageRequest.of(0, JOB_PROJECT_WINDOW, Sort.by(Sort.Direction.DESC, "createdAt"));
         List<Project> projects = projectRepository.findByStatus(ProjectStatus.OPEN, window).getContent();
         List<UUID> projectIds = projects.stream().map(Project::getId).toList();
+        if (!projectIds.isEmpty()) projectRepository.findByIdInFetchingSkills(projectIds);
         Map<UUID, Long> bidCounts = bidRepository.findByProjectIdInOrderByAmountDesc(projectIds).stream()
                 .collect(Collectors.groupingBy(b -> b.getProject().getId(), Collectors.counting()));
-        Set<UUID> followedAuthors = viewingUserId == null ? Set.of()
-                : Set.copyOf(followRepository.findFollowingUserIdsByFollowerUserId(viewingUserId));
 
         return projects.stream().map(project -> {
-            double recency = recencyScore(project.getCreatedAt());
-            double followBonus = followedAuthors.contains(project.getPostedByUser().getId()) ? FOLLOW_BONUS : 0.0;
-            double urgency = deadlineUrgency(project.getEndsAt());
             var author = project.getPostedByUser();
             FeedItemResponse item = new FeedItemResponse(
                     project.getId().toString(), project.getKind().wireValue(), author.getId().toString(),
                     author.getName(), "🧑🏽", null, null, null,
-                    project.getTitle(), project.getDescription(), null, project.getSkills(), List.of(),
+                    project.getTitle(), project.getDescription(), null, java.util.Collections.unmodifiableList(new ArrayList<>(project.getSkills())), List.of(),
                     project.getStatus().name().toLowerCase(), project.getCreatedAt().toString(),
                     null, null, null, null, project.getEndsAt().toString(), null, null, null, null, null, null,
                     null, null, null,
@@ -167,9 +242,10 @@ public class FeedAggregationService {
                     null, null, null, null,
                     project.getBudgetMin(), project.getBudgetMax(), project.getDurationWeeks(),
                     bidCounts.getOrDefault(project.getId(), 0L),
-                    project.isDemoContent() || author.isDemoContent()
+                    project.isDemoContent() || author.isDemoContent(),
+                    null, null, null, null
             );
-            return new ScoredFeedItem(item, recency + followBonus + DEADLINE_URGENCY_WEIGHT * urgency, author.getId(), null);
+            return new ProjectBase(item, project.getCreatedAt(), author.getId(), project.getEndsAt());
         }).toList();
     }
 
@@ -185,7 +261,7 @@ public class FeedAggregationService {
         return 1.0 - (hoursUntil / DEADLINE_URGENCY_HORIZON_HOURS);
     }
 
-    private List<FeedItemResponse> page(List<FeedItemResponse> sorted, int page, int size) {
+    private static <T> List<T> page(List<T> sorted, int page, int size) {
         int from = Math.min(page * size, sorted.size());
         int to = Math.min(from + size, sorted.size());
         return sorted.subList(from, to);

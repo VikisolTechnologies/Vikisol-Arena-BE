@@ -1,6 +1,7 @@
 package com.vikisol.arena.enterprise.controller;
 
 import com.vikisol.arena.common.dto.ApiResponse;
+import com.vikisol.arena.common.dto.PageLimits;
 import com.vikisol.arena.common.dto.PagedResponse;
 import com.vikisol.arena.enterprise.dto.CreatePostingRequest;
 import com.vikisol.arena.enterprise.dto.JobPostingResponse;
@@ -10,7 +11,6 @@ import com.vikisol.arena.jobs.entity.PostingStatus;
 import com.vikisol.arena.security.service.UserPrincipal;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -32,7 +32,7 @@ public class JobPostingController {
             @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size) {
-        var pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
+        var pageable = PageLimits.of(page, size, Sort.by(Sort.Direction.DESC, "createdAt"));
         return ResponseEntity.ok(ApiResponse.ok(jobPostingService.getMyPostings(principal.getId(), pageable)));
     }
 
@@ -46,6 +46,14 @@ public class JobPostingController {
     public ResponseEntity<ApiResponse<JobPostingResponse>> createPosting(
             @AuthenticationPrincipal UserPrincipal principal, @Valid @RequestBody CreatePostingRequest request) {
         return ResponseEntity.ok(ApiResponse.ok("Posting created", jobPostingService.createPosting(principal.getId(), request)));
+    }
+
+    // Row 28: edit in place.
+    @PatchMapping("/{id}")
+    public ResponseEntity<ApiResponse<JobPostingResponse>> updatePosting(
+            @AuthenticationPrincipal UserPrincipal principal, @PathVariable UUID id,
+            @Valid @RequestBody com.vikisol.arena.enterprise.dto.UpdatePostingRequest request) {
+        return ResponseEntity.ok(ApiResponse.ok("Posting updated", jobPostingService.updatePosting(principal.getId(), id, request)));
     }
 
     @PutMapping("/{id}/status")
