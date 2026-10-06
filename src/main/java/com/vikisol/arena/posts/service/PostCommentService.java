@@ -145,6 +145,7 @@ public class PostCommentService {
             name = profile.getName();
             emoji = profile.getAvatarEmoji();
         }
+        if (comment.getAuthorUser().getDeletedAt() != null) name = "a former member";
         return new PostCommentResponse(comment.getId().toString(), comment.getPost().getId().toString(),
                 comment.getAuthorUser().getId().toString(), name, emoji, comment.getContent(), comment.getCreatedAt().toString(),
                 parentId, false, false, op, mine);

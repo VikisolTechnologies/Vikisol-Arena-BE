@@ -24,8 +24,11 @@ public class PostGeoRepository {
     @SuppressWarnings("unchecked")
     public List<Post> findOpenInCells(List<String> prefixes, int limit) {
         // Joinable kinds only (Post.isJoinable), which is all nearby shows.
-        StringBuilder sql = new StringBuilder("select p.* from arena_posts p where p.status = 'OPEN' and p.geohash is not null"
-                + " and p.anonymous = false and p.intent_type in ('ACTIVITY', 'ASK', 'COLLAB')");
+        StringBuilder sql = new StringBuilder("select p.* from arena_posts p"
+                + " join arena_users u on u.id = p.author_user_id"
+                + " where p.status = 'OPEN' and p.geohash is not null"
+                + " and p.anonymous = false and p.intent_type in ('ACTIVITY', 'ASK', 'COLLAB')"
+                + " and u.deleted_at is null and u.banned_at is null");
         if (!prefixes.isEmpty()) {
             sql.append(" and (");
             for (int i = 0; i < prefixes.size(); i++) {
