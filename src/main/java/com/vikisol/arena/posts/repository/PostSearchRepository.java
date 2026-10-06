@@ -28,6 +28,7 @@ public class PostSearchRepository {
             join arena_users u on u.id = p.author_user_id
             left join arena_enterprise_profiles e on e.id = p.author_company_id
             where p.status in (:statuses) and p.intent_type in (:types)
+              and u.deleted_at is null and u.banned_at is null
               and p.id in (
                 select t.id from arena_posts t
                 where lower(coalesce(t.title, '') || ' ' || t.body || ' ' || coalesce(t.location_text, '')) like :pattern

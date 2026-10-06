@@ -175,6 +175,8 @@ public class PostService {
     // excluded (nothing to show a visitor about a post that never happened).
     @Transactional(readOnly = true)
     public PagedResponse<PostResponse> getUserPosts(UUID targetUserId, UUID viewingUserId, Pageable pageable) {
+        // The profile page passes a candidate-profile id; posts are stored by user id.
+        targetUserId = asUserId(targetUserId);
         // ARCHITECT-REVIEW-BE-1 blocker #2: permitAll(), used to answer for a hidden/blocked/
         // banned/deleted person too.
         visibilityGuard.requireVisibleTo(viewingUserId, targetUserId);
@@ -648,6 +650,34 @@ public class PostService {
         postRepository.save(post);
         roomService.notifyRoomOfCancellation(post);
         return mapper.toResponse(post, userId, null, roomIdFor(post));
+    }
+
+    // Account erasure: upcoming activities are cancelled and everyone who joined is told.
+    // Open needs and offers are closed. A finished activity stays, so the people who took
+    // part still have it in their history (shown as "a former member").
+    @Transactional
+    public void retireOnErasure(UUID authorId) {
+        Instant now = Instant.now();
+        for (Post post : postRepository.findAllByAuthorUserId(authorId)) {
+            if (post.getStatus() == PostStatus.CANCELLED || post.getStatus() == PostStatus.CLOSED) continue;
+            if (post.getIntentType() == PostIntentType.ACTIVITY) {
+                boolean upcoming = post.getStartsAt() == null || !post.getStartsAt().isBefore(now)
+                        || (post.getEndsAt() != null && post.getEndsAt().isAfter(now));
+                if (!upcoming) continue;
+                cancel(authorId, post.getId(), "The host is no longer on Arena.");
+            } else if (post.getIntentType() == PostIntentType.ASK || post.getIntentType() == PostIntentType.OFFER) {
+                if (post.getStatus() == PostStatus.OPEN || post.getStatus() == PostStatus.FULL || post.getStatus() == PostStatus.PAUSED) {
+                    post.setStatus(PostStatus.CLOSED);
+                    postRepository.save(post);
+                }
+            }
+        }
+    }
+
+    /** Profile pages address a person by either their user id or their candidate-profile id. */
+    private UUID asUserId(UUID id) {
+        if (id == null || userRepository.existsById(id)) return id;
+        return candidateProfileRepository.findById(id).map(p -> p.getUser().getId()).orElse(id);
     }
 
     // ARENA-FIX-EVERYTHING.md Phase 1 finding - there was no way for an author to remove their

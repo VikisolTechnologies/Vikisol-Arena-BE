@@ -65,6 +65,7 @@ public class CandidateProfileService {
     private final com.vikisol.arena.common.service.FileSigningService fileSigningService;
     private final ProfileVisibilityGuard visibilityGuard;
     private final com.vikisol.arena.auth.service.AccountTombstone accountTombstone;
+    private final com.vikisol.arena.posts.service.PostService postService;
 
     // FE-API-GAPS 1 and 5: the closed vocabularies the onboarding screens send.
     static final Set<String> INTENTS = Set.of("activities", "meet", "ask", "offer", "job", "hire", "projects", "explore");
@@ -227,6 +228,9 @@ public class CandidateProfileService {
     private void eraseAccount(UUID userId, String accessToken, String auditReason) {
         CandidateProfile profile = getEntityForUser(userId);
         User user = userRepository.findById(userId).orElseThrow();
+        // Upcoming activities are cancelled (people who joined are told) and open needs and
+        // offers are closed, before the name is cleared. Finished activities stay.
+        postService.retireOnErasure(userId);
         // Architect item 4 (legal): everything in the tables added for the new app - answers,
         // feedback, disputes, offers, applications' notes and assessments, requests, the career
         // layer - goes too. See PersonalDataService for the full list.

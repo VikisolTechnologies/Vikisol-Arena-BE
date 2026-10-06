@@ -35,6 +35,7 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
                 p.title, p.body, p.locationText)
             from Post p join p.authorUser u left join p.authorCompany c
             where p.status in :statuses and p.intentType in :types
+              and u.deletedAt is null and u.bannedAt is null
             order by p.createdAt desc
             """)
     List<PostSearchRow> searchRows(@Param("statuses") java.util.Collection<PostStatus> statuses,
@@ -48,6 +49,7 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
                 p.startsAt, p.capacity, p.spotsFilled)
             from Post p join p.authorUser u left join p.authorCompany c
             where p.status = :status
+              and u.deletedAt is null and u.bannedAt is null
             order by p.createdAt desc
             """)
     List<PostWindowRow> findWindowRows(@Param("status") PostStatus status, Pageable pageable);
@@ -59,7 +61,7 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     Page<Post> findByStatusInOrderByCreatedAtDesc(java.util.Collection<PostStatus> statuses, Pageable pageable);
 
     // Discuss thread lists (Phase 2) - live discussions, optionally inside one community.
-    @Query("select p from Post p where p.status in :statuses and p.intentType in :types order by p.createdAt desc")
+    @Query("select p from Post p join p.authorUser u where p.status in :statuses and p.intentType in :types and u.deletedAt is null and u.bannedAt is null order by p.createdAt desc")
     Page<Post> findDiscussions(@Param("statuses") java.util.Collection<PostStatus> statuses,
                                @Param("types") java.util.Collection<com.vikisol.arena.posts.entity.PostIntentType> types, Pageable pageable);
 
@@ -87,6 +89,9 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
 
     @EntityGraph(attributePaths = "authorUser")
     Page<Post> findByAuthorUserIdOrderByCreatedAtDesc(UUID authorUserId, Pageable pageable);
+
+    @EntityGraph(attributePaths = "authorUser")
+    List<Post> findAllByAuthorUserId(UUID authorUserId);
 
     @EntityGraph(attributePaths = {"authorUser", "authorCompany"})
     @Query("select p from Post p where p.id in (select j.post.id from PostJoinRequest j where j.user.id = :userId and j.status = com.vikisol.arena.posts.entity.PostJoinStatus.APPROVED)")

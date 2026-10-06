@@ -315,14 +315,15 @@ public class CollabProjectService {
     // banned/deleted person too.
     @Transactional(readOnly = true)
     public Page<ProjectCard> projectsOf(UUID userId, UUID viewerId, Pageable pageable) {
-        visibilityGuard.requireVisibleTo(viewerId, userId);
-        Page<Post> page = postRepository.findCollabProjectsOf(userId, pageable);
+        final UUID personId = asUserId(userId);
+        visibilityGuard.requireVisibleTo(viewerId, personId);
+        Page<Post> page = postRepository.findCollabProjectsOf(personId, pageable);
         Map<UUID, ProjectDetails> details = detailsRepository.findByPostIdIn(page.stream().map(Post::getId).toList()).stream()
                 .collect(Collectors.toMap(d -> d.getPost().getId(), Function.identity()));
-        Set<UUID> contributed = contributorRepository.findByUserId(userId).stream().map(c -> c.getPost().getId()).collect(Collectors.toSet());
+        Set<UUID> contributed = contributorRepository.findByUserId(personId).stream().map(c -> c.getPost().getId()).collect(Collectors.toSet());
         return page.map(p -> {
-            String role = p.getAuthorUser().getId().equals(userId) ? "owner"
-                    : memberRepository.findByPostIdAndUserId(p.getId(), userId).map(ProjectMember::getRole).map(ProjectRole::getTitle).orElse("member");
+            String role = p.getAuthorUser().getId().equals(personId) ? "owner"
+                    : memberRepository.findByPostIdAndUserId(p.getId(), personId).map(ProjectMember::getRole).map(ProjectRole::getTitle).orElse("member");
             ProjectDetails d = details.get(p.getId());
             return new ProjectCard(p.getId().toString(), title(p), p.getStatus().wireValue(), role, p.getCreatedAt().toString(),
                     d == null ? null : d.getOutcome(), d == null || d.getCompletedAt() == null ? null : d.getCompletedAt().toString(),
@@ -335,6 +336,7 @@ public class CollabProjectService {
     // hidden/nearby visibility, so a stranger could still read anyone's stats.
     @Transactional(readOnly = true)
     public ProfileStats stats(UUID userId, UUID viewerId) {
+        userId = asUserId(userId);
         visibilityGuard.requireVisibleTo(viewerId, userId);
         return new ProfileStats(
                 postRepository.countHostedActivities(userId),
@@ -408,5 +410,11 @@ public class CollabProjectService {
         Post post = requireProject(postId);
         if (!post.getAuthorUser().getId().equals(ownerId)) throw new AccessDeniedException("Not your project");
         return post;
+    }
+
+    /** Profile pages address a person by either their user id or their candidate-profile id. */
+    private UUID asUserId(UUID id) {
+        if (id == null || userRepository.existsById(id)) return id;
+        return candidateProfileRepository.findById(id).map(p -> p.getUser().getId()).orElse(id);
     }
 }

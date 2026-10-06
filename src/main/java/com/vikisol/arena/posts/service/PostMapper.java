@@ -149,6 +149,10 @@ public class PostMapper {
             authorName = post.getAuthorCompany().getCompanyName();
             authorEmoji = post.getAuthorCompany().getLogoEmoji();
         }
+        // An erased account's past posts stay in other people's history, under this label.
+        if (post.getAuthorCompany() == null && post.getAuthorUser().getDeletedAt() != null) {
+            authorName = "a former member";
+        }
         boolean mine = viewingUserId != null && post.getAuthorUser().getId().equals(viewingUserId);
 
         // Phase 2 part C: an anonymous post shows its alias to everyone except its author, and
